@@ -12,7 +12,6 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  Github,
   Image as ImageIcon,
   Loader2,
   MoreVertical,
@@ -28,7 +27,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Button, IconButton } from '../../components/ui/Button';
 import { MenuRow } from '../../components/ui/MenuRow';
 import { Modal } from '../../components/ui/Modal';
-import { ProjectPicker } from '../../components/ProjectPicker';
+import { ProjectSwitcher } from '../../components/ProjectSwitcher';
 import { Sheet } from '../../components/ui/Sheet';
 import { FileEditorSheet } from './FileEditorSheet';
 import { bytes, fileVisualKind, relTime, type FileVisualKind } from '../../util/format';
@@ -58,8 +57,7 @@ export function FilesScreen() {
               <button
                 type="button"
                 onClick={() => useAppStore.getState().navigate({ name: 'home' })}
-                className="press tap rounded-2xl px-5 text-[14px] font-semibold text-white"
-                style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+                className="press tap rounded-2xl px-5 text-[14px] font-semibold text-white btn-primary"
               >
                 Go to projects
               </button>
@@ -73,7 +71,6 @@ export function FilesScreen() {
 }
 
 function FilesScreenInner({ projectId }: { projectId: string }) {
-  const projects = useAppStore((s) => s.projects);
   const toast = useAppStore((s) => s.toast);
   const setLightbox = useAppStore((s) => s.setLightbox);
   const filesVersion = useAppStore((s) => s.filesVersion[projectId] ?? 0);
@@ -93,7 +90,6 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const [deleting, setDeleting] = useState(false);
   const uploadInput = useRef<HTMLInputElement | null>(null);
 
-  const projectName = projects.find((p) => p.id === projectId)?.name ?? 'project';
 
   const load = useCallback(
     async (silent = false) => {
@@ -235,18 +231,9 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
 
   return (
     <div className="safe-t flex min-h-full flex-col px-4 pb-8">
-      <header className="flex items-center justify-between py-4">
-        <div className="min-w-0">
-          <h1 className="truncate text-[20px] font-bold tracking-tight">Files</h1>
-          <p className="truncate text-[12.5px] text-dim">{projectName}</p>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <IconButton
-            label="GitHub — sync, clone, pull requests"
-            onClick={() => useAppStore.getState().navigate({ name: 'github' })}
-          >
-            <Github size={18} />
-          </IconButton>
+      <header className="flex items-center justify-between gap-1 py-2">
+        <ProjectSwitcher className="min-w-0 flex-1" subtitle="Files" />
+        <div className="flex shrink-0 items-center">
           <IconButton
             label={showDot ? 'Hide dotfiles' : 'Show dotfiles'}
             onClick={() => setShowDot((v) => !v)}
@@ -267,7 +254,6 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
         </div>
       </header>
 
-      <ProjectPicker className="mb-3" />
 
       {/* breadcrumbs + create actions */}
       <nav aria-label="Breadcrumb" className="no-scrollbar mb-2.5 flex items-center gap-0.5 overflow-x-auto text-[12.5px]">

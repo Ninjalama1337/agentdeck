@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Trash2 } from 'lucide-react';
+import { FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Settings, SquareTerminal, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { ConnectionPill } from '../../components/ConnectionPill';
 import { AgentAvatar } from '../../components/ui/Avatar';
@@ -12,6 +12,11 @@ import { NewProjectSheet } from '../projects/NewProjectSheet';
 import { AgentSheet } from './AgentSheet';
 import { RoutinesSheet, scheduleLabel } from '../routines/RoutinesSheet';
 import { greeting, relTime } from '../../util/format';
+import { InboxButton } from '../inbox/InboxSheet';
+import { PresetGlyph } from '../code/Launcher';
+import { estimateSize } from '../code/termInput';
+import { usePrefs } from '../../store/prefs';
+import { haptic } from '../../util/haptics';
 import type { AgentId, Project } from '@agentdeck/shared';
 
 export function HomeScreen() {
@@ -25,6 +30,12 @@ export function HomeScreen() {
   const openSession = useAppStore((s) => s.openSession);
   const navigate = useAppStore((s) => s.navigate);
   const deleteProject = useAppStore((s) => s.deleteProject);
+  const presets = useAppStore((s) => s.terminalPresets);
+  const terminals = useAppStore((s) => s.terminals);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const createTerminal = useAppStore((s) => s.createTerminal);
+  const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
+  const toast = useAppStore((s) => s.toast);
 
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [routinesOpen, setRoutinesOpen] = useState(false);
@@ -48,6 +59,24 @@ export function HomeScreen() {
     [routines],
   );
 
+  const quickAgents = (presets ?? []).filter((p) => p.kind === 'agent' && p.available && p.id !== 'antigravity');
+  const activeProject = projects.find((p) => p.id === activeProjectId);
+
+  const quickLaunch = async (presetId: string) => {
+    if (!activeProjectId) {
+      toast('info', 'Create or pick a project first');
+      return;
+    }
+    haptic('medium');
+    const { cols, rows } = estimateSize(usePrefs.getState().termFontSize);
+    try {
+      await createTerminal(activeProjectId, cols, rows, { presetId });
+      navigate({ name: 'code' });
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Failed to start');
+    }
+  };
+
   const openProjectAndChat = async (id: string) => {
     await openProject(id);
     navigate({ name: 'chat' });
@@ -56,13 +85,91 @@ export function HomeScreen() {
   return (
     <div className="safe-t flex min-h-full flex-col px-4 pb-8">
       {/* header */}
-      <header className="flex items-center justify-between py-4">
-        <div>
-          <h1 className="text-[22px] font-bold tracking-tight">{greetingText}</h1>
-          <p className="text-[13px] text-dim">Your agents, in your pocket.</p>
+      <header className="flex items-center gap-1 py-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[22px] font-bold tracking-tight">{greetingText}</h1>
+          <div className="mt-0.5 flex items-center gap-2">
+            <ConnectionPill />
+          </div>
         </div>
-        <ConnectionPill />
+        <InboxButton />
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={() => navigate({ name: 'settings' })}
+          className="press tap flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08] active:text-ink"
+        >
+          <Settings size={20} />
+        </button>
       </header>
+
+      {/* quick start: one tap → agent TUI in the active project */}
+      {quickAgents.length > 0 && (
+        <section aria-label="Quick start" className="mb-5">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="section-title">Start in {activeProject?.name ?? 'project'}</h2>
+            <button type="button" onClick={() => navigate({ name: 'code' })} className="press text-[12px] font-medium text-accent">
+              All launchers
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {quickAgents.slice(0, 4).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => void quickLaunch(p.id)}
+                className="press glass flex items-center gap-2.5 p-2.5 text-left active:bg-surface-2"
+              >
+                <PresetGlyph preset={p} size={36} />
+                <span className="min-w-0">
+                  <span className="block truncate text-[13.5px] font-semibold">{p.label}</span>
+                  <span className="block truncate text-[11px] text-dim">Terminal session</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* live terminals */}
+      {terminals.length > 0 && (
+        <section aria-label="Live terminals" className="mb-5">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="section-title">Live terminals</h2>
+            <span className="rounded-full bg-ok/15 px-2 py-[1px] text-[11px] font-semibold text-ok">{terminals.length}</span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {terminals.slice(0, 4).map((t) => {
+              const preset = presets?.find((p) => p.id === t.presetId);
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveTerminal(t.id);
+                    navigate({ name: 'code' });
+                  }}
+                  className="press tap glass flex items-center gap-3 p-3 text-left active:bg-surface-2"
+                >
+                  {preset ? <PresetGlyph preset={preset} size={32} /> : <SquareTerminal size={18} className="text-dim" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold">{t.title ?? 'shell'}</span>
+                    <span className="block truncate text-[11.5px] text-dim">
+                      {projects.find((p) => p.id === t.projectId)?.name ?? 'project'}
+                      {t.lastOutputAt ? ` · active ${relTime(t.lastOutputAt)}` : ''}
+                    </span>
+                  </span>
+                  {t.attention ? (
+                    <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">waiting</span>
+                  ) : (
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-ok" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* agent status row */}
       <section aria-label="Agent status" className="no-scrollbar -mx-4 mb-4 flex gap-2.5 overflow-x-auto px-4 py-0.5">
@@ -89,7 +196,7 @@ export function HomeScreen() {
       {runningNow.length > 0 && (
         <section aria-label="Running now" className="mb-5">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-[13px] font-semibold uppercase tracking-wider text-dim">Running now</h2>
+            <h2 className="section-title">Running now</h2>
             <span className="rounded-full bg-accent/15 px-2 py-[1px] text-[11px] font-semibold text-accent">
               {runningNow.length}
             </span>
@@ -117,7 +224,7 @@ export function HomeScreen() {
       {/* routines */}
       <section aria-label="Routines" className="mb-5">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold uppercase tracking-wider text-dim">Routines</h2>
+          <h2 className="section-title">Routines</h2>
           <button
             type="button"
             onClick={() => setRoutinesOpen(true)}
@@ -186,8 +293,7 @@ export function HomeScreen() {
                 <button
                   type="button"
                   onClick={() => setNewProjectOpen(true)}
-                  className="press tap inline-flex items-center gap-2 rounded-2xl px-5 text-[14px] font-semibold text-white"
-                  style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+                  className="press tap btn-primary inline-flex items-center gap-2 rounded-2xl px-5 text-[14px] font-semibold text-white"
                 >
                   <Plus size={16} /> New project
                 </button>
@@ -242,12 +348,8 @@ export function HomeScreen() {
         type="button"
         aria-label="Add project"
         onClick={() => setNewProjectOpen(true)}
-        className="press fixed left-1/2 bottom-[92px] z-20 flex h-14 w-14 items-center justify-center rounded-full text-white"
-        style={{
-          transform: 'translateX(calc(min(50vw, 18rem) - 76px))',
-          background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)',
-          boxShadow: '0 10px 30px rgba(124,92,255,0.5)',
-        }}
+        className="press btn-primary fixed left-1/2 bottom-[calc(88px+var(--ad-safe-bottom))] z-20 flex h-14 w-14 items-center justify-center rounded-full text-white"
+        style={{ transform: 'translateX(calc(min(50vw, 18rem) - 76px))' }}
       >
         <Plus size={26} />
       </button>
@@ -278,12 +380,12 @@ export function HomeScreen() {
             />
             <MenuRow
               icon={<Github size={18} strokeWidth={1.8} />}
-              label="GitHub"
-              description="Sync & clone"
+              label="Git"
+              description="Changes, branches, history"
               onClick={() => {
                 const id = projectMenu.id;
                 setProjectMenu(null);
-                void openProjectAndChat(id).then(() => navigate({ name: 'github' }));
+                void openProjectAndChat(id).then(() => navigate({ name: 'git' }));
               }}
             />
             <div className="my-1.5 h-px bg-line" />

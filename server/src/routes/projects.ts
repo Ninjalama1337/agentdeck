@@ -3,15 +3,26 @@ import fsp from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Project } from '@agentdeck/shared';
-import { notFound } from '../http/errors.js';
+import { httpError, notFound } from '../http/errors.js';
+import { EnhanceError, runEnhance } from '../agents/enhance.js';
 import { sanitizeFileName, ensureDir } from '../util/paths.js';
 import { newProjectId } from '../util/ids.js';
 import {
   cloneRepo,
   findFreeCloneTarget,
+  gitBranches,
+  gitChanges,
+  gitCheckout,
   gitCommit,
+  gitDiff,
+  gitDiffForMessage,
+  gitDiscard,
+  gitFetch,
   gitInit,
+  gitLog,
+  gitPull,
   gitPush,
+  gitShow,
   gitStatus,
   sanitizeCloneName,
 } from '../git/gitOps.js';
@@ -137,11 +148,12 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const project = getProjectOr404(deps, (req.params as { id: string }).id);
     const body = z
       .object({
-        message: z.string().min(1).max(2000),
+        message: z.string().min(1).max(5000),
         all: z.boolean().optional(),
+        files: z.array(z.string().min(1).max(1000)).max(2000).optional(),
       })
       .parse(req.body);
-    const info = await gitCommit(project.path, body.message, body.all !== false);
+    const info = await gitCommit(project.path, body.message, body.all !== false, body.files);
     project.git = info;
     await deps.store.saveProject(project);
     return info;
@@ -150,6 +162,105 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
   fastify.post('/projects/:id/git/push', async (req) => {
     const project = getProjectOr404(deps, (req.params as { id: string }).id);
     return gitPush(project.path);
+  });
+
+  fastify.get('/projects/:id/git/changes', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    return gitChanges(project.path);
+  });
+
+  fastify.get('/projects/:id/git/diff', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const query = z.object({ path: z.string().max(1000).optional() }).parse(req.query ?? {});
+    return gitDiff(project.path, query.path);
+  });
+
+  fastify.get('/projects/:id/git/log', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(30) }).parse(req.query ?? {});
+    return gitLog(project.path, query.limit);
+  });
+
+  fastify.get('/projects/:id/git/show/:hash', async (req) => {
+    const params = req.params as { id: string; hash: string };
+    const project = getProjectOr404(deps, params.id);
+    return gitShow(project.path, params.hash);
+  });
+
+  fastify.get('/projects/:id/git/branches', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    return gitBranches(project.path);
+  });
+
+  fastify.post('/projects/:id/git/checkout', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const body = z.object({ branch: z.string().min(1).max(200), create: z.boolean().optional() }).parse(req.body);
+    const result = await gitCheckout(project.path, body.branch, body.create === true);
+    await refreshProjectGit(deps, project);
+    return result;
+  });
+
+  fastify.post('/projects/:id/git/pull', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const result = await gitPull(project.path);
+    await refreshProjectGit(deps, project);
+    return result;
+  });
+
+  fastify.post('/projects/:id/git/fetch', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const result = await gitFetch(project.path);
+    await refreshProjectGit(deps, project);
+    return result;
+  });
+
+  fastify.post('/projects/:id/git/discard', async (req, reply) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const body = z.object({ path: z.string().min(1).max(1000) }).parse(req.body);
+    await gitDiscard(project.path, body.path);
+    await refreshProjectGit(deps, project);
+    reply.code(204).send();
+  });
+
+  /** AI commit message from the current diff (transient agent run). */
+  fastify.post('/projects/:id/git/suggest-message', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const body = z
+      .object({
+        agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']).default('claude'),
+        files: z.array(z.string().max(1000)).max(2000).optional(),
+        model: z.string().optional(),
+      })
+      .parse(req.body ?? {});
+    const diff = await gitDiffForMessage(project.path, body.files);
+    if (!diff.trim()) throw httpError(409, 'NOTHING_TO_COMMIT', 'No changes to describe.');
+    const prompt = [
+      'Write a git commit message for the changes below.',
+      'Format: a concise imperative subject line (max 72 chars), then optionally a blank line',
+      'and a short bullet list of the important changes. Match the language of existing',
+      'code comments if obvious, otherwise English. Reply with the commit message ONLY —',
+      'no code fences, no preamble.',
+      '',
+      diff,
+    ].join('\n');
+    try {
+      const text = await runEnhance(
+        { agents: deps.agents, store: deps.store, log: deps.log },
+        {
+          project,
+          agentId: body.agentId,
+          text: prompt,
+          raw: true,
+          ...(body.model ? { model: body.model } : {}),
+        },
+      );
+      return { text: text.replace(/^```[a-z]*\n?|```$/g, '').trim() };
+    } catch (err) {
+      if (err instanceof EnhanceError) {
+        throw httpError(err.code === 'AGENT_UNAVAILABLE' ? 409 : 502, err.code, err.message);
+      }
+      throw err;
+    }
   });
 
   // GitHub ------------------------------------------------------------------
@@ -163,6 +274,14 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
       .parse(req.query ?? {});
     return listGithubRepos(query.limit, query.q);
   });
+}
+
+async function refreshProjectGit(deps: AppDeps, project: Project): Promise<void> {
+  const info = await gitStatus(project.path).catch(() => undefined);
+  if (info) {
+    project.git = info;
+    await deps.store.saveProject(project);
+  }
 }
 
 export { getProjectOr404 };

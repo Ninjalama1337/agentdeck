@@ -29,9 +29,9 @@ function waitsFor(predicate: () => boolean, timeoutMs = 15_000): Promise<void> {
 describe('TerminalManager (real PTY)', () => {
   /**
    * Fedora's bash queries the terminal at startup (OSC 10/11 colors, DSR
-   * cursor report) and prints a fastfetch banner before its first prompt. In
-   * production xterm.js answers the queries automatically; headless tests
-   * must emulate that — and type only once the shell has settled.
+   * cursor report) and prints a fastfetch banner before its first prompt. The
+   * manager's headless emulator answers those queries itself, so tests only
+   * need to type once the shell has settled.
    */
   function responder(manager: TerminalManager) {
     const seen = new Map<string, string>();
@@ -39,9 +39,6 @@ describe('TerminalManager (real PTY)', () => {
       onData: (id: string, d: string) => {
         const prev = seen.get(id) ?? '';
         seen.set(id, prev + d);
-        if (d.includes('\u001b]11;?')) manager.write(id, '\u001b]11;rgb:0c0c/0c0c/0c0c\u001b\\');
-        if (d.includes('\u001b]10;?')) manager.write(id, '\u001b]10;rgb:e5e5/e5e5/e5e5\u001b\\');
-        if (d.includes('\u001b[6n')) manager.write(id, '\u001b[1;1R');
       },
       textOf: (id: string) => seen.get(id) ?? '',
     };
@@ -107,16 +104,31 @@ describe('TerminalManager (real PTY)', () => {
     expect(manager.write(info.id, 'x')).toBe(false);
   });
 
+  it('types the launch command into the fresh shell', async () => {
+    const manager = new TerminalManager(quietLogger);
+    let out = '';
+    const broadcasts = { onData: (_id: string, d: string) => (out += d), onExit: () => undefined, onList: () => undefined };
+    const info = manager.spawn('/tmp', 'p1', 80, 24, broadcasts, {
+      title: 'echo',
+      presetId: 'custom',
+      command: 'echo AGENTDECK_$((40+2))',
+    });
+    expect(info.title).toBe('echo');
+    await waitsFor(() => out.includes('AGENTDECK_42'));
+    manager.killAll();
+  });
+
   it('caps concurrency by reaping the oldest terminal', async () => {
     const manager = new TerminalManager(quietLogger);
     const broadcasts = { onData: () => undefined, onExit: () => undefined, onList: () => undefined };
     const ids: string[] = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 12; i++) {
       ids.push(manager.spawn('/tmp', 'p1', 60, 20, broadcasts).id);
     }
-    expect(manager.list()).toHaveLength(6);
+    expect(manager.list()).toHaveLength(10);
     expect(manager.get(ids[0])).toBeUndefined();
-    expect(manager.get(ids[7])).toBeDefined();
+    expect(manager.get(ids[1])).toBeUndefined();
+    expect(manager.get(ids[11])).toBeDefined();
     manager.killAll();
     expect(manager.list()).toHaveLength(0);
   });

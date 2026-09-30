@@ -87,7 +87,7 @@ jobs:
 
       - name: Android-Projekt generieren (wird nicht committed)
         working-directory: mobile
-        run: npx cap add android
+        run: npx cap add android && npm run patch:android
 
       - name: Cap-Sync
         working-directory: mobile
@@ -190,7 +190,7 @@ jobs:
 
       - name: Android-Projekt generieren (wird nicht committed)
         working-directory: mobile
-        run: npx cap add android
+        run: npx cap add android && npm run patch:android
 
       - name: Cap-Sync
         working-directory: mobile

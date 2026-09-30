@@ -5,6 +5,7 @@ import type { AgentInfo } from './agents.js';
 import type {
   AdminJob,
   ChatMessage,
+  DeckNotification,
   FileChangeEvent,
   Project,
   Routine,
@@ -55,6 +56,10 @@ export interface ServerToClientEvents {
   'terminal:exit': (payload: { id: string; code: number }) => void;
   /** Terminal list changed (created/killed). */
   'terminal:list': (payload: { terminals: TerminalInfo[] }) => void;
+  /** A terminal rang the bell / sent an OSC notification / went quiet after work. */
+  'terminal:attention': (payload: { id: string; reason: 'bell' | 'notify' | 'idle'; text?: string }) => void;
+  /** Inbox-worthy event (run finished, terminal waiting, team done). Also sent via Web Push. */
+  notification: (payload: { notification: DeckNotification }) => void;
   notify: (payload: { level: 'info' | 'warn' | 'error'; text: string }) => void;
 }
 
@@ -65,6 +70,8 @@ export interface ClientToServerEvents {
   ) => void;
   'terminal:input': (payload: { id: string; data: string }) => void;
   'terminal:resize': (payload: { id: string; cols: number; rows: number }) => void;
+  /** Client viewed the terminal — clears its attention flag. */
+  'terminal:seen': (payload: { id: string }) => void;
 }
 
 export interface SocketData {

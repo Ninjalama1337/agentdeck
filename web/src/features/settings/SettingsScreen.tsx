@@ -28,6 +28,8 @@ import { AgentAdminSheet, ElapsedLabel } from './AgentAdminSheet';
 import { UsageSheet } from './UsageSheet';
 import { AccountSheet } from './AccountSheet';
 import { bytes, relTime } from '../../util/format';
+import { PreferencesSection } from './PreferencesSection';
+import { ArrowLeft } from 'lucide-react';
 
 /** Dot + label colors for the tunnel status row. */
 const TUNNEL_DOTS: Record<TunnelStatus, string> = {
@@ -177,10 +179,20 @@ export function SettingsScreen() {
 
   return (
     <div className="safe-t flex min-h-full flex-col px-4 pb-8">
-      <header className="flex items-center justify-between py-4">
-        <h1 className="text-[20px] font-bold tracking-tight">Settings</h1>
+      <header className="flex items-center gap-1 py-3">
+        <button
+          type="button"
+          aria-label="Back"
+          onClick={() => useAppStore.getState().navigate({ name: 'home' })}
+          className="press tap -ml-2 flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08]"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <h1 className="min-w-0 flex-1 text-[20px] font-bold tracking-tight">Settings</h1>
         <ConnectionPill />
       </header>
+
+      <PreferencesSection />
 
       {/* server */}
       <section className="glass mb-4 p-4" aria-label="Server">

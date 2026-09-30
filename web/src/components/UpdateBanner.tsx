@@ -50,8 +50,7 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
         role="alert"
       >
         <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl btn-primary"
         >
           <Download size={16} className="text-white" />
         </span>
@@ -62,8 +61,7 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
         <a
           href={api.apkLatestUrl()}
           download
-          className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white btn-primary"
         >
           <Download size={14} />
           Download

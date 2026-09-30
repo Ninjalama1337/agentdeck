@@ -18,7 +18,9 @@ import type {
   CreateProjectRequest,
   CreateRoutineRequest,
   CreateSessionRequest,
+  CreateTerminalRequest,
   CloneProjectRequest,
+  DeckNotification,
   DeviceInfo,
   MessageUsage,
   PairResponse,
@@ -30,6 +32,7 @@ import type {
   TeamRun,
   TeamRunRequest,
   TerminalInfo,
+  TerminalPreset,
   UpdateRoutineRequest,
 } from '@agentdeck/shared';
 import { AGENT_LABELS } from '@agentdeck/shared';
@@ -41,6 +44,9 @@ import {
   setToken as persistToken,
 } from '../api/client';
 import { connectSocket, disconnectSocket, emitInterrupt, getSocket } from '../api/socket';
+import { usePrefs } from './prefs';
+import { haptic } from '../util/haptics';
+import { currentPushSubscription, showSystemNotification } from '../util/notify';
 
 /* ------------------------------------------------------------------ router */
 
@@ -49,7 +55,7 @@ export type Route =
   | { name: 'chat' }
   | { name: 'code' }
   | { name: 'files' }
-  | { name: 'github' }
+  | { name: 'git' }
   | { name: 'settings' }
   | { name: 'team'; runId: string };
 
@@ -58,7 +64,7 @@ export function parseHash(hash: string): Route {
   if (h === 'chat') return { name: 'chat' };
   if (h === 'code') return { name: 'code' };
   if (h === 'files') return { name: 'files' };
-  if (h === 'github') return { name: 'github' };
+  if (h === 'git' || h === 'github') return { name: 'git' };
   if (h === 'settings') return { name: 'settings' };
   if (h.startsWith('team/')) return { name: 'team', runId: h.slice('team/'.length) };
   return { name: 'home' };
@@ -115,6 +121,9 @@ export interface FileEventRecord {
 /* ----------------------------------------------------------------- helpers */
 
 const PROJECT_KEY = 'agentdeck:project';
+const INBOX_KEY = 'agentdeck:inbox';
+const INBOX_SEEN_KEY = 'agentdeck:inbox-seen';
+const INBOX_LIMIT = 80;
 const MODEL_PREFS_KEY = 'agentdeck:model-prefs';
 
 function readJson<T>(key: string, fallback: T): T {
@@ -224,6 +233,17 @@ export interface AppStore {
   /** Account profiles per agent (env overrides). */
   accounts: Account[];
   accountsLoaded: boolean;
+  /* mobile polish */
+  /** Notification inbox (newest first, persisted per device). */
+  inbox: DeckNotification[];
+  /** ts of the newest notification the user has looked at. */
+  inboxSeenAt: number;
+  /** Agent launch presets for the Code tab (null = not fetched). */
+  terminalPresets: TerminalPreset[] | null;
+  /** Preset id requested via app shortcut (?launch=claude) — consumed by the Code tab. */
+  pendingLaunch: string | null;
+  /** This browser has an active Web Push subscription (server pushes when hidden). */
+  pushActive: boolean;
 
   /* actions */
   init(): void;
@@ -269,8 +289,22 @@ export interface AppStore {
   fetchTeamRuns(projectId?: string): Promise<void>;
   upsertTeamRun(run: TeamRun): void;
   /* BridgeMind ports (0.9) */
-  /** Opens a PTY in the active (or given) project and focuses it. */
-  createTerminal(projectId: string, cols: number, rows: number): Promise<TerminalInfo>;
+  /** Opens a PTY (optionally launching an agent preset) and focuses it. */
+  createTerminal(
+    projectId: string,
+    cols: number,
+    rows: number,
+    launch?: Pick<CreateTerminalRequest, 'presetId' | 'variantId' | 'command' | 'title'>,
+  ): Promise<TerminalInfo>;
+  refreshTerminalPresets(force?: boolean): Promise<void>;
+  /** Tells the server the user looked at a terminal (clears attention). */
+  markTerminalSeen(id: string): void;
+  setPendingLaunch(presetId: string | null): void;
+  /** Deep link from a notification / shortcut: "session:<id>", "terminal:<id>", "team:<id>". */
+  openTarget(target: string): void;
+  markInboxSeen(): void;
+  clearInbox(): void;
+  refreshPushActive(): Promise<void>;
   killTerminal(id: string): Promise<void>;
   setActiveTerminal(id: string | null): void;
   refreshTerminals(): Promise<void>;
@@ -300,6 +334,10 @@ let tmpMsgSeq = 0;
 let toastSeq = 0;
 /** Admin job ids we already toasted a done/error for (WS replays the full job). */
 const toastedAdminJobs = new Set<string>();
+function loadInbox(): DeckNotification[] {
+  return readJson<DeckNotification[]>(INBOX_KEY, []).slice(0, INBOX_LIMIT);
+}
+
 /** Per-terminal output subscribers (xterm instances). Keyed by terminal id. */
 const terminalSubs = new Map<string, { onData: (data: string) => void; onExit?: (code: number) => void }>();
 
@@ -510,6 +548,43 @@ export const useAppStore = create<AppStore>()((set, get) => {
     socket.on('notify', ({ level, text }) => {
       get().toast(level, text);
     });
+
+    socket.on('terminal:attention', ({ id }) => {
+      set((st) => ({ terminals: st.terminals.map((t) => (t.id === id ? { ...t, attention: true } : t)) }));
+    });
+
+    socket.on('notification', ({ notification }) => {
+      receiveNotification(notification);
+    });
+  }
+
+  /** Inbox + (when the app is not in front) a system notification. */
+  function receiveNotification(n: DeckNotification): void {
+    set((st) => {
+      if (st.inbox.some((x) => x.id === n.id)) return {};
+      const inbox = [n, ...st.inbox].slice(0, INBOX_LIMIT);
+      writeJson(INBOX_KEY, inbox);
+      return { inbox };
+    });
+    const prefs = usePrefs.getState();
+    const st = get();
+    // Already looking at exactly this thing → nothing to announce.
+    const looking =
+      document.visibilityState === 'visible' &&
+      ((n.sessionId && st.route.name === 'chat' && st.activeSessionId === n.sessionId) ||
+        (n.terminalId && st.route.name === 'code' && st.activeTerminalId === n.terminalId));
+    if (looking) {
+      if (n.terminalId) get().markTerminalSeen(n.terminalId);
+      return;
+    }
+    if (!prefs.notifyKinds[n.kind]) return;
+    if (document.visibilityState === 'visible') {
+      haptic(n.kind.endsWith('error') ? 'warning' : 'success');
+      get().toast(n.kind.endsWith('error') ? 'error' : 'info', `${n.title} — ${n.body}`);
+      return;
+    }
+    // Hidden: Web Push (service worker) covers it when subscribed.
+    if (prefs.notifications && !st.pushActive) void showSystemNotification(n);
   }
 
   function applyStatus(sessionId: string, status: SessionStatus, detail?: string): void {
@@ -607,6 +682,11 @@ export const useAppStore = create<AppStore>()((set, get) => {
     routinesLoaded: false,
     accounts: [],
     accountsLoaded: false,
+    inbox: loadInbox(),
+    inboxSeenAt: readJson<number>(INBOX_SEEN_KEY, 0),
+    terminalPresets: null,
+    pendingLaunch: null,
+    pushActive: false,
 
     init() {
       if (initialized) return;
@@ -624,9 +704,20 @@ export const useAppStore = create<AppStore>()((set, get) => {
         }
       });
 
+      // Notification taps (service worker / native plugin) and shortcuts.
+      window.addEventListener('agentdeck:open', (e) => {
+        const target = (e as CustomEvent<string>).detail;
+        if (typeof target === 'string') get().openTarget(target);
+      });
+      navigator.serviceWorker?.addEventListener('message', (e) => {
+        const data = e.data as { type?: string; open?: string; notification?: DeckNotification } | undefined;
+        if (data?.type === 'agentdeck:open' && data.open) get().openTarget(data.open);
+      });
+
       if (get().token) {
         attachSocket();
         void get().bootstrap();
+        void get().refreshPushActive();
       }
 
       // Public route — also fetched while unpaired so the pairing screen can
@@ -656,6 +747,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
         persistActiveProject(active);
 
         const jobs: Promise<unknown>[] = [
+          get().refreshTerminalPresets(),
           get().refreshDevices(),
           get().fetchTeamRuns(),
           get().refreshTerminals(),
@@ -702,6 +794,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
         overlayDepth: 0,
         filesVersion: {},
         fileEvents: [],
+        terminals: [],
+        activeTerminalId: null,
       });
       toastedAdminJobs.clear();
       get().navigate({ name: 'home' });
@@ -1004,8 +1098,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     /* --- BridgeMind ports ------------------------------------------------- */
 
-    async createTerminal(projectId, cols, rows) {
-      const { terminal } = await api.createTerminal({ projectId, cols, rows });
+    async createTerminal(projectId, cols, rows, launch) {
+      const { terminal } = await api.createTerminal({ projectId, cols, rows, ...(launch ?? {}) });
       set((st) => ({
         // The server's terminal:list WS broadcast usually beats the POST
         // response — append only when the list event hasn't landed yet.
@@ -1032,6 +1126,58 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     setActiveTerminal(id) {
       set({ activeTerminalId: id });
+      if (id) get().markTerminalSeen(id);
+    },
+
+    async refreshTerminalPresets(force = false) {
+      try {
+        set({ terminalPresets: await api.terminalPresets(force) });
+      } catch {
+        /* older server — Code tab falls back to plain shells */
+        if (!get().terminalPresets) set({ terminalPresets: [] });
+      }
+    },
+
+    markTerminalSeen(id) {
+      const term = get().terminals.find((t) => t.id === id);
+      if (!term?.attention) return;
+      set((st) => ({ terminals: st.terminals.map((t) => (t.id === id ? { ...t, attention: false } : t)) }));
+      getSocket()?.emit('terminal:seen', { id });
+    },
+
+    setPendingLaunch(presetId) {
+      set({ pendingLaunch: presetId });
+    },
+
+    openTarget(target) {
+      const [kind, id] = [target.slice(0, target.indexOf(':')), target.slice(target.indexOf(':') + 1)];
+      if (!id) return;
+      if (kind === 'session') {
+        get().navigate({ name: 'chat' });
+        void get().openSession(id).catch(() => get().toast('warn', 'Session no longer exists'));
+      } else if (kind === 'terminal') {
+        get().navigate({ name: 'code' });
+        if (get().terminals.some((t) => t.id === id)) get().setActiveTerminal(id);
+        else get().toast('warn', 'That terminal has ended');
+      } else if (kind === 'team') {
+        get().navigate({ name: 'team', runId: id });
+      }
+    },
+
+    markInboxSeen() {
+      const newest = get().inbox[0]?.ts ?? Date.now();
+      writeJson(INBOX_SEEN_KEY, newest);
+      set({ inboxSeenAt: newest });
+    },
+
+    clearInbox() {
+      writeJson(INBOX_KEY, []);
+      set({ inbox: [] });
+    },
+
+    async refreshPushActive() {
+      const sub = await currentPushSubscription();
+      set({ pushActive: sub !== null });
     },
 
     async refreshTerminals() {

@@ -32,8 +32,7 @@ export function ApkCard({ info, className }: { info: ApkInfo | null; className?:
     >
       <div className="flex items-center gap-3">
         <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white btn-primary"
         >
           <Smartphone size={18} />
         </span>

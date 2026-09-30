@@ -79,8 +79,7 @@ export function RoutinesSheet({ open, onClose }: { open: boolean; onClose: () =>
           <button
             type="button"
             onClick={() => setEditing('new')}
-            className="press tap flex items-center justify-center gap-2 rounded-2xl text-[14px] font-semibold text-white"
-            style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+            className="press tap flex items-center justify-center gap-2 rounded-2xl text-[14px] font-semibold text-white btn-primary"
           >
             <Repeat size={16} /> New routine
           </button>
@@ -348,8 +347,7 @@ function RoutineEditor({
           type="button"
           onClick={() => void save()}
           disabled={!canSave}
-          className="press tap flex-1 rounded-2xl py-2.5 text-[14px] font-semibold text-white disabled:opacity-45"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="press tap flex-1 rounded-2xl py-2.5 text-[14px] font-semibold text-white disabled:opacity-45 btn-primary"
         >
           {saving ? <Loader2 size={15} className="mx-auto animate-spin" /> : routine ? 'Save changes' : 'Create routine'}
         </button>

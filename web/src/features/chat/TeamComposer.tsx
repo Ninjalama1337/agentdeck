@@ -178,8 +178,7 @@ export function TeamComposer({
           type="button"
           disabled={!valid || busy || headless.length === 0}
           onClick={() => void launch()}
-          className="press tap flex items-center justify-center gap-2 rounded-2xl text-[15px] font-semibold text-white disabled:opacity-40"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="press tap flex items-center justify-center gap-2 rounded-2xl text-[15px] font-semibold text-white disabled:opacity-40 btn-primary"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <Users size={16} />}
           Launch team run

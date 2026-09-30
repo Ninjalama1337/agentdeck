@@ -18,6 +18,8 @@ import type { FileWatchers } from '../files/watcher.js';
 import type { AdminJobRunner } from '../admin/runner.js';
 import type { TerminalManager } from '../term/manager.js';
 import type { RoutineScheduler } from '../routines/scheduler.js';
+import type { NotificationHub } from '../notify/hub.js';
+import type { VoiceService } from '../voice/transcribe.js';
 
 export interface AppDeps {
   config: Config;
@@ -37,6 +39,10 @@ export interface AppDeps {
   terminals: TerminalManager;
   /** Recurring agent runs ("agents on routines"). */
   routines: RoutineScheduler;
+  /** Inbox + Web Push delivery. */
+  notifications: NotificationHub;
+  /** Server-side dictation (Whisper API / local command). */
+  voice: VoiceService;
   /** Per-IP limiter for the public /api/apk/latest download route. */
   apkLimiter: RateLimiter;
   jwtSecret: string;

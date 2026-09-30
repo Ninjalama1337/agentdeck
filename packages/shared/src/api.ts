@@ -190,6 +190,8 @@ export interface GitCommitRequest {
   message: string;
   /** Stage all changes before committing (default true). */
   all?: boolean;
+  /** Commit only these paths (overrides `all`). */
+  files?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -338,12 +340,154 @@ export interface TerminalInfo {
   rows: number;
   /** Process exit code once the shell ended (event only, not in list). */
   exitCode?: number;
+  /** Human title ("Claude Code", "shell", custom command). */
+  title?: string;
+  /** Launcher preset the terminal was started from (see TerminalPreset). */
+  presetId?: string;
+  /** Preset variant (new, continue, yolo, …). */
+  variantId?: string;
+  /** Command typed into the shell right after spawn (agent TUI etc.). */
+  command?: string;
+  /** Last PTY output timestamp. */
+  lastOutputAt?: number;
+  /** The terminal rang / went quiet after work and waits for the user. */
+  attention?: boolean;
 }
 
 export interface CreateTerminalRequest {
   projectId: string;
   cols?: number;
   rows?: number;
+  /** Launcher preset id (claude, codex, opencode, …); omitted = plain shell. */
+  presetId?: string;
+  /** Variant of the preset (new, continue, yolo, …). */
+  variantId?: string;
+  /** Free-form command typed into the shell after spawn (overrides preset). */
+  command?: string;
+  title?: string;
+}
+
+export interface TerminalPresetVariant {
+  id: string;
+  label: string;
+  /** Extra CLI args appended to the preset command. */
+  args: string;
+  hint?: string;
+  danger?: boolean;
+}
+
+/** One-tap launcher for an agent TUI (or tool) inside a PTY. */
+export interface TerminalPreset {
+  id: string;
+  label: string;
+  description: string;
+  kind: 'agent' | 'tool' | 'shell';
+  /** Base command; empty for the plain shell. */
+  command: string;
+  accent: string;
+  /** Binary found on the server PATH (always true for the shell). */
+  available: boolean;
+  /** Resolved absolute path of the binary, when found. */
+  resolvedPath?: string;
+  variants: TerminalPresetVariant[];
+  /** Quick-send snippets shown as chips while this preset runs. */
+  snippets?: { label: string; text: string }[];
+  /** Install hint shown when unavailable. */
+  install?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Notifications — in-app inbox + Web Push
+// ---------------------------------------------------------------------------
+
+export type DeckNotificationKind =
+  | 'session-done'
+  | 'session-error'
+  | 'terminal-attention'
+  | 'team-done'
+  | 'team-error'
+  | 'info';
+
+export interface DeckNotification {
+  id: string;
+  kind: DeckNotificationKind;
+  title: string;
+  body: string;
+  ts: number;
+  projectId?: string;
+  sessionId?: string;
+  terminalId?: string;
+  runId?: string;
+}
+
+export interface PushStatus {
+  /** Server can send Web Push (VAPID keys ready). */
+  enabled: boolean;
+  publicKey?: string;
+  /** Number of subscriptions registered for the calling device. */
+  subscriptions: number;
+}
+
+export interface PushSubscribeRequest {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  /** Which notification kinds this device wants pushed (default: all). */
+  kinds?: DeckNotificationKind[];
+}
+
+// ---------------------------------------------------------------------------
+// Voice — server-side transcription for dictation
+// ---------------------------------------------------------------------------
+
+export interface VoiceStatus {
+  available: boolean;
+  provider?: 'openai' | 'groq' | 'command';
+  reason?: string;
+}
+
+export interface TranscribeResponse {
+  text: string;
+}
+
+// ---------------------------------------------------------------------------
+// Git (extended) — changes, diff, log, branches
+// ---------------------------------------------------------------------------
+
+export type GitFileState = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict' | 'copied' | 'typechange';
+
+export interface GitChange {
+  path: string;
+  /** Previous path for renames. */
+  from?: string;
+  state: GitFileState;
+  staged: boolean;
+  unstaged: boolean;
+}
+
+export interface GitCommitInfo {
+  hash: string;
+  short: string;
+  subject: string;
+  author: string;
+  ts: number;
+  refs?: string;
+}
+
+export interface GitBranches {
+  current?: string;
+  local: string[];
+  remote: string[];
+}
+
+export interface GitDiffResponse {
+  diff: string;
+  truncated: boolean;
+  binary?: boolean;
+}
+
+export interface GitOpResult {
+  ok: boolean;
+  message: string;
 }
 
 // ---------------------------------------------------------------------------

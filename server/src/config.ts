@@ -32,6 +32,19 @@ export const TunnelConfigSchema = z.object({
   binary: z.string().default('cloudflared'),
 });
 
+export const VoiceConfigSchema = z.object({
+  provider: z.enum(['auto', 'openai', 'groq', 'command', 'off']).default('auto'),
+  /** API key (falls back to OPENAI_API_KEY / GROQ_API_KEY). */
+  apiKey: z.string().default(''),
+  /** OpenAI-compatible base URL (provider openai). */
+  baseUrl: z.string().default(''),
+  model: z.string().default(''),
+  /** Local transcriber command; {wav}/{file}/{lang} placeholders. */
+  command: z.string().default(''),
+  /** Default language hint (ISO 639-1), empty = auto / device language. */
+  language: z.string().default(''),
+});
+
 export const ConfigSchema = z.object({
   host: z.string().default('0.0.0.0'),
   port: z.number().int().min(0).max(65535).default(8787),
@@ -43,6 +56,7 @@ export const ConfigSchema = z.object({
   maxUploadBytes: z.number().int().min(1024).default(20 * 1024 * 1024),
   maxApkBytes: z.number().int().min(1024).default(200 * 1024 * 1024),
   tunnel: TunnelConfigSchema.default({}),
+  voice: VoiceConfigSchema.default({}),
   corsOrigins: z
     .array(z.string())
     .default(['http://localhost:5173', 'capacitor://localhost', 'http://localhost', 'https://localhost']),
@@ -131,6 +145,16 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
   const tunnelBinary = str('AGENTDECK_TUNNEL_BINARY');
   if (tunnelBinary !== undefined) tunnel.binary = tunnelBinary;
   if (Object.keys(tunnel).length > 0) o.tunnel = tunnel;
+  const voice: Record<string, unknown> = {};
+  const voiceProvider = str('AGENTDECK_VOICE_PROVIDER');
+  if (voiceProvider !== undefined) voice.provider = voiceProvider;
+  const voiceCommand = str('AGENTDECK_VOICE_COMMAND');
+  if (voiceCommand !== undefined) voice.command = voiceCommand;
+  const voiceKey = str('AGENTDECK_VOICE_API_KEY');
+  if (voiceKey !== undefined) voice.apiKey = voiceKey;
+  const voiceModel = str('AGENTDECK_VOICE_MODEL');
+  if (voiceModel !== undefined) voice.model = voiceModel;
+  if (Object.keys(voice).length > 0) o.voice = voice;
   const cors = str('AGENTDECK_CORS_ORIGINS');
   if (cors !== undefined) {
     if (cors.trim().startsWith('[')) {

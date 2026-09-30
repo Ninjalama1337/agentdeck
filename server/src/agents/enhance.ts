@@ -9,7 +9,7 @@ import type { AgentService } from './registry.js';
 import type { Logger } from '../logging.js';
 import { truncate } from './types.js';
 
-const ENHANCE_TIMEOUT_MS = 60_000;
+const ENHANCE_TIMEOUT_MS = 90_000;
 
 const META_PROMPT = [
   'You improve prompts for a coding agent. Rewrite the rough draft below into ONE crisp,',
@@ -28,6 +28,8 @@ export interface EnhanceArgs {
   model?: string;
   thinkingEffort?: string;
   accountId?: string;
+  /** Send `text` verbatim instead of wrapping it in the enhance meta-prompt. */
+  raw?: boolean;
 }
 
 export interface EnhanceRunnerDeps {
@@ -76,7 +78,7 @@ export async function runEnhance(deps: EnhanceRunnerDeps, args: EnhanceArgs): Pr
     plan = adapter.buildRun({
       session: transient,
       project: args.project,
-      text: `${META_PROMPT}\n${truncate(args.text, 8_000)}\n>>>`,
+      text: args.raw ? truncate(args.text, 20_000) : `${META_PROMPT}\n${truncate(args.text, 8_000)}\n>>>`,
       attachments: [],
       ...(args.model !== undefined ? { model: args.model } : {}),
       ...(args.thinkingEffort !== undefined ? { thinkingEffort: args.thinkingEffort } : {}),
@@ -124,7 +126,7 @@ export async function runEnhance(deps: EnhanceRunnerDeps, args: EnhanceArgs): Pr
       } catch {
         // already gone
       }
-      finish(new EnhanceError('Enhance timed out after 60s.', 'TIMEOUT'));
+      finish(new EnhanceError('Agent run timed out after 90s.', 'TIMEOUT'));
     }, ENHANCE_TIMEOUT_MS);
     timer.unref?.();
 

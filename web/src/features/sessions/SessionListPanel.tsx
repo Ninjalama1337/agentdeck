@@ -6,6 +6,8 @@ import { useAppStore } from '../../store/appStore';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { relTime } from '../../util/format';
+import { ProjectSwitcher } from '../../components/ProjectSwitcher';
+import { InboxButton } from '../inbox/InboxSheet';
 
 const STATUS_DOT: Record<Session['status'], string> = {
   idle: '#5b6478',
@@ -50,8 +52,7 @@ export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: ()
           <button
             type="button"
             onClick={() => navigate({ name: 'home' })}
-            className="press tap rounded-2xl px-5 text-[14px] font-semibold text-white"
-            style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+            className="press tap rounded-2xl px-5 text-[14px] font-semibold text-white btn-primary"
           >
             Go to projects
           </button>
@@ -62,19 +63,16 @@ export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: ()
 
   return (
     <div className="safe-t flex min-h-full flex-col px-4 pb-8">
-      <header className="flex items-center justify-between py-4">
-        <div className="min-w-0">
-          <h1 className="truncate text-[20px] font-bold tracking-tight">{project.name}</h1>
-          <p className="text-[12.5px] text-dim">Threads</p>
-        </div>
+      <header className="flex items-center gap-1 py-2">
+        <ProjectSwitcher className="min-w-0 flex-1" subtitle={`${sessions.length} ${sessions.length === 1 ? 'chat' : 'chats'}`} />
+        <InboxButton />
       </header>
 
       <div className="mb-4 flex gap-2">
         <button
           type="button"
           onClick={onNewSession}
-          className="press tap flex flex-1 items-center justify-center gap-2 rounded-2xl text-[14px] font-semibold text-white"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="press tap flex flex-1 items-center justify-center gap-2 rounded-2xl text-[14px] font-semibold text-white btn-primary"
         >
           <Plus size={16} /> New session
         </button>

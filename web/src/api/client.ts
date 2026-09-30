@@ -17,7 +17,17 @@ import type {
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateTerminalRequest,
+  DeckNotification,
   DeviceInfo,
+  GitBranches,
+  GitChange,
+  GitCommitInfo,
+  GitDiffResponse,
+  GitOpResult,
+  PushStatus,
+  PushSubscribeRequest,
+  TerminalPreset,
+  VoiceStatus,
   EnhanceRequest,
   EnhanceResponse,
   FileContentResponse,
@@ -430,6 +440,95 @@ export const api = {
   /** Enhance: rewrite a rough draft into a crisp prompt (transient run). */
   enhance(body: EnhanceRequest): Promise<EnhanceResponse> {
     return request('POST', '/api/enhance', { json: body });
+  },
+
+  /* ------------------------------------------------------ mobile polish */
+
+  /** One-tap agent launchers for the Code tab (availability probed on the server). */
+  terminalPresets(refresh = false): Promise<TerminalPreset[]> {
+    return request('GET', '/api/terminals/presets', { query: { refresh: refresh ? '1' : undefined } });
+  },
+
+  notifications(): Promise<DeckNotification[]> {
+    return request('GET', '/api/notifications');
+  },
+
+  pushStatus(): Promise<PushStatus> {
+    return request('GET', '/api/push');
+  },
+
+  pushSubscribe(body: PushSubscribeRequest): Promise<void> {
+    return request('POST', '/api/push/subscribe', { json: body });
+  },
+
+  pushUnsubscribe(endpoint?: string): Promise<void> {
+    return request('POST', '/api/push/unsubscribe', { json: { endpoint } });
+  },
+
+  pushTest(): Promise<{ delivered: number }> {
+    return request('POST', '/api/push/test');
+  },
+
+  voiceStatus(): Promise<VoiceStatus> {
+    return request('GET', '/api/voice');
+  },
+
+  async transcribe(audio: Blob, lang?: string): Promise<{ text: string }> {
+    const form = new FormData();
+    const ext = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm';
+    form.append('file', audio, `dictation.${ext}`);
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    let res: Response;
+    try {
+      res = await fetch(`${base()}/api/voice/transcribe${qs({ lang })}`, { method: 'POST', headers, body: form });
+    } catch {
+      throw new ApiError('Cannot reach the AgentDeck server', 0);
+    }
+    if (res.status === 401) emitUnauthorized();
+    if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+    return (await res.json()) as { text: string };
+  },
+
+  gitChanges(projectId: string): Promise<GitChange[]> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/git/changes`);
+  },
+
+  gitDiff(projectId: string, path?: string): Promise<GitDiffResponse> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/git/diff`, { query: { path } });
+  },
+
+  gitLog(projectId: string, limit = 40): Promise<GitCommitInfo[]> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/git/log`, { query: { limit } });
+  },
+
+  gitShow(projectId: string, hash: string): Promise<GitDiffResponse> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/git/show/${encodeURIComponent(hash)}`);
+  },
+
+  gitBranches(projectId: string): Promise<GitBranches> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/git/branches`);
+  },
+
+  gitCheckout(projectId: string, branch: string, create = false): Promise<GitOpResult> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/checkout`, { json: { branch, create } });
+  },
+
+  gitPull(projectId: string): Promise<GitOpResult> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/pull`);
+  },
+
+  gitFetch(projectId: string): Promise<GitOpResult> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/fetch`);
+  },
+
+  gitDiscard(projectId: string, path: string): Promise<void> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/discard`, { json: { path } });
+  },
+
+  gitSuggestMessage(projectId: string, body: { agentId?: string; files?: string[] }): Promise<{ text: string }> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/suggest-message`, { json: body });
   },
 };
 

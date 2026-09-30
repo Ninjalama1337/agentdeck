@@ -63,6 +63,8 @@ if [[ ! -d mobile/android ]]; then
   info "mobile/android fehlt — generiere Plattform (einmalig) …"
   ( cd mobile && npx cap add android )
 fi
+# Mikrofon (Diktat), Benachrichtigungen, Vibration — idempotent.
+( cd mobile && npm run patch:android )
 
 # --- 6) APK bauen -------------------------------------------------------------------
 info "Baue Debug-APK (gradlew assembleDebug) …"

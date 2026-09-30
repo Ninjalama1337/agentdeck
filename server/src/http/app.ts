@@ -32,7 +32,10 @@ import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '.
 import { FileWatchers } from '../files/watcher.js';
 import { TerminalManager } from '../term/manager.js';
 import { RoutineScheduler } from '../routines/scheduler.js';
+import { NotificationHub, summarize } from '../notify/hub.js';
+import { VoiceService } from '../voice/transcribe.js';
 import { registerRoutes } from '../routes/index.js';
+import { terminalBroadcasts } from '../routes/terminals.js';
 import type { AppDeps } from '../routes/deps.js';
 import { NAME, VERSION } from '../version.js';
 
@@ -104,9 +107,49 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
 
   // Broadcast plumbing: store/entity changes → WS; adapter events → WS.
   let broadcast: Broadcaster = () => undefined;
+  const notifications = new NotificationHub({
+    dataDir: config.dataDir,
+    log,
+    broadcast: (notification) => broadcast('notification', { notification }),
+  });
+  await notifications.init();
   const manager = new AgentManager(config, store, agents, log, (sessionId, event) => {
     broadcast('session:event', { sessionId, ts: Date.now(), event });
+    if (event.type === 'status' && (event.status === 'idle' || event.status === 'error')) {
+      void notifySessionFinished(sessionId, event.status);
+    }
   });
+
+  /** Run finished → inbox + push ("Claude is done in winterlicht"). */
+  async function notifySessionFinished(sessionId: string, status: 'idle' | 'error'): Promise<void> {
+    try {
+      const session = store.getSession(sessionId);
+      if (!session) return;
+      // Team steps report once per run (below), not per step.
+      if (store.getSessionSource(sessionId) === 'team') return;
+      const project = store.getProject(session.projectId);
+      const label = agents.infoOf(session.agentId)?.label ?? session.agentId;
+      const where = project?.name ?? 'project';
+      let body: string;
+      if (status === 'error') {
+        body = summarize(session.lastError) || 'The run failed.';
+      } else {
+        const messages = await store.getMessages(sessionId);
+        const last = [...messages].reverse().find((m) => m.role === 'assistant');
+        body = summarize(last?.text) || 'Finished.';
+      }
+      notifications.notify({
+        kind: status === 'error' ? 'session-error' : 'session-done',
+        title: status === 'error' ? `${label} failed · ${where}` : `${label} is done · ${where}`,
+        body,
+        projectId: session.projectId,
+        sessionId,
+      });
+    } catch (err) {
+      log.warn({ err }, 'session notification failed');
+    }
+  }
+  const notifiedTeams = new Set<string>();
   // PTY terminals — broadcast callbacks are built per call in the routes
   // (they close over `deps.broadcast`, which is bound by then).
   const terminals = new TerminalManager(log);
@@ -117,6 +160,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     logger: log,
     manager,
     terminals,
+    onTerminalSeen: (id) => terminals.markSeen(id, terminalBroadcasts(deps)),
     touchDevice: (deviceId) => store.touchDevice(deviceId),
     corsOrigins: config.corsOrigins,
   });
@@ -143,6 +187,18 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
         break;
       case 'team':
         broadcast('team:update', { run: change.run });
+        if ((change.run.status === 'done' || change.run.status === 'error') && !notifiedTeams.has(change.run.id)) {
+          notifiedTeams.add(change.run.id);
+          const project = store.getProject(change.run.projectId);
+          const steps = change.run.steps.length;
+          notifications.notify({
+            kind: change.run.status === 'done' ? 'team-done' : 'team-error',
+            title: `Team run ${change.run.status === 'done' ? 'finished' : 'failed'} · ${project?.name ?? 'project'}`,
+            body: `${steps} ${steps === 1 ? 'step' : 'steps'} — tap to review`,
+            projectId: change.run.projectId,
+            runId: change.run.id,
+          });
+        }
         break;
       case 'routine':
         broadcast('routine:update', { routine: change.routine });
@@ -193,6 +249,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     adminJobs: adminJobRunner,
     terminals,
     routines,
+    notifications,
+    voice: new VoiceService({ config, log }),
     apkLimiter: new RateLimiter(30, 60_000),
     jwtSecret,
     bridgeToken,

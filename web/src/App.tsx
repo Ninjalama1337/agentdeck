@@ -12,7 +12,8 @@ import { ChatScreen } from './features/chat/ChatScreen';
 import { TeamScreen } from './features/chat/TeamScreen';
 import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
-import { GitHubScreen } from './features/github/GitHubScreen';
+import { GitScreen } from './features/git/GitScreen';
+import { listenForNativeTaps } from './util/notify';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 
 /** Consume an image handed over by the PWA share_target (stashed in Cache API by sw.ts). */
@@ -51,10 +52,40 @@ export default function App() {
   const booted = useAppStore((s) => s.booted);
   const route = useAppStore((s) => s.route);
   const apkInfo = useAppStore((s) => s.apkInfo);
+  const keyboardOpen = useAppStore((s) => s.keyboardOpen);
 
   useEffect(() => {
     useAppStore.getState().init();
+    listenForNativeTaps();
   }, []);
+
+  // Deep links: ?open=session:<id> (notification tap) · ?launch=claude (app shortcut).
+  useEffect(() => {
+    if (!token) return;
+    const params = new URLSearchParams(window.location.search);
+    const open = params.get('open');
+    const launch = params.get('launch');
+    if (!open && !launch) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    const store = useAppStore.getState();
+    if (launch) {
+      store.setPendingLaunch(launch);
+      store.navigate({ name: 'code' });
+    }
+    if (open) {
+      // Wait for bootstrap so sessions/terminals are known.
+      const go = () => useAppStore.getState().openTarget(open);
+      if (store.booted) go();
+      else {
+        const unsub = useAppStore.subscribe((st) => {
+          if (st.booted) {
+            unsub();
+            go();
+          }
+        });
+      }
+    }
+  }, [token]);
 
   // Soft keyboard tracking via visualViewport: when the visible viewport
   // shrinks well below the layout viewport, a keyboard is open → hide the
@@ -132,17 +163,17 @@ export default function App() {
           newer build than the one bundled into this WebView (see UpdateBanner). */}
       <UpdateBanner apk={apkInfo} />
       <main
-        className={
-          route.name === 'chat'
-            ? 'screen-h relative z-10 mx-auto w-full max-w-xl'
-            : 'screen-h relative z-10 mx-auto w-full max-w-xl overflow-y-auto overscroll-contain'
-        }
+        className={[
+          keyboardOpen ? 'screen-h-kb' : 'screen-h',
+          'relative z-10 mx-auto w-full max-w-xl',
+          route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
+        ].join(' ')}
       >
         {route.name === 'home' && <HomeScreen />}
         {route.name === 'chat' && <ChatScreen />}
         {route.name === 'code' && <CodeScreen />}
         {route.name === 'files' && <FilesScreen />}
-        {route.name === 'github' && <GitHubScreen />}
+        {route.name === 'git' && <GitScreen />}
         {route.name === 'settings' && <SettingsScreen />}
         {route.name === 'team' && <TeamScreen runId={route.runId} />}
       </main>

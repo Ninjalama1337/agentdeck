@@ -9,6 +9,7 @@ export async function deviceRoutes(fastify: FastifyInstance, deps: AppDeps): Pro
     const id = (req.params as { id: string }).id;
     const deleted = await deps.store.deleteDevice(id);
     if (!deleted) throw notFound('Device not found');
+    await deps.notifications.forgetDevice(id);
     reply.code(204).send();
   });
 }

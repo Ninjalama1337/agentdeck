@@ -15,7 +15,6 @@ import { AgentAvatar } from '../../components/ui/Avatar';
 import { IconButton } from '../../components/ui/Button';
 import { MenuRow } from '../../components/ui/MenuRow';
 import { Sheet } from '../../components/ui/Sheet';
-import { ProjectPicker } from '../../components/ProjectPicker';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
 import { ModelBar } from './ModelBar';
@@ -86,9 +85,6 @@ export function ChatScreen() {
   if (!session) {
     return (
       <div className="flex min-h-full flex-col">
-        <div className="px-4 pt-3">
-          <ProjectPicker />
-        </div>
         <div className="flex flex-1 flex-col">
           <SessionListPanel onNewSession={() => setNewSessionOpen(true)} onTeamRun={() => setTeamOpen(true)} />
         </div>

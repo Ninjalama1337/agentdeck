@@ -98,6 +98,25 @@ Server neu starten — es gibt kein Hot-Reload.
 | `agents.<id>.mode` | string | s. o. | `headless` \| `ide` \| `auto` \| `off` |
 | `agents.<id>.command` | string | pro Agent | CLI-Befehl (Pfad erlaubt) |
 | `agents.<id>.ideCommand` | string | abgeleitet | Befehl zum Öffnen der IDE |
+| `voice.provider` | string | `"auto"` | Diktat-Backend: `auto` \| `openai` \| `groq` \| `command` \| `off` |
+| `voice.apiKey` | string | `""` | API-Key (Fallback: `OPENAI_API_KEY` / `GROQ_API_KEY`) |
+| `voice.baseUrl` | string | `""` | OpenAI-kompatible Base-URL (Default `https://api.openai.com/v1`) |
+| `voice.model` | string | `""` | z. B. `whisper-1`, `gpt-4o-mini-transcribe`, `whisper-large-v3-turbo` |
+| `voice.command` | string | `""` | lokaler Transkriber, Platzhalter `{wav}` `{file}` `{lang}` |
+| `voice.language` | string | `""` | Standard-Sprache (ISO 639-1), leer = Gerätesprache |
+
+### Diktat (Whisper) — optional
+
+Auf dem Handy nutzt die App zuerst die On-Device-Spracherkennung (Chrome/PWA,
+live). In der APK-WebView gibt es keine — dann nimmt die App kurz Audio auf und
+der Server transkribiert. Beispiele:
+
+```json
+{ "voice": { "provider": "groq" } }                       // + GROQ_API_KEY im Env
+{ "voice": { "command": "whisper-cli -m ~/models/ggml-base.bin -nt -l {lang} -f {wav}" } }
+```
+
+`{wav}` wird per `ffmpeg` als 16-kHz-Mono-WAV erzeugt (whisper.cpp braucht das).
 
 ### Agent-Modi
 
@@ -126,6 +145,10 @@ Chat-Auswahl und bleibt nur als „Projekt öffnen“-Button.
 | `AGENTDECK_TUNNEL` | `tunnel.provider` | `cloudflared` (aktiviert) \| `off` |
 | `AGENTDECK_TUNNEL_TOKEN` | `tunnel.token` (impliziert `mode: "token"`) | `<tunnel-token>` |
 | `AGENTDECK_TUNNEL_BINARY` | `tunnel.binary` | `/usr/local/bin/cloudflared` |
+| `AGENTDECK_VOICE_PROVIDER` | `voice.provider` | `groq` |
+| `AGENTDECK_VOICE_COMMAND` | `voice.command` | `whisper-cli -m … -f {wav}` |
+| `AGENTDECK_VOICE_API_KEY` | `voice.apiKey` | `sk-…` |
+| `AGENTDECK_VOICE_MODEL` | `voice.model` | `whisper-1` |
 
 Der Tunnel selbst ist in [REMOTE.md](REMOTE.md) erklärt (Quick-Tunnel,
 Named Tunnel, Cloudflare Access).
@@ -173,6 +196,8 @@ Kurzreferenz (Details: [ARCHITECTURE.md](ARCHITECTURE.md)):
 ├── jwt-secret               # HS256-Secret (0600) — löschen = alle Geräte abmelden
 ├── bridge-token             # Token für /api/bridge/run + APK-Uploads von CI/Skript (0600)
 ├── pairing-code.txt         # aktueller Pairing-Code
+├── vapid.json               # Web-Push-Schlüssel (0600) — löschen = Geräte müssen Push neu aktivieren
+├── push-subscriptions.json  # Push-Abos pro Gerät (0600)
 ├── apk/                     # agentdeck-latest.apk + apk.json (Version, SHA-256, …)
 ├── projects/                # Standard-projectsRoot
 ├── sessions/<id>/…          # meta.json + messages.jsonl

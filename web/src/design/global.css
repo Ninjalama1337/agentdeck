@@ -24,6 +24,7 @@
   --shadow-glass: 0 4px 16px rgba(0, 0, 0, 0.28);
 }
 
+@layer base {
 /* ------------------------------------------------------------------ base */
 
 html {
@@ -105,6 +106,9 @@ img {
   display: none;
 }
 
+}
+
+@layer components {
 /* ------------------------------------------------- ambient background */
 
 /* Calm depth wash instead of the old animated aurora: two barely-there
@@ -163,6 +167,11 @@ img {
 .screen-h {
   height: calc(100vh - 64px - var(--ad-safe-bottom));
   height: calc(100dvh - 64px - var(--ad-safe-bottom));
+}
+/* Soft keyboard open: the tab bar slides away — use the whole (resized) viewport. */
+.screen-h-kb {
+  height: 100vh;
+  height: 100dvh;
 }
 
 /* ---------------------------------------------------------------- fields */
@@ -470,6 +479,160 @@ textarea.field {
   }
 }
 
+/* ------------------------------------------------------------ polish 1.0 */
+
+/* Primary action: one gradient everywhere (was inlined per screen). */
+.btn-primary {
+  background: var(--ad-grad);
+  box-shadow: 0 6px 20px rgba(124, 92, 255, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.btn-ok {
+  background: var(--ad-grad-ok);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Chat / terminal input shell with a focus ring on the whole pill. */
+.composer {
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-line);
+  box-shadow: var(--ad-shadow-soft);
+  transition: border-color 160ms var(--ad-ease), box-shadow 160ms var(--ad-ease);
+}
+.composer:focus-within {
+  border-color: rgba(124, 92, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14), var(--ad-shadow-soft);
+}
+
+/* Sticky translucent top bar used by every screen header. */
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--ad-bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ad-dim);
+}
+
+/* Recording pulse around the mic button. */
+.mic-ring {
+  box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.55);
+  animation: mic-ring 1.3s ease-out infinite;
+}
+@keyframes mic-ring {
+  to {
+    box-shadow: 0 0 0 14px rgba(244, 63, 94, 0);
+  }
+}
+
+/* Attention badge (terminal waiting, unread inbox). */
+.badge {
+  display: inline-flex;
+  min-width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ad-danger);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--ad-bg);
+}
+
+.attention-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ad-warn);
+  box-shadow: 0 0 10px var(--ad-warn);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+/* Terminal key bar keys. */
+.kbd {
+  display: flex;
+  height: 36px;
+  min-width: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--ad-line);
+  background: var(--ad-surface-2);
+  color: var(--ad-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  transition: background 120ms var(--ad-ease), transform 120ms var(--ad-ease);
+}
+.kbd:active {
+  background: var(--ad-surface-3);
+  transform: scale(0.94);
+}
+.kbd[aria-pressed='true'] {
+  border-color: rgba(124, 92, 255, 0.6);
+  background: rgba(124, 92, 255, 0.22);
+  color: #c9bcff;
+}
+
+/* Unified diff rendering. */
+.diff {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  background: var(--ad-code-bg);
+  border: 1px solid var(--ad-line);
+  border-radius: 14px;
+  padding: 8px 0;
+}
+.diff > div {
+  padding: 0 12px;
+  min-width: max-content;
+}
+.diff .add {
+  background: rgba(16, 185, 129, 0.13);
+  color: #8ff0c7;
+}
+.diff .del {
+  background: rgba(244, 63, 94, 0.13);
+  color: #ffb1c0;
+}
+.diff .hunk {
+  color: #8ab4ff;
+  background: rgba(78, 140, 255, 0.08);
+}
+.diff .meta {
+  color: var(--ad-dim);
+}
+
+/* xterm: match the card, keep the scrollbar thin on touch. */
+.term-host .xterm {
+  height: 100%;
+  padding: 4px 2px 0 6px;
+}
+.term-host .xterm-viewport {
+  background-color: transparent !important;
+}
+.term-host .xterm-viewport::-webkit-scrollbar {
+  width: 3px;
+}
+
+}
+
 /* --------------------------------------------------------- reduced motion */
 
 @media (prefers-reduced-motion: reduce) {
@@ -481,6 +644,8 @@ textarea.field {
   .modal-backdrop,
   .caret,
   .pulse-dot,
+  .mic-ring,
+  .attention-dot,
   .skeleton {
     animation: none !important;
   }

@@ -10,7 +10,8 @@
     "copy": "npm run copy:web && cap copy android",
     "sync": "npm run build:web && npm run copy:web && cap sync android",
     "android": "cap open android",
-    "dist:android": "npm run copy:web && cap sync android && cd android && ./gradlew assembleDebug"
+    "dist:android": "npm run copy:web && cap sync android && cd android && ./gradlew assembleDebug",
+    "patch:android": "node scripts/patch-android.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "^7.6.0",
@@ -19,5 +20,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@capacitor/haptics": "^7.0.0",
+    "@capacitor/local-notifications": "^7.0.0"
   }
 }

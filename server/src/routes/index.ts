@@ -17,6 +17,7 @@ import { terminalRoutes } from './terminals.js';
 import { routineRoutes } from './routines.js';
 import { accountRoutes } from './accounts.js';
 import { enhanceRoutes } from './enhance.js';
+import { notificationRoutes } from './notifications.js';
 
 /** Registers every route module under /api. */
 export async function registerRoutes(fastify: FastifyInstance, opts: { deps: AppDeps }): Promise<void> {
@@ -38,5 +39,6 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await routineRoutes(fastify, deps);
   await accountRoutes(fastify, deps);
   await enhanceRoutes(fastify, deps);
+  await notificationRoutes(fastify, deps);
   await bridgeRoutes(fastify, deps);
 }

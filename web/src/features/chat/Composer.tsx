@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Image as ImageIcon, Mic, MicOff, Paperclip, Send, Square, Wand2, X } from 'lucide-react';
+import { ArrowUp, Camera, FileText, Image as ImageIcon, Paperclip, Square, Wand2, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, Attachment, Session } from '@agentdeck/shared';
 import { api, uploadFile } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { Spinner } from '../../components/ui/Spinner';
+import { DictationHint, MicButton } from '../../components/MicButton';
+import { useDictation } from '../../hooks/useDictation';
+import { usePrefs } from '../../store/prefs';
+import { haptic } from '../../util/haptics';
 
 interface PendingAttachment {
   localId: string;
@@ -18,49 +22,32 @@ interface PendingAttachment {
 
 let localSeq = 0;
 
-/* Web Speech API (Chrome PWA); the Capacitor WebView has no recognizer — the
- * mic button simply hides there until a native plugin ships. */
-type SpeechRecognitionLike = {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-type SpeechCtor = new () => SpeechRecognitionLike;
-
-function speechCtor(): SpeechCtor | null {
-  const w = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
-
 export function Composer({ session, agent }: { session: Session; agent: AgentInfo | undefined }) {
   const sendTurn = useAppStore((s) => s.sendTurn);
   const interrupt = useAppStore((s) => s.interrupt);
   const toast = useAppStore((s) => s.toast);
   const takePendingFiles = useAppStore((s) => s.takePendingFiles);
   const projects = useAppStore((s) => s.projects);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const [text, setText] = useState('');
   const [atts, setAtts] = useState<PendingAttachment[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
-  const [listening, setListening] = useState(false);
-  const recognition = useRef<SpeechRecognitionLike | null>(null);
+  const enterToSend = usePrefs((st) => st.enterToSend);
+  const dictation = useDictation(
+    (spoken) => setText((t) => (t && !/\s$/.test(t) ? `${t} ${spoken}` : `${t}${spoken}`)),
+    (msg) => toast('error', msg),
+  );
   const textarea = useRef<HTMLTextAreaElement | null>(null);
   const photoInput = useRef<HTMLInputElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const anyInput = useRef<HTMLInputElement | null>(null);
 
   const projectId = session.projectId;
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
   const running = session.status === 'running' || session.status === 'queued';
   const canSend = (text.trim().length > 0 || atts.some((a) => a.att)) && !atts.some((a) => !a.att && !a.error);
   const headless = agent?.capabilities.headless === true;
-  const voiceAvailable = speechCtor() !== null;
 
   /* PWA share_target handover → pending files queued by App.tsx */
   useEffect(() => {
@@ -116,37 +103,10 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
     }
   };
 
-  /* BridgeVoice (lite): hold-free dictation, appends to the draft. */
-  const toggleVoice = () => {
-    const Ctor = speechCtor();
-    if (!Ctor) return;
-    if (listening) {
-      recognition.current?.stop();
-      return;
-    }
-    const rec = new Ctor();
-    recognition.current = rec;
-    rec.lang = navigator.language || 'de-DE';
-    rec.interimResults = false;
-    rec.continuous = false;
-    rec.onresult = (event) => {
-      const spoken = Array.from({ length: event.results.length }, (_, i) => event.results[i][0]?.transcript ?? '')
-        .join(' ')
-        .trim();
-      if (spoken) setText((t) => (t ? `${t} ${spoken}` : spoken));
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    try {
-      rec.start();
-      setListening(true);
-    } catch {
-      setListening(false);
-    }
-  };
-
   const send = async () => {
     if (!canSend || running) return;
+    if (dictation.state !== 'idle') dictation.stop();
+    haptic('light');
     const payloadText = text;
     const uploaded = atts.filter((a) => a.att).map((a) => a.att as Attachment);
     setText('');
@@ -186,6 +146,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
 
   return (
     <div className="safe-b px-3 pb-3">
+      <DictationHint dictation={dictation} />
       {/* attachment strip */}
       {atts.length > 0 && (
         <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto px-0.5">
@@ -225,10 +186,10 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
       )}
 
       {/* input row */}
-      <div className="glass flex items-end gap-1.5 rounded-[26px] p-1.5">
+      <div className="composer flex items-end gap-1 rounded-[26px] p-1.5">
         <button
           type="button"
-          aria-label="Attach image"
+          aria-label="Attach"
           onClick={() => setSheetOpen(true)}
           className="tap flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-dim active:bg-white/10 active:text-ink"
         >
@@ -238,47 +199,41 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
           ref={textarea}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (enterToSend && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void send();
+            }
+          }}
           rows={1}
-          placeholder={`Message ${projectName}…`}
+          placeholder={running ? 'Agent is working…' : `Message ${agent?.label ?? 'agent'} in ${projectName}…`}
           aria-label="Message"
+          enterKeyHint={enterToSend ? 'send' : 'enter'}
           className="max-h-[132px] min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15.5px] leading-snug outline-none placeholder:text-dim/70"
         />
-        {(headless || voiceAvailable) && text.trim().length > 0 && (
-          <div className="flex shrink-0 flex-col items-center justify-center gap-0.5 self-center">
-            {headless && (
-              <button
-                type="button"
-                aria-label="Enhance prompt with the agent"
-                disabled={enhancing || !text.trim()}
-                onClick={() => void enhance()}
-                className={clsx(
-                  'press flex h-8 w-9 items-center justify-center rounded-lg',
-                  enhancing ? 'text-accent' : 'text-dim active:bg-white/10 active:text-ink',
-                )}
-              >
-                {enhancing ? <Spinner /> : <Wand2 size={16} />}
-              </button>
+        {headless && text.trim().length > 0 && (
+          <button
+            type="button"
+            aria-label="Enhance prompt with the agent"
+            disabled={enhancing}
+            onClick={() => void enhance()}
+            className={clsx(
+              'press flex h-11 w-10 shrink-0 items-center justify-center rounded-full',
+              enhancing ? 'text-accent' : 'text-dim active:bg-white/10 active:text-ink',
             )}
-            {voiceAvailable && (
-              <button
-                type="button"
-                aria-label={listening ? 'Stop dictation' : 'Dictate message'}
-                onClick={toggleVoice}
-                className={clsx(
-                  'press flex h-8 w-9 items-center justify-center rounded-lg',
-                  listening ? 'text-danger' : 'text-dim active:bg-white/10 active:text-ink',
-                )}
-              >
-                {listening ? <MicOff size={16} /> : <Mic size={16} />}
-              </button>
-            )}
-          </div>
+          >
+            {enhancing ? <Spinner /> : <Wand2 size={17} />}
+          </button>
         )}
+        <MicButton dictation={dictation} />
         {running ? (
           <button
             type="button"
             aria-label="Stop run"
-            onClick={() => void interrupt(session.id)}
+            onClick={() => {
+              haptic('medium');
+              void interrupt(session.id);
+            }}
             className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-danger/20 text-danger"
           >
             <Square size={16} fill="currentColor" />
@@ -290,12 +245,11 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
             disabled={!canSend}
             onClick={() => void send()}
             className={clsx(
-              'press flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition-opacity',
+              'press btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition-opacity',
               canSend ? '' : 'opacity-35',
             )}
-            style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
           >
-            <Send size={17} />
+            <ArrowUp size={20} strokeWidth={2.4} />
           </button>
         )}
       </div>
@@ -315,14 +269,23 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
           <AttachRow
             icon={<ImageIcon size={18} />}
             title="Choose image"
-            hint="From gallery or files"
+            hint="From gallery"
             onClick={() => {
               setSheetOpen(false);
               fileInput.current?.click();
             }}
           />
+          <AttachRow
+            icon={<FileText size={18} />}
+            title="Choose file"
+            hint="PDF, text, logs, code"
+            onClick={() => {
+              setSheetOpen(false);
+              anyInput.current?.click();
+            }}
+          />
           <p className="px-1 pt-1 text-[12px] text-dim">
-            Images upload instantly and are attached to your next message. Max 20 MB.
+            Files upload instantly and are attached to your next message. Max 20 MB.
           </p>
         </div>
       </Sheet>
@@ -343,7 +306,18 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
       <input
         ref={fileInput}
         type="file"
-        accept="image/*,application/pdf,text/*"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          if (files.length) void addFiles(files);
+        }}
+      />
+      <input
+        ref={anyInput}
+        type="file"
         multiple
         className="hidden"
         onChange={(e) => {

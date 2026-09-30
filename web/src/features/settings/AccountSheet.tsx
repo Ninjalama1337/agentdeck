@@ -141,8 +141,7 @@ export function AccountSheet({ open, onClose }: { open: boolean; onClose: () => 
           type="button"
           disabled={!valid || busy}
           onClick={() => void save()}
-          className="press tap flex items-center justify-center gap-2 rounded-2xl py-2.5 text-[14px] font-semibold text-white disabled:opacity-45"
-          style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+          className="press tap flex items-center justify-center gap-2 rounded-2xl py-2.5 text-[14px] font-semibold text-white disabled:opacity-45 btn-primary"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
           Add account

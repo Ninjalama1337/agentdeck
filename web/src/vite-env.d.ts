@@ -12,5 +12,7 @@ declare const __APK_VERSION__: string;
 interface Window {
   Capacitor?: {
     isNativePlatform?: () => boolean;
+    /** Native plugins registered in the APK (LocalNotifications, Haptics, …). */
+    Plugins?: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>> | undefined>;
   };
 }

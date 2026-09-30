@@ -26,6 +26,8 @@ export interface GatewayOptions {
   manager: AgentManager;
   /** PTY terminals — input/resize arrive as WS events from the Code tab. */
   terminals: TerminalManager;
+  /** Called when a client viewed a terminal (clears its attention flag). */
+  onTerminalSeen?: (id: string) => void;
   touchDevice: (deviceId: string) => Promise<void>;
   corsOrigins: string[];
 }
@@ -75,6 +77,10 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
         return;
       }
       opts.terminals.resize(payload.id, payload.cols, payload.rows);
+    });
+    socket.on('terminal:seen', (payload) => {
+      if (typeof payload?.id !== 'string') return;
+      opts.onTerminalSeen?.(payload.id);
     });
   });
 

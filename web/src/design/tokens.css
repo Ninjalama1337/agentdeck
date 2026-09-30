@@ -32,6 +32,8 @@
   --ad-accent-blue: #4e8cff;
   --ad-accent-teal: #2dd4bf;
   --ad-agent: var(--ad-accent);
+  --ad-grad: linear-gradient(135deg, #7c5cff 0%, #4e8cff 100%);
+  --ad-grad-ok: linear-gradient(135deg, #10b981 0%, #0ea5e9 100%);
   --ad-ok: #10b981;
   --ad-warn: #f59e0b;
   --ad-danger: #f43f5e;

@@ -4,7 +4,8 @@
 
 AgentDeck läuft auf dem Rechner, auf dem deine Agents arbeiten, und stellt eine
 mobil-optimierte Oberfläche bereit: Chat-Steuerung, Modellwechsel, Datei-Browser,
-Git und Team-Runs — für **Claude Code**, **ZCode**, **Antigravity** und **Codex**.
+Git, Terminals mit Agent-Launchern, Push-Benachrichtigungen und Diktat — für
+**Claude Code**, **Codex**, **OpenCode**, **Gemini CLI**, **ZCode** und **Antigravity**.
 
 [![CI](https://github.com/Ninjalama1337/agentdeck/actions/workflows/ci.yml/badge.svg)](https://github.com/Ninjalama1337/agentdeck/actions/workflows/ci.yml)
 [![Android APK](https://github.com/Ninjalama1337/agentdeck/actions/workflows/android.yml/badge.svg)](https://github.com/Ninjalama1337/agentdeck/actions/workflows/android.yml)
@@ -35,6 +36,20 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 
 **Funktionen**
 
+- **Agent-Terminals mit einem Tipp** — Claude Code, Codex, OpenCode, Gemini CLI,
+  Aider (und lazygit/btop) direkt als echte TUI im Handy-Terminal starten:
+  *Neu*, *Weiter*, *Auswählen* oder *YOLO*. Eingabezeile mit Autokorrektur und
+  Diktat, Tastenleiste (Ctrl, Esc, ⇧Tab, Pfeile, ^C …), Schnellantworten für
+  Rechte-Abfragen (1/2/3, y/n) und Slash-Befehle je Agent, Pinch-Zoom.
+- **Benachrichtigungen** — „Claude ist fertig“, „Run fehlgeschlagen“,
+  „Terminal wartet auf dich“ (Bell, OSC 9/777 oder Stille nach Arbeit):
+  In-App-Inbox, Web Push bei geschlossener App (HTTPS/Tunnel), lokale
+  Notifications in der APK. Tippen springt direkt in Session oder Terminal.
+- **Diktat überall** — Chat, Terminal-Eingabe und Commit-Message; live über die
+  Geräteerkennung oder per Whisper auf dem Server (OpenAI, Groq, whisper.cpp).
+- **Git-Tab** — geänderte Dateien mit farbigem Diff, einzelne Dateien auswählen
+  oder verwerfen, KI-Commit-Message aus dem Diff, Commit & Push, Pull/Fetch,
+  Branches wechseln/anlegen, Historie mit Commit-Diffs, GitHub-Clone.
 - **Chat-Steuerung aller Agents** — Turns senden, Live-Streaming der Antwort
   (Text, Tool-Nutzung, Token-/Kosten-Verbrauch), Unterbrechen per Tap.
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit

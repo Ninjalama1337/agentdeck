@@ -228,8 +228,7 @@ export function NewSessionSheet({
             type="button"
             disabled={!agentId || busy}
             onClick={() => void create()}
-            className="press tap flex items-center justify-center gap-2 rounded-2xl text-[15px] font-semibold text-white disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)' }}
+            className="press tap flex items-center justify-center gap-2 rounded-2xl text-[15px] font-semibold text-white disabled:opacity-40 btn-primary"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
             Start session

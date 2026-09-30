@@ -7,18 +7,42 @@ import { z } from 'zod';
 import { httpError, notFound } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
+import { listPresets, resolveLaunch } from '../term/presets.js';
+import type { TerminalBroadcasts } from '../term/manager.js';
 
 const CreateSchema = z.object({
   projectId: z.string().min(1),
   cols: z.number().int().min(10).max(500).optional(),
   rows: z.number().int().min(4).max(300).optional(),
+  presetId: z.string().max(40).optional(),
+  variantId: z.string().max(40).optional(),
+  command: z.string().max(1000).optional(),
+  title: z.string().max(80).optional(),
 });
 
-export function terminalBroadcasts(deps: AppDeps) {
+const ATTENTION_TEXT = {
+  bell: 'is waiting for you',
+  notify: 'sent a notification',
+  idle: 'went quiet — probably done or waiting for input',
+} as const;
+
+export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
   return {
     onData: (id: string, data: string) => deps.broadcast('terminal:data', { id, data }),
     onExit: (id: string, code: number) => deps.broadcast('terminal:exit', { id, code }),
     onList: () => deps.broadcast('terminal:list', { terminals: deps.terminals.list() }),
+    onAttention: (info, reason, text) => {
+      deps.broadcast('terminal:attention', { id: info.id, reason, ...(text ? { text } : {}) });
+      const project = deps.store.getProject(info.projectId);
+      const title = info.title ?? 'Terminal';
+      deps.notifications.notify({
+        kind: 'terminal-attention',
+        title: `${title} · ${project?.name ?? 'terminal'}`,
+        body: text ?? `${title} ${ATTENTION_TEXT[reason]}`,
+        projectId: info.projectId,
+        terminalId: info.id,
+      });
+    },
   };
 }
 
@@ -26,6 +50,11 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
   fastify.get('/terminals', async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query ?? {});
     return deps.terminals.list(query.projectId);
+  });
+
+  fastify.get('/terminals/presets', async (req) => {
+    const query = z.object({ refresh: z.string().optional() }).parse(req.query ?? {});
+    return listPresets(query.refresh === '1');
   });
 
   fastify.get('/terminals/:id', async (req) => {
@@ -38,12 +67,25 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
   fastify.post('/terminals', async (req, reply) => {
     const body = CreateSchema.parse(req.body);
     const project = getProjectOr404(deps, body.projectId);
+    let launch: ReturnType<typeof resolveLaunch>;
+    try {
+      launch = resolveLaunch(body.presetId, body.variantId, body.command);
+    } catch (err) {
+      throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
+    }
     const info = deps.terminals.spawn(
       project.path,
       project.id,
       body.cols ?? 80,
       body.rows ?? 24,
       terminalBroadcasts(deps),
+      {
+        title: body.title?.trim() || launch.title,
+        presetId: launch.presetId,
+        ...(launch.variantId ? { variantId: launch.variantId } : {}),
+        idleNotify: launch.agent,
+        ...(launch.command ? { command: launch.command } : {}),
+      },
     );
     reply.code(201).send({ terminal: info });
   });
