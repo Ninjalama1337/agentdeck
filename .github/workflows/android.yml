@@ -1,0 +1,220 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'mobile/**'
+
+permissions:
+  contents: read
+
+jobs:
+  apk-debug:
+    name: Debug-APK
+    runs-on: ubuntu-latest
+    # Auf Tags erstellt der Job die GitHub Release -> Schreibrecht noetig.
+    permissions:
+      contents: write
+    env:
+      # Wenn beide Secrets gesetzt sind, published der letzte Schritt die APK
+      # automatisch an den eigenen Server (siehe Kommentar am Publish-Schritt).
+      AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
+      AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Node 22 einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # VERSION: Tag v1.2.3 -> "1.2.3", sonst CI-Nummer "0.1.<run_number>".
+      # CHANNEL: "release" auf Tags, sonst "ci". VITE_AGENTDECK_APK_VERSION
+      # landet im Web-Build (define __APK_VERSION__) und treibt dort den
+      # APK-Self-Update-Banner: die App kennt damit ihre eigene Version.
+      - name: Version und Channel ermitteln
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            CHANNEL="release"
+          else
+            VERSION="0.1.${GITHUB_RUN_NUMBER}"
+            CHANNEL="ci"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "VITE_AGENTDECK_APK_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Baue AgentDeck $VERSION (Channel: $CHANNEL)"
+
+      # Lockfile kann (noch) nicht existieren -> npm ci, sonst npm install.
+      - name: Abhaengigkeiten installieren
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Shared-Paket bauen
+        run: npm run build -w packages/shared
+
+      - name: Web-App bauen
+        run: npm run build -w web
+
+      - name: JDK 21 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # ubuntu-latest bringt das Android SDK bereits mit (ANDROID_HOME gesetzt).
+      - name: Android SDK pruefen
+        run: |
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          yes | "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      # Reihenfolge wichtig: mobile/dist muss existieren, BEVOR `cap add android`
+      # laeuft (webDir-Pruefung). `npm run sync` synchronisiert danach nochmal
+      # sauber (Assets + native Konfiguration). Beide Schritte erben
+      # VITE_AGENTDECK_APK_VERSION aus dem Versionsschritt oben.
+      - name: Web-Build nach mobile/ kopieren
+        working-directory: mobile
+        run: |
+          npm run build:web
+          npm run copy:web
+
+      - name: Android-Projekt generieren (wird nicht committed)
+        working-directory: mobile
+        run: npx cap add android
+
+      - name: Cap-Sync
+        working-directory: mobile
+        run: npm run sync
+
+      - name: Debug-APK bauen
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: APK als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDeck-debug-APK
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Nur bei v*-Tags: zusaetzlich die Release-Variante bauen (unsigniert,
+      # Keystore gehoert bewusst nicht ins Repo) und beide APKs als GitHub
+      # Release mit generierten Release-Notes veroeffentlichen.
+      - name: Release-APK bauen (nur Tags, unsigned)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: GitHub Release erstellen (nur Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mobile/android/app/build/outputs/apk/debug/app-debug.apk
+            mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          generate_release_notes: true
+
+      # Optional: gebaute APK direkt an den eigenen AgentDeck-Server pushen,
+      # damit sie unter /api/apk/latest liegt (Pairing-Seite + Update-Banner).
+      # Benoetigt zwei Repo-Secrets (Settings > Secrets and variables > Actions):
+      #   AGENTDECK_URL          – Basis-URL des Servers, z. B. https://agentdeck.example.com
+      #   AGENTDECK_BRIDGE_TOKEN – Inhalt von <dataDir>/bridge-token
+      #                            (Standard: ~/.local/share/agentdeck/bridge-token)
+      # Fehlen sie, ist AGENTDECK_URL leer und der Schritt wird uebersprungen.
+      - name: Optional — APK an AgentDeck-Server publishen
+        if: env.AGENTDECK_URL != ''
+        run: |
+          curl -sf --max-time 300 -X POST "$AGENTDECK_URL/api/apk/upload" \
+            -H "x-bridge-token: $AGENTDECK_BRIDGE_TOKEN" \
+            -F "apk=@mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
+            -F "version=$VERSION" \
+            -F "channel=$CHANNEL"
+          echo "Debug-APK $VERSION (Channel: $CHANNEL) an den Server uebertragen."
+
+  # Nur bei v*-Tags: Release-Variante. Ohne Keystore im Repo bleibt die APK
+  # UNSIGNIERT (app-release-unsigned.apk) — vor der Verteilung selbst signieren
+  # (apksigner/jarsigner). Fuer den Eigengebrauch reicht die Debug-APK oben.
+  apk-release:
+    name: Release-APK (unsigned)
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      # Wenn beide Secrets gesetzt sind, published der letzte Schritt die APK
+      # automatisch an den eigenen Server (siehe Kommentar im Debug-Job).
+      AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
+      AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Node 22 einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Version und Channel ermitteln (Tag-Build)
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CHANNEL=release" >> "$GITHUB_ENV"
+          echo "VITE_AGENTDECK_APK_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Abhaengigkeiten installieren
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: JDK 21 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK pruefen
+        run: echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+
+      - name: Web-Build nach mobile/ kopieren
+        working-directory: mobile
+        run: |
+          npm run build:web
+          npm run copy:web
+
+      - name: Android-Projekt generieren (wird nicht committed)
+        working-directory: mobile
+        run: npx cap add android
+
+      - name: Cap-Sync
+        working-directory: mobile
+        run: npm run sync
+
+      - name: Release-APK bauen (unsigned)
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: APK als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDeck-release-APK-unsigned
+          path: mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+
+      - name: Optional — APK an AgentDeck-Server publishen
+        if: env.AGENTDECK_URL != ''
+        run: |
+          curl -sf --max-time 300 -X POST "$AGENTDECK_URL/api/apk/upload" \
+            -H "x-bridge-token: $AGENTDECK_BRIDGE_TOKEN" \
+            -F "apk=@mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk" \
+            -F "version=$VERSION" \
+            -F "channel=$CHANNEL"
+          echo "Release-APK $VERSION an den Server uebertragen."

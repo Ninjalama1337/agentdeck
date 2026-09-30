@@ -1,0 +1,44 @@
+{
+  "name": "@agentdeck/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentDeck backend: Fastify API, socket.io gateway, agent adapters, MCP bridge.",
+  "bin": {
+    "agentdeck-mcp": "dist/mcp/bridge.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && chmod +x dist/mcp/bridge.js",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@agentdeck/shared": "*",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/multipart": "^9.0.1",
+    "@fastify/static": "^8.0.3",
+    "execa": "^9.5.1",
+    "fastify": "^5.1.0",
+    "jose": "^6.0.8",
+    "nanoid": "^5.0.8",
+    "node-pty": "^1.1.0",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.8.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/qrcode-terminal": "^0.12.2",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

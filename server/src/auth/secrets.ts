@@ -1,0 +1,85 @@
+import crypto from 'node:crypto';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import { ensureDir } from '../util/paths.js';
+
+function randomHex(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString('hex');
+}
+
+/**
+ * Loads `name` from dataDir or creates it with fresh random hex content.
+ * Files are written with 0600 permissions (jwt-secret, bridge-token).
+ */
+export async function loadOrCreateSecret(dataDir: string, name: string): Promise<string> {
+  await ensureDir(dataDir);
+  const file = path.join(dataDir, name);
+  try {
+    const existing = (await fsp.readFile(file, 'utf8')).trim();
+    if (existing.length >= 32) return existing;
+  } catch {
+    // fall through to creation
+  }
+  const secret = randomHex(32);
+  const handle = await fsp.open(file, 'w', 0o600);
+  try {
+    await handle.writeFile(secret, 'utf8');
+  } finally {
+    await handle.close();
+  }
+  await fsp.chmod(file, 0o600).catch(() => undefined);
+  return secret;
+}
+
+/** Reads the bridge token written at startup (used by bridge-authenticated routes). */
+export async function readBridgeToken(dataDir: string): Promise<string | undefined> {
+  try {
+    const token = (await fsp.readFile(path.join(dataDir, 'bridge-token'), 'utf8')).trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 6-digit pairing code stored at dataDir/pairing-code.txt. */
+export class PairingCodeManager {
+  private readonly file: string;
+
+  constructor(dataDir: string) {
+    this.file = path.join(dataDir, 'pairing-code.txt');
+  }
+
+  static generate(): string {
+    // Uniform 6-digit code, zero-padded (000000-999999).
+    return crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+  }
+
+  async read(): Promise<string | undefined> {
+    try {
+      const code = (await fsp.readFile(this.file, 'utf8')).trim();
+      return /^\d{6}$/.test(code) ? code : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Returns the stored code or creates a fresh one (first startup). */
+  async readOrCreate(): Promise<string> {
+    const existing = await this.read();
+    if (existing) return existing;
+    return this.rotate();
+  }
+
+  async rotate(): Promise<string> {
+    const code = PairingCodeManager.generate();
+    await ensureDir(path.dirname(this.file));
+    const handle = await fsp.open(this.file, 'w', 0o600);
+    try {
+      await handle.writeFile(code + '\n', 'utf8');
+    } finally {
+      await handle.close();
+    }
+    await fsp.chmod(this.file, 0o600).catch(() => undefined);
+    return code;
+  }
+}

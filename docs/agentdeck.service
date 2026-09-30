@@ -1,0 +1,35 @@
+# AgentDeck — systemd user service
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/agentdeck.service ~/.config/systemd/user/agentdeck.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agentdeck
+#
+# WICHTIG: ExecStart unten auf deinen Checkout-Pfad anpassen.
+# Logs: journalctl --user -u agentdeck -f
+
+[Unit]
+Description=AgentDeck server (remote control deck for coding agents)
+Documentation=https://github.com/Ninjalama1337/agentdeck
+After=network-online.target
+
+[Service]
+Type=simple
+# Anpassen: absoluter Pfad zu server/dist/index.js in deinem Checkout.
+ExecStart=%h/.zcode/workspace/default/agentdeck/server/dist/index.js
+Environment=AGENTDECK_PORT=8787
+Environment=NODE_ENV=production
+# Optional: Log-Level und Bind-Adresse ueberschreiben (env > config.json)
+# Environment=AGENTDECK_LOG_LEVEL=debug
+# Environment=AGENTDECK_HOST=127.0.0.1
+
+Restart=on-failure
+RestartSec=3
+
+# Server braucht keine Privilegien; TempDir haelt Restarts sauber.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

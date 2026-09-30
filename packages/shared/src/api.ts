@@ -1,0 +1,424 @@
+/**
+ * REST DTOs and domain models — shared between server and web app.
+ */
+import type { AgentId, PermissionMode } from './agents.js';
+
+// ---------------------------------------------------------------------------
+// Domain models
+// ---------------------------------------------------------------------------
+
+export type SessionStatus = 'idle' | 'queued' | 'running' | 'error' | 'stopped';
+
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** API-relative URL (served by the backend, authed via signed token query param). */
+  url: string;
+  kind: 'image' | 'file';
+}
+
+export interface MessageUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system' | 'error';
+  agentId?: AgentId;
+  model?: string;
+  text: string;
+  /** Model reasoning ("thinking"), kept strictly separate from the answer. */
+  thinking?: string;
+  attachments: Attachment[];
+  ts: number;
+  usage?: MessageUsage;
+  /** Where the turn came from. */
+  source?: 'app' | 'mcp' | 'team' | 'routine';
+}
+
+export interface ProjectGitInfo {
+  remote?: string;
+  branch?: string;
+  /** Number of dirty files. */
+  dirty?: number;
+  ahead?: number;
+  behind?: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  /** Absolute path on the remote machine (sandboxed to projectsRoot). */
+  path: string;
+  createdAt: number;
+  updatedAt: number;
+  git?: ProjectGitInfo;
+}
+
+export interface Session {
+  id: string;
+  projectId: string;
+  agentId: AgentId;
+  title: string;
+  status: SessionStatus;
+  model?: string;
+  thinkingEffort?: string;
+  permissionMode: PermissionMode;
+  createdAt: number;
+  updatedAt: number;
+  /** External conversation id for resume (e.g. Claude Code session id). */
+  externalSessionId?: string;
+  /** Agent account profile whose env overrides the adapter defaults. */
+  accountId?: string;
+  lastError?: string;
+}
+
+export type TeamStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
+
+export interface TeamStep {
+  id: string;
+  agentId: AgentId;
+  prompt: string;
+  /** Session created for this step (chat view is available per step). */
+  sessionId?: string;
+  status: TeamStepStatus;
+  resultSummary?: string;
+  error?: string;
+}
+
+export type TeamRunStatus = 'pending' | 'running' | 'done' | 'error' | 'stopped';
+
+export interface TeamRun {
+  id: string;
+  projectId: string;
+  title: string;
+  mode: 'sequence' | 'parallel';
+  status: TeamRunStatus;
+  steps: TeamStep[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// REST request / response DTOs
+// ---------------------------------------------------------------------------
+
+export interface PairRequest {
+  code: string;
+  deviceName: string;
+}
+
+export interface PairResponse {
+  token: string;
+  server: { name: string; version: string; host: string };
+}
+
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  kind: 'file' | 'dir';
+  size?: number;
+  ext?: string;
+  modifiedAt?: number;
+}
+
+export interface SendTurnRequest {
+  text: string;
+  attachmentIds?: string[];
+  /** Override the session model for this turn. */
+  model?: string;
+  /** Override the thinking/reasoning effort for this turn. */
+  thinkingEffort?: string;
+}
+
+export interface SendTurnResponse {
+  userMessage: ChatMessage;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  initGit?: boolean;
+}
+
+export interface CloneProjectRequest {
+  url: string;
+  name?: string;
+}
+
+export interface CreateSessionRequest {
+  projectId: string;
+  agentId: AgentId;
+  model?: string;
+  thinkingEffort?: string;
+  permissionMode?: PermissionMode;
+  /** Account profile for this thread (env overrides; see Account). */
+  accountId?: string;
+  title?: string;
+}
+
+export interface TeamRunRequest {
+  projectId: string;
+  title?: string;
+  mode: 'sequence' | 'parallel';
+  /** Sequential mode: append previous step results to each prompt. */
+  passContext?: boolean;
+  steps: { agentId: AgentId; prompt: string }[];
+}
+
+export interface GithubRepo {
+  nameWithOwner: string;
+  url: string;
+  description?: string | null;
+  updatedAt?: string;
+  isPrivate?: boolean;
+  language?: string | null;
+}
+
+export interface GitCommitRequest {
+  message: string;
+  /** Stage all changes before committing (default true). */
+  all?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// In-app file editing
+// ---------------------------------------------------------------------------
+
+export interface FileContentResponse {
+  path: string;
+  content: string;
+  size: number;
+  mime: string;
+  /** true when content exceeded the read cap and was truncated. */
+  truncated: boolean;
+}
+
+export interface SaveFileRequest {
+  path: string;
+  content: string;
+}
+
+export interface SaveFileResponse {
+  path: string;
+  size: number;
+  savedAt: number;
+}
+
+export interface CreateEntryRequest {
+  path: string;
+  kind: 'file' | 'dir';
+}
+
+export type FileChangeEventKind = 'change' | 'create' | 'delete';
+
+export interface FileChangeEvent {
+  type: FileChangeEventKind;
+  /** Path relative to the project root. */
+  path: string;
+}
+
+// ---------------------------------------------------------------------------
+// Agent administration (update / install / login) — live jobs
+// ---------------------------------------------------------------------------
+
+export type AdminJobKind = 'update' | 'install' | 'login';
+
+export type AdminJobStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped';
+
+/** What the server can do for an agent (derived from static recipes). */
+export interface AdminCapability {
+  kind: AdminJobKind;
+  /** Recipe headline shown in the UI ("claude update", "npm i -g …"). */
+  label: string;
+  /** Why the action is unavailable (login inside IDE etc.). */
+  unavailableReason?: string;
+}
+
+export interface AdminJob {
+  id: string;
+  agentId: AgentId;
+  kind: AdminJobKind;
+  status: AdminJobStatus;
+  /** Rolling console output (capped server-side). */
+  output: string[];
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number;
+  error?: string;
+}
+
+export interface StartAdminJobRequest {
+  agentId: AgentId;
+  kind: AdminJobKind;
+}
+
+// ---------------------------------------------------------------------------
+// Remote access (tunnel) + APK distribution
+// ---------------------------------------------------------------------------
+
+export type TunnelProvider = 'cloudflared' | 'off';
+export type TunnelStatus = 'disabled' | 'starting' | 'connected' | 'error';
+
+export interface TunnelInfo {
+  provider: TunnelProvider;
+  status: TunnelStatus;
+  /** Public HTTPS URL (e.g. https://xxx.trycloudflare.com) once connected. */
+  publicUrl?: string;
+  error?: string;
+}
+
+export interface ApkInfo {
+  available: boolean;
+  version?: string;
+  size?: number;
+  sha256?: string;
+  builtAt?: number;
+  channel?: string;
+  fileName?: string;
+}
+
+export interface ApkUploadResponse extends ApkInfo {
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// Thinking effort + subscription usage
+// ---------------------------------------------------------------------------
+
+/** Reasoning effort per session/turn. Adapters map to CLI flags; agents list
+ *  their supported levels in AgentInfo.efforts. */
+export type ThinkingEffort = 'default' | 'adaptive' | 'low' | 'medium' | 'high';
+
+export interface UsageWindow {
+  pct?: number;
+  resetsAt?: string;
+  requests?: number;
+  sessions?: number;
+}
+
+export interface AgentUsage {
+  agentId: AgentId;
+  available: boolean;
+  reason?: string;
+  plan?: string;
+  session?: UsageWindow;
+  week?: UsageWindow;
+  last24h?: UsageWindow;
+  last7d?: UsageWindow;
+  /** Unparsed CLI output for transparency / debugging. */
+  raw?: string;
+  fetchedAt: number;
+}
+
+export interface ApiError {
+  error: { message: string; code?: string };
+}
+
+// ---------------------------------------------------------------------------
+// Terminals ("Code" tab) — real PTY shells on the server
+// ---------------------------------------------------------------------------
+
+export interface TerminalInfo {
+  id: string;
+  projectId: string;
+  createdAt: number;
+  cols: number;
+  rows: number;
+  /** Process exit code once the shell ended (event only, not in list). */
+  exitCode?: number;
+}
+
+export interface CreateTerminalRequest {
+  projectId: string;
+  cols?: number;
+  rows?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Routines — agents on recurring jobs
+// ---------------------------------------------------------------------------
+
+export type RoutineSchedule =
+  | { kind: 'interval'; minutes: number }
+  | { kind: 'daily'; time: string }
+  | { kind: 'weekly'; weekday: number; time: string };
+
+export interface Routine {
+  id: string;
+  name: string;
+  projectId: string;
+  agentId: AgentId;
+  prompt: string;
+  model?: string;
+  thinkingEffort?: string;
+  accountId?: string;
+  schedule: RoutineSchedule;
+  enabled: boolean;
+  /** Session used for every fire (created on the first run). */
+  sessionId?: string;
+  lastRunAt?: number;
+  lastStatus?: 'ok' | 'error' | 'skipped';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateRoutineRequest {
+  name: string;
+  projectId: string;
+  agentId: AgentId;
+  prompt: string;
+  model?: string;
+  thinkingEffort?: string;
+  accountId?: string;
+  schedule: RoutineSchedule;
+  enabled?: boolean;
+}
+
+export type UpdateRoutineRequest = Partial<CreateRoutineRequest>;
+
+// ---------------------------------------------------------------------------
+// Accounts — env profiles per agent (multi-account usage switching)
+// ---------------------------------------------------------------------------
+
+export interface Account {
+  id: string;
+  name: string;
+  agentId: AgentId;
+  /** Env vars merged into every run of sessions using this account. */
+  env: Record<string, string>;
+  createdAt: number;
+}
+
+export interface CreateAccountRequest {
+  name: string;
+  agentId: AgentId;
+  env: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Enhance — rewrite a rough draft into a crisp prompt (transient, no session)
+// ---------------------------------------------------------------------------
+
+export interface EnhanceRequest {
+  projectId: string;
+  agentId: AgentId;
+  text: string;
+  model?: string;
+  thinkingEffort?: string;
+}
+
+export interface EnhanceResponse {
+  text: string;
+}

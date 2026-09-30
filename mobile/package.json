@@ -1,0 +1,23 @@
+{
+  "name": "agentdeck-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Capacitor-7-Wrapper: verpackt web/dist als AgentDeck-Android-APK.",
+  "scripts": {
+    "build:web": "cd .. && npm run build -w packages/shared && npm run build -w web",
+    "copy:web": "node scripts/sync-web.mjs",
+    "copy": "npm run copy:web && cap copy android",
+    "sync": "npm run build:web && npm run copy:web && cap sync android",
+    "android": "cap open android",
+    "dist:android": "npm run copy:web && cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.6.0",
+    "@capacitor/cli": "^7.6.0",
+    "@capacitor/core": "^7.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

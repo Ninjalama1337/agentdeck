@@ -1,0 +1,54 @@
+/**
+ * AgentDeck design tokens — raw CSS custom properties.
+ * Referenced by hand-written CSS in global.css and set dynamically
+ * (e.g. --ad-agent is overridden per agent accent).
+ *
+ * "Quiet workspace" palette: neutral near-black surfaces, solid cards instead
+ * of translucent glass, one restrained accent. Calm enough to read long
+ * agent threads in, distinct enough to feel deliberate.
+ */
+:root {
+  color-scheme: dark;
+
+  /* surfaces — solid, layered neutrals (dark rises toward the viewer) */
+  --ad-bg: #0b0c10;
+  --ad-bg-raise: #101218;
+  --ad-surface: #15171e;
+  --ad-surface-2: #1a1d25;
+  --ad-surface-3: #21242e;
+  /* legacy glass slots (still referenced app-wide) — now near-solid */
+  --ad-glass: rgba(22, 24, 31, 0.94);
+  --ad-glass-strong: rgba(16, 18, 23, 0.97);
+  --ad-line: rgba(255, 255, 255, 0.09);
+  --ad-line-strong: rgba(255, 255, 255, 0.16);
+  --ad-code-bg: #0d0f14;
+
+  /* text */
+  --ad-ink: #e9ecf3;
+  --ad-dim: #99a1b3;
+
+  /* accents (agent accents mirror AGENT_ACCENTS from @agentdeck/shared) */
+  --ad-accent: #7c5cff;
+  --ad-accent-blue: #4e8cff;
+  --ad-accent-teal: #2dd4bf;
+  --ad-agent: var(--ad-accent);
+  --ad-ok: #10b981;
+  --ad-warn: #f59e0b;
+  --ad-danger: #f43f5e;
+
+  /* shape + depth */
+  --ad-radius: 18px;
+  --ad-radius-sm: 13px;
+  --ad-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --ad-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.28);
+  --ad-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* safe areas */
+  --ad-safe-top: env(safe-area-inset-top, 0px);
+  --ad-safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Bottom tab bar height — must match TabBar.tsx (h-16). The bar is mounted
+     on every route, so sheets/bottom UI reserve this via
+     calc(var(--ad-tabbar-h) + var(--ad-safe-bottom)). */
+  --ad-tabbar-h: 64px;
+}

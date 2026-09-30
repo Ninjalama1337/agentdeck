@@ -1,0 +1,327 @@
+# AgentDeck — Binding Contract (v0.1)
+
+This document plus `packages/shared/src/**` is the **source of truth** for every
+workspace in this monorepo. If code and contract disagree, the contract wins.
+
+AgentDeck is a self-hosted control deck that lets you drive coding agents on
+your machine from a mobile app (PWA / Android APK):
+
+- **Agents:** Claude Code (fully headless), ZCode (IDE mode + MCP bridge),
+  Antigravity (headless probe + IDE fallback), Codex (headless).
+- **Backend:** Fastify + socket.io on the machine where the agents run.
+- **Frontend:** React PWA, mobile-first, served by the backend.
+- **Cross-agent work:** Team runs (sequential/parallel pipelines) and an MCP
+  bridge so any agent can delegate to any other agent as a subagent.
+
+## Workspaces
+
+| Path | Owner | Contents |
+|---|---|---|
+| `packages/shared` | root (fixed) | TS types for API + WS protocol |
+| `server` | backend agent | Fastify server, adapters, MCP bridge |
+| `web` | frontend agent | React PWA |
+| `mobile` | mobile agent | Capacitor wrapper + APK build |
+| `docs`, `scripts`, `.github`, `README.md` | mobile agent | docs, CI |
+
+## Environment facts (verified on this machine, 2026-09-30)
+
+- Node v22.23.2, npm 10.9.8, npm registry reachable.
+- `claude` — Claude Code **2.1.285** at
+  `~/.nvm/versions/node/v22.23.2/bin/claude`. Full headless support:
+  `claude -p --input-format stream-json --output-format stream-json --verbose`,
+  `--model <id>`, `--permission-mode <default|acceptEdits|plan|bypassPermissions>`,
+  `--resume <sessionId>`, `--dangerously-skip-permissions`, cwd defines project.
+  Thinking effort: `--effort <low|medium|high>` (verified in 2.1.285 help).
+  Subscription usage (verified): `claude -p "/usage"` prints plan usage —
+  "Current session: N% used · resets <date>", "Current week (all models):
+  N% used · resets <date>", "Last 24h · N requests · N sessions",
+  "Last 7d · N requests · N sessions".
+  stream-json stdout lines: `{type:"system",subtype:"init",session_id,...}`,
+  `{type:"assistant",message:{content:[{type:"text"|"thinking"|"tool_use",...}]}}`,
+  `{type:"user",message:{content:[{type:"tool_result",...}]}}`,
+  `{type:"result",subtype:"success"|"error",result,usage,...}`.
+  `thinking` blocks stream as `thinking-delta` and are persisted SEPARATELY on
+  the assistant `ChatMessage.thinking` — never mixed into `text`.
+  Image input: user-turn content block `{"type":"image","source":{"type":"base64","media_type":...,"data":...}}`.
+- `zcode` — **Headless CLI available** (built from github.com/zai-org/ZCode,
+  `apps/zcode-cli` ≥ 0.16.x): `-p <prompt>` (prompt as flag value),
+  `--output-format text|json|stream-json`, `--mode build|edit|plan|yolo`,
+  `--resume <id>`, `--cwd <dir>`, `--verbose`. stdout = one JSON SessionEvent
+  per line (`{type:'session_created'|'model_streaming'|'assistant_message'|
+  'reasoning_start'|'reasoning_delta'|'reasoning_end'|'tool_call_started'|
+  'tool_call_result'|'turn_complete'|'turn_error'|…', payload}` — wire types
+  use dot-notation; reasoning_* maps to `thinking-delta`). No image input.
+  **Model + thinking effort** have no CLI flags: the adapter atomically
+  patches `defaultModelSelection {providerId, modelId, options.reasoningLevel}`
+  in `~/.zcode/v2/provider_config.json` before each run (server-wide default,
+  provider binding preserved; failure degrades to a run `notice`). Model
+  presets: GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo (+ custom);
+  efforts: default/low/medium/high → reasoningLevel.
+  Detection: `--version` prints a bare semver without Electron logs → CLI
+  (headless); if the binary is the desktop AppImage (Electron log markers) the
+  adapter falls back to IDE mode + MCP bridge participation.
+- `antigravity` — Flatpak `com.google.Antigravity` **2.17.0**, CLI wrapper at
+  `~/.local/share/flatpak/app/com.google.Antigravity/current/active/files/bin/antigravity`
+  (invoke as `flatpak run --command=antigravity com.google.Antigravity`).
+  Headless capability unverified → probe + IDE fallback (`flatpak run
+  com.google.Antigravity <path>`), MCP bridge participation.
+- `codex` — codex-cli **0.158.0** at `~/.local/bin/codex`.
+  Headless: `codex exec --json <prompt>` (JSONL events on stdout), `-C <dir>`,
+  `-m <model>`, resume: `codex exec resume <id>`.
+- `gh` — authenticated (Ninjalama1337), `git` present.
+- **Adapter rule:** every adapter must degrade gracefully. `AgentInfo.available`
+  reflects install status; `AgentInfo.capabilities.headless` reflects remote
+  chat control. Never spawn a GUI app as a side effect of probing.
+
+## Configuration
+
+Env prefix `AGENTDECK_`, optional JSON config at `~/.config/agentdeck/config.json`
+(deep-merged over defaults, env wins). Schema:
+
+```jsonc
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "dataDir": "~/.local/share/agentdeck",     // state, secrets, attachments
+  "projectsRoot": "<dataDir>/projects",      // sandbox root for ALL file access
+  "logLevel": "info",
+  "maxRunMs": 1800000,                        // hard kill for agent runs
+  "maxUploadBytes": 20971520,                 // 20 MB per attachment
+  "maxApkBytes": 209715200,                   // 200 MB per APK upload
+  "corsOrigins": ["http://localhost:5173", "capacitor://localhost", "http://localhost"],
+  "agents": {
+    "claude":      { "mode": "headless", "command": "claude" },
+    "zcode":       { "mode": "auto",    "command": "zcode" },
+    "antigravity": { "mode": "auto",    "command": "flatpak run --command=antigravity com.google.Antigravity", "ideCommand": "flatpak run com.google.Antigravity" },
+    "codex":       { "mode": "headless", "command": "codex" }
+  },
+  "tunnel": {
+    "provider": "cloudflared",              // "off" (default) | "cloudflared"
+    "mode": "quick",                        // "quick" (no account, random trycloudflare.com URL) | "token" (dashboard connector token) | "named" (fixed URL via tunnel name — scripts/setup-tunnel.sh)
+    "token": "",                            // cloudflared tunnel token (mode "token")
+    "name": "",                             // tunnel name (mode "named"; requires prior `cloudflared tunnel login` + `create`)
+    "credentialsFile": "",                  // optional override for mode "named"
+    "hostname": "",                         // fixed hostname for named/token modes (becomes publicUrl)
+    "binary": "cloudflared"                 // command override if not on PATH
+  }
+}
+```
+
+Tunnel env overrides: `AGENTDECK_TUNNEL=cloudflared|off`,
+`AGENTDECK_TUNNEL_TOKEN=<token>` (implies mode `token`),
+`AGENTDECK_TUNNEL_BINARY=<path>`.
+
+Storage layout under `dataDir`:
+`projects.json`, `devices.json`, `jwt-secret` (0600), `bridge-token` (0600),
+`pairing-code.txt`, `sessions/<id>/meta.json`, `sessions/<id>/messages.jsonl`,
+`attachments/<sessionId>/<fileId>__<safe-name>`, `apk/agentdeck-latest.apk`
++ `apk/apk.json` (metadata: version, size, sha256, builtAt, channel).
+```
+
+Adapter `mode`: `headless` (always try), `ide` (never headless),
+`auto` (headless if a cheap non-GUI probe succeeds, else ide), `off` (hidden).
+
+Storage layout under `dataDir`:
+`projects.json`, `devices.json`, `jwt-secret` (0600), `bridge-token` (0600),
+`pairing-code.txt`, `sessions/<id>/meta.json`, `sessions/<id>/messages.jsonl`,
+`attachments/<sessionId>/<fileId>__<safe-name>`.
+
+## Auth & security
+
+1. On first start the server generates a **6-digit pairing code**, prints it
+   (with QR) to the console and writes it to `dataDir/pairing-code.txt`.
+2. `POST /api/pair {code, deviceName}` → on success issues a **JWT (HS256,
+   30d)** with `deviceId`, rotates the code, registers the device. Max 5
+   failed attempts per IP / 10 min (429). Pairing is only possible while the
+   request originates from the LAN or localhost.
+3. Every `/api/*` route except `/api/health`, `/api/apk/info` and
+   `/api/apk/latest` requires `Authorization: Bearer`. socket.io handshake
+   requires `auth.token`. When a tunnel is enabled, pairing remains the only
+   way in; the two public APK routes are read-only, rate-limited and serve no
+   secrets. Pairing from tunnel requests is allowed (the 5-per-10-min limiter
+   applies; the LAN-only restriction is dropped when a tunnel is active).
+   APK uploads additionally accept `x-bridge-token` (bridge token) from
+   localhost so CI/scripts can push builds.
+4. File downloads use **signed one-time tokens** because Android download
+   managers cannot send headers:
+   `GET /api/projects/:id/files/raw?path=...&token=<base64url(payload).sig>`,
+   HMAC-SHA256 over `{projectId, path, exp}` with the JWT secret, TTL 120 s.
+5. All file paths are resolved (`realpath`) and must stay inside
+   `projectsRoot` — no traversal, no symlink escape. Uploads: images and
+   regular files ≤ `maxUploadBytes`, sanitized filenames.
+6. Agent processes run with cwd = project path, inherited env, are killed
+   (SIGINT → 3 s grace → SIGKILL) on interrupt or `maxRunMs`.
+7. `POST /api/bridge/run` is restricted to localhost callers holding the
+   bridge token from `dataDir/bridge-token` (printed at startup).
+
+## REST API (JSON; errors: `{"error":{"message":string,"code?:string}}`)
+
+| Method | Path | Body → Result |
+|---|---|---|
+| GET | `/api/health` | `{ok,name,version,agents:[{id,available}],tunnel?:{status,publicUrl?}}` (no auth) |
+| POST | `/api/pair` | `PairRequest → PairResponse` |
+| GET | `/api/tunnel` | `TunnelInfo` (authed) |
+| GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached ≥60 s). Claude: parsed from `claude -p "/usage"` (session/week pct + resets + request stats, raw kept). Codex: plan hint via `codex login status` if present. Others: `{available:false, reason}` |
+| GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
+| POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
+| GET | `/api/admin/jobs/:id` | `AdminJob` |
+| POST | `/api/admin/jobs/:id/stop` | `204` — cancels the ACTIVE job (status → `stopped`); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` |
+
+### Admin recipes (fixed, server-side — never free-form commands)
+
+| Agent | update | install | login |
+|---|---|---|---|
+| claude | `claude update` | `npm install -g @anthropic-ai/claude-code` | `claude setup-token` (official headless subscription OAuth; URL streams to the app) |
+| zcode | `scripts/update-zcode.sh` (builds from zai-org/ZCode → `~/.zcode/runtime`) | same script (clone-if-missing) | `zcode login zai` (browser on the machine / fallback URL in the console) |
+| antigravity | `flatpak update -y com.google.Antigravity` | `flatpak install -y flathub com.google.Antigravity` | opens the IDE window for Google sign-in (job finishes immediately) |
+| codex | `npm install -g @openai/codex@latest` | same | `codex login` (browser on the machine) |
+
+Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
+500-line output ring buffer; the active job can be cancelled from the app
+(status `stopped`). `AgentInfo.admin` lists the per-agent actions.
+| GET | `/api/apk/info` | `ApkInfo` (no auth) |
+| GET | `/api/apk/latest` | APK binary stream, `Content-Type: application/vnd.android.package-archive`, `Content-Disposition: attachment; filename="agentdeck-<version>.apk"` (no auth, rate-limited) |
+| POST | `/api/apk/upload` | multipart `apk` + fields `version`, `channel` → `ApkUploadResponse` (device JWT or `x-bridge-token`) |
+| GET | `/api/agents` | `AgentInfo[]` |
+| GET | `/api/devices` | `DeviceInfo[]` |
+| DELETE | `/api/devices/:id` | `204` |
+| GET | `/api/projects` | `Project[]` |
+| POST | `/api/projects` | `CreateProjectRequest → Project` |
+| POST | `/api/projects/clone` | `CloneProjectRequest → Project` (async clone; progress via `project:update`) |
+| DELETE | `/api/projects/:id` | `204` (removes from registry, never deletes files) |
+| GET | `/api/projects/:id/files` `?path=&all=` | `FileEntry[]` (`all=1` includes dotfiles) |
+| GET | `/api/projects/:id/files/raw` `?path=&token=` | file stream (inline for images/text, attachment otherwise) |
+| GET | `/api/projects/:id/files/content` `?path=` | `FileContentResponse` — UTF-8 text read, cap 1 MB (`truncated:true`), 415 NON_TEXT for binary files (null byte or NFD check) |
+| PUT | `/api/projects/:id/files/content` | `SaveFileRequest → SaveFileResponse` — atomic write (temp+rename), creates missing parent dirs, cap 1 MB, 415 NON_TEXT, 403 inside `.git/` |
+| POST | `/api/projects/:id/files/create` | `CreateEntryRequest → 204` — new empty file or dir, 409 EXISTS, same sandbox rules |
+| DELETE | `/api/projects/:id/files/entry` `?path=&recursive=0` | `204` — file always; dir only when empty (`recursive=1` for non-empty), 403 inside `.git/` |
+| POST | `/api/projects/:id/files/upload` `?dir=` (multipart `file`) | `Attachment` |
+| GET | `/api/sessions?projectId=` | `Session[]` |
+| POST | `/api/sessions` | `CreateSessionRequest → Session` (now incl. optional `thinkingEffort`) |
+| GET | `/api/sessions/:id` | `{session: Session, messages: ChatMessage[]}` |
+| DELETE | `/api/sessions/:id` | `204` |
+| POST | `/api/sessions/:id/messages` | `SendTurnRequest → SendTurnResponse` (409 if a run is active; `model`/`thinkingEffort` override the session defaults for that turn and update them) |
+| POST | `/api/sessions/:id/interrupt` | `204` |
+| POST | `/api/sessions/:id/ide` | opens/focuses the project in the agent IDE → `204` |
+| GET | `/api/models/:agentId` | `{models: ModelPreset[]}` |
+| GET | `/api/projects/:id/git/status` | `ProjectGitInfo` |
+| POST | `/api/projects/:id/git/commit` | `GitCommitRequest → ProjectGitInfo` |
+| POST | `/api/projects/:id/git/push` | `→ {ok, message}` |
+| GET | `/api/github/repos` `?limit=&q=` | `GithubRepo[]` (via `gh`) |
+| POST | `/api/team/runs` | `TeamRunRequest → TeamRun` |
+| GET | `/api/team/runs?projectId=` | `TeamRun[]` |
+| GET | `/api/team/runs/:id` | `TeamRun` |
+| POST | `/api/bridge/run` | `{agent, prompt, project?, model?, timeoutMs?} → {ok, text?, error?, sessionId}` (bridge token, localhost only) |
+
+Every mutating endpoint emits the matching WS update afterwards.
+
+## WebSocket protocol (socket.io, path `/socket.io`)
+
+Typed in `packages/shared/src/events.ts`. Server pushes `session:event`,
+`session:update`, `project:update`, `agent:update`, `team:update`,
+`files:changed {projectId, events:[{type:'change'|'create'|'delete', path}]}`,
+`notify`. Client emits `session:interrupt {sessionId}` with ack.
+
+File watcher: every registered project gets a recursive `fs.watch` on its root
+(started lazily on first access after boot, restarted on server start, dropped
+on project delete). Events are debounced 400 ms, batched per project, paths
+are project-relative, `.git/` internals are excluded. Writes through the API
+also flow into the same `files:changed` stream so phones and agents stay in
+sync in real time.
+
+Team semantics: each step becomes a real `Session` (so history is browsable).
+`sequence` + `passContext` prepends previous step results to each prompt.
+`parallel` runs all steps at once. Status flows through `team:update`.
+
+## MCP bridge (`agentdeck-mcp`)
+
+Standalone stdio binary (`server` package `bin`). Hand-rolled JSON-RPC 2.0 MCP
+server (no SDK dependency): `initialize`, `notifications/initialized`,
+`tools/list`, `tools/call`. Tools:
+
+- `agentdeck_list_agents` → available agents + capabilities
+- `agentdeck_delegate {agent, prompt, project?, model?, timeoutMs?}` → runs a
+  turn via `POST /api/bridge/run` and returns the final assistant text
+- `agentdeck_project_files {project?, path?}` → file listing
+
+This is what makes cross-agent subagents work: register `agentdeck-mcp` as an
+MCP server in Claude Code, ZCode or Antigravity and that agent can delegate
+tasks to the other agents on the same machine.
+
+## Frontend contract
+
+The web app is served by the backend at `/` (built assets from `web/dist`,
+SPA fallback for non-`/api` routes). Dev mode: Vite on :5173 with proxy for
+`/api` + `/socket.io`. All types come from `@agentdeck/shared`.
+UI language: English. Docs language: German.
+
+**APK distribution / self-update (frontend):** the pairing screen and
+settings render an "Android app" card from `GET /api/apk/info` with a direct
+download link to `GET /api/apk/latest`. APK builds inject their version via
+`VITE_AGENTDECK_APK_VERSION` (default `0.0.0-web` for browser/PWA builds);
+when running inside Capacitor native (`window.Capacitor?.isNativePlatform()`)
+and the installed version is older than `apk.info.version`, a dismissible
+update banner with a download button appears. The PWA keeps updating itself
+via the service worker (already implemented).
+
+## BridgeMind ports (v0.9.0)
+
+Features adopted from bridgemind.ai, mapped to a phone-first remote deck.
+
+### Terminals ("Code" tab)
+
+Real PTY shells on the server, one per open tab, project-scoped.
+
+- `node-pty` (server-only dep, compiles on this machine) behind
+  `server/src/term/manager.ts`.
+- REST: `POST /api/terminals {projectId, cols?, rows?}` → `TerminalInfo`;
+  `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
+- WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`.
+- WS server→clients: `terminal:data {id, data}` (UTF-8 chunk),
+  `terminal:exit {id, code}`, `terminal:list {terminals}` (create/kill).
+- Constraints: cwd = project path, `$SHELL` (fallback `/bin/bash`), max 6
+  concurrent terminals, idle timeout 15 min, all killed on server shutdown.
+  Login flows for agent accounts happen here (e.g. `claude` with a custom
+  `CLAUDE_CONFIG_DIR`).
+
+### Routines (agents on recurring jobs)
+
+- `Routine` = { id, name, projectId, agentId, prompt, model?, thinkingEffort?,
+  accountId?, schedule, enabled, sessionId?, lastRunAt?, lastStatus? }.
+- `schedule` = `{kind:'interval', minutes: 1..20160}` |
+  `{kind:'daily', time:'HH:MM'}` | `{kind:'weekly', weekday:0-6, time:'HH:MM'}`
+  (server local time).
+- One persistent session per routine (created on first fire, titled
+  `[routine] <name>`); every fire appends a `source:'routine'` user message
+  and starts a normal turn. A fire is skipped while that session still has an
+  active run.
+- Scheduler tick: 30 s; `nextRunAt` is derived, never stored.
+- REST: `GET/POST /api/routines`, `PATCH /api/routines/:id`,
+  `DELETE /api/routines/:id`, `POST /api/routines/:id/run` (fire now).
+- WS: `routine:update {routine}` on every change/fire.
+
+### Multi-accounts (usage limit becomes a choice)
+
+- `Account` = { id, name, agentId, env: Record<string,string> }. Env keys must
+  match `^[A-Z_][A-Z0-9_]*$` (≤ 24 entries); values are strings (≤ 500 chars).
+  Typical keys: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`. No secrets are stored by
+  the server — logins happen in a Terminal.
+- `Session.accountId?` selects the account; `AgentManager` merges
+  `account.env` AFTER `plan.env` (account wins) into the spawn env.
+- `CreateSessionRequest.accountId?` validated against existing accounts of
+  that agent.
+- REST: `GET/POST /api/accounts`, `DELETE /api/accounts/:id`.
+
+### Enhance prompt
+
+- `POST /api/enhance {projectId, agentId, text, model?, thinkingEffort?}` →
+  `{text}`. Runs the agent headless with a fixed meta-prompt (rewrite the
+  draft into a crisp brief), transient (no session/messages persisted),
+  60 s cap. Uses the same adapters, never appears in history.
+
+### Dashboard (Home tab)
+
+Pure frontend aggregation over existing REST/WS streams: agent roster,
+"Running now" (sessions with status running/queued across projects), routines
+with next fire, projects. Tabs become Threads · Home · Code · Files · Settings
+(GitHub moves into the Files header + project menu).

@@ -1,0 +1,25 @@
+{
+  "name": "agentdeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote control deck for coding agents (Claude Code, ZCode, Antigravity, Codex) from your phone.",
+  "workspaces": [
+    "packages/*",
+    "server",
+    "web",
+    "mobile"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w server && npm run build -w web",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "start": "node server/dist/index.js",
+    "test": "npm run test -w server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "smoke": "npm run smoke -w server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, Typecheck & Tests (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Node 22 einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Lockfile kann (noch) nicht existieren -> npm ci, sonst npm install.
+      - name: Abhaengigkeiten installieren
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Shared-Paket bauen
+        run: npm run build -w packages/shared
+
+      - name: Typecheck (alle Workspaces, --if-present)
+        # Kein continue-on-error: Typechecks muessen gruens sein.
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Tests (Server)
+        run: npm test

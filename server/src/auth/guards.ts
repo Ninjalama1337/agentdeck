@@ -1,0 +1,98 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { isLocalAddress } from '../util/net.js';
+import { verifyDeviceToken } from './jwt.js';
+import { httpError } from '../http/errors.js';
+
+export interface RequestDevice {
+  deviceId: string;
+  name: string;
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    device?: RequestDevice;
+  }
+}
+
+export function bearerToken(req: FastifyRequest): string | undefined {
+  const header = req.headers.authorization;
+  if (!header) return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match?.[1]?.trim() || undefined;
+}
+
+/**
+ * Fastify onRequest hook enforcing device-JWT auth on every /api route except
+ * the explicitly public ones (health, pair, apk info/latest), the bridge scope
+ * (own guard), apk upload (own guard: device JWT or bridge token) and
+ * signed-token file downloads (the HMAC token in the query IS the credential;
+ * the route verifies signature, expiry and path binding).
+ */
+export function makeDeviceAuthHook(secretHex: string, touchDevice: (deviceId: string) => Promise<void>) {
+  return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const path = req.url.split('?')[0] ?? '';
+    if (!path.startsWith('/api/')) return;
+    if (path === '/api/health' || path === '/api/pair') return;
+    if (path === '/api/apk/info' || path === '/api/apk/latest' || path === '/api/apk/upload') return;
+    if (path.startsWith('/api/bridge/')) return;
+    if (
+      /^\/api\/projects\/[^/]+\/files\/raw$/.test(path) &&
+      new URL(req.url, 'http://localhost').searchParams.has('token')
+    ) {
+      return;
+    }
+    const token = bearerToken(req);
+    if (!token) {
+      throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
+    }
+    const payload = await verifyDeviceToken(secretHex, token);
+    if (!payload) {
+      throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
+    }
+    req.device = payload;
+    void touchDevice(payload.deviceId);
+  };
+}
+
+/**
+ * Guard for /api/bridge/*: requires the shared bridge token AND a loopback
+ * caller (the MCP bridge binary runs on the same machine).
+ */
+export function makeBridgeGuard(bridgeToken: string) {
+  return async (req: FastifyRequest): Promise<void> => {
+    if (!isLocalAddress(req.socket.remoteAddress)) {
+      throw httpError(403, 'FORBIDDEN', 'Bridge is restricted to localhost');
+    }
+    const token = bearerToken(req);
+    if (!token || token !== bridgeToken) {
+      throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
+    }
+  };
+}
+
+/**
+ * Guard for POST /api/apk/upload: a device JWT (any peer, this is how the app
+ * pushes builds) OR the bridge token — the latter only from localhost peers
+ * so CI/scripts can push builds without pairing a device.
+ */
+export function makeApkUploadGuard(secretHex: string, bridgeToken: string, touchDevice: (deviceId: string) => Promise<void>) {
+  return async (req: FastifyRequest): Promise<void> => {
+    const token = bearerToken(req);
+    if (token) {
+      const payload = await verifyDeviceToken(secretHex, token);
+      if (payload) {
+        req.device = payload;
+        void touchDevice(payload.deviceId);
+        return;
+      }
+    }
+    const bridge = req.headers['x-bridge-token'];
+    if (typeof bridge === 'string' && bridge.length > 0 && bridge === bridgeToken) {
+      if (!isLocalAddress(req.socket.remoteAddress)) {
+        throw httpError(403, 'FORBIDDEN', 'Bridge-token APK upload is restricted to localhost.');
+      }
+      return;
+    }
+    throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
+  };
+}

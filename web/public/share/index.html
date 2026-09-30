@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B0E14" />
+  <title>AgentDeck — Receiving share…</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0b0e14;
+      color: #e7ecf5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      text-align: center;
+      padding: 28px 32px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.055);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+    .dot {
+      width: 44px;
+      height: 44px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #7c5cff, #4e8cff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 20px;
+    }
+    p { margin: 4px 0; }
+    .dim { color: #98a2b8; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="dot">A</div>
+    <p>Receiving shared image…</p>
+    <p class="dim">Opening AgentDeck</p>
+  </div>
+  <script>
+    // Normally the service worker intercepts the POST to /share before this
+    // page even loads (see src/sw.ts). This page is the graceful fallback
+    // landing: hand over to the app, which picks the queued image up from the
+    // Cache API (or shows its composer once a session is open).
+    setTimeout(function () {
+      location.replace('/?shared=1');
+    }, 350);
+  </script>
+</body>
+</html>
