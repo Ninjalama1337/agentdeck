@@ -46,6 +46,12 @@ export ANDROID_SDK_ROOT="$SDK_DIR"
 info "Android SDK: $SDK_DIR"
 
 # --- 3) Java grob pruefen (Capacitor 7 will JDK 21) ------------------------------
+# Bekannte JDK-21-Orte bevorzugen, falls JAVA_HOME nicht gesetzt ist.
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  for cand in "$HOME/.local/opt/jdk-21" "$HOME/.jdks/jdk-21" /usr/lib/jvm/java-21-openjdk /usr/lib/jvm/temurin-21-jdk; do
+    if [[ -x "$cand/bin/java" ]]; then export JAVA_HOME="$cand" PATH="$cand/bin:$PATH"; break; fi
+  done
+fi
 if ! command -v java >/dev/null 2>&1; then
   die "java nicht gefunden. JDK 21 installieren (z. B. Temurin: https://adoptium.net)."
 fi
@@ -54,17 +60,20 @@ if (( JAVA_MAJOR < 21 )); then
   printf '%s\n' "${YELLOW}WARN:${RESET} java ${JAVA_MAJOR} gefunden — Capacitor 7 erwartet JDK 21."
 fi
 
-# --- 4) Web bauen und nach mobile/dist synchronisieren ---------------------------
-info "Baue Web-App und synchronisiere (npm run sync -w mobile) …"
-npm run sync -w mobile
+# --- 4) Web bauen und nach mobile/dist kopieren ---------------------------------
+# mobile/dist muss existieren, BEVOR `cap add android` laeuft (webDir-Pruefung).
+info "Baue Web-App (npm run build:web / copy:web -w mobile) …"
+npm run build:web -w mobile
+npm run copy:web -w mobile
 
-# --- 5) Android-Projekt (einmalig generieren) -------------------------------------
+# --- 5) Android-Projekt (einmalig generieren), Rechte, Sync -----------------------
 if [[ ! -d mobile/android ]]; then
   info "mobile/android fehlt — generiere Plattform (einmalig) …"
   ( cd mobile && npx cap add android )
 fi
 # Mikrofon (Diktat), Benachrichtigungen, Vibration — idempotent.
 ( cd mobile && npm run patch:android )
+( cd mobile && npx cap sync android )
 
 # --- 6) APK bauen -------------------------------------------------------------------
 info "Baue Debug-APK (gradlew assembleDebug) …"
