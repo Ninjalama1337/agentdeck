@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronsDown, RotateCcw, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -32,6 +32,48 @@ export const TERM_THEME = {
   brightCyan: '#67e8f9',
   brightWhite: '#ffffff',
 };
+
+/**
+ * Mobile IMEs keep committed text in xterm's hidden textarea. A later
+ * composition/keyCode 229 event can make xterm resend that stale buffer.
+ * Clear only after the key/composition has settled; keep the buffer for
+ * xterm's screen-reader mode.
+ */
+function installMobileImeBufferFix(term: Terminal): () => void {
+  const textarea = term.textarea;
+  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+  if (!textarea || !touchDevice) return () => undefined;
+
+  let composing = false;
+  let clearTimer: number | null = null;
+  const scheduleClear = () => {
+    if (clearTimer !== null) window.clearTimeout(clearTimer);
+    clearTimer = window.setTimeout(() => {
+      clearTimer = null;
+      if (composing || term.options.screenReaderMode) return;
+      textarea.value = '';
+    }, 0);
+  };
+  const onCompositionStart = () => {
+    composing = true;
+  };
+  const onCompositionEnd = () => {
+    composing = false;
+    scheduleClear();
+  };
+  const onKeyUp = () => scheduleClear();
+
+  textarea.addEventListener('compositionstart', onCompositionStart);
+  textarea.addEventListener('compositionend', onCompositionEnd);
+  textarea.addEventListener('keyup', onKeyUp);
+  return () => {
+    textarea.removeEventListener('compositionstart', onCompositionStart);
+    textarea.removeEventListener('compositionend', onCompositionEnd);
+    textarea.removeEventListener('keyup', onKeyUp);
+    if (clearTimer !== null) window.clearTimeout(clearTimer);
+  };
+}
+
 
 /** Sticky modifier shared by key bar and direct typing ("Ctrl" then a key). */
 export interface ModifierRef {
@@ -83,6 +125,13 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    const disposeImeFix = installMobileImeBufferFix(term);
+    const viewport = host.querySelector<HTMLElement>('.xterm-viewport');
+    if (viewport) {
+      viewport.style.touchAction = 'pan-y';
+      viewport.style.setProperty('-webkit-overflow-scrolling', 'touch');
+      viewport.style.overscrollBehaviorY = 'contain';
+    }
     termRef.current = term;
     fitRef.current = fit;
     const ta = term.textarea;
@@ -140,14 +189,20 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     });
 
     let resizeTimer: number | null = null;
+    let lastCols = term.cols;
+    let lastRows = term.rows;
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
+        if (term.cols !== lastCols || term.rows !== lastRows) {
+          lastCols = term.cols;
+          lastRows = term.rows;
+          if (resizeTimer) window.clearTimeout(resizeTimer);
+          resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows), 80);
+        }
       } catch {
         return; // host not measurable yet
       }
-      if (resizeTimer) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows), 80);
     });
     observer.observe(host);
 
@@ -156,6 +211,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       if (resizeTimer) window.clearTimeout(resizeTimer);
       input.dispose();
       unsubscribe();
+      disposeImeFix();
       term.dispose();
       termRef.current = null;
     };
@@ -226,6 +282,35 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           pinch.current = null;
         }}
       />
+      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-xl border border-line bg-surface-2/90 p-1 shadow-lg backdrop-blur-sm">
+        <button
+          type="button"
+          aria-label="Scroll terminal up one page"
+          title="Scroll up"
+          onClick={() => termRef.current?.scrollPages(-1)}
+          className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
+        >
+          <ChevronUp size={16} />
+        </button>
+        <button
+          type="button"
+          aria-label="Scroll terminal down one page"
+          title="Scroll down"
+          onClick={() => termRef.current?.scrollPages(1)}
+          className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
+        >
+          <ChevronDown size={16} />
+        </button>
+        <button
+          type="button"
+          aria-label="Scroll terminal to latest output"
+          title="Latest output"
+          onClick={() => termRef.current?.scrollToBottom()}
+          className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
+        >
+          <ChevronsDown size={15} />
+        </button>
+      </div>
       {ended !== null && (
         <div className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-2xl border border-line bg-surface-2/95 p-2 pl-3.5 shadow-lg">
           <span className="min-w-0 flex-1 text-[12.5px] text-dim">

@@ -15,6 +15,7 @@
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "start": "node server/dist/index.js",
+    "restart": "scripts/restart.sh",
     "test": "npm run test -w server",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "smoke": "npm run smoke -w server"

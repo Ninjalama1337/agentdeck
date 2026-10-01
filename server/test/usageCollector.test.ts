@@ -28,9 +28,9 @@ describe('parseClaudeUsage', () => {
     expect(parsed.available).toBe(true);
     expect(parsed.plan).toBe('Claude subscription');
     expect(parsed.session?.pct).toBe(1);
-    expect(parsed.session?.resetsAt).toBe('Sep 30, 1:19pm');
+    expect(parsed.session?.resetsAt).toBe('Sep 30, 13:19');
     expect(parsed.week?.pct).toBe(24);
-    expect(parsed.week?.resetsAt).toBe('Oct 5, 8:59pm');
+    expect(parsed.week?.resetsAt).toBe('Oct 5, 20:59');
     expect(parsed.last24h).toEqual({ requests: 349, sessions: 6 });
     expect(parsed.last7d).toEqual({ requests: 503, sessions: 9 });
   });
@@ -113,5 +113,45 @@ describe('UsageCollector', () => {
     const claude = result.find((r) => r.agentId === 'claude');
     expect(claude?.available).toBe(false);
     expect(claude?.reason).toContain('failed');
+  });
+
+  it('collects zcode when available and supports plan choices', async () => {
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'zcode',
+      zcodeCollector: async () => ({
+        plan: 'GLM Coding Lite (Abo)',
+        activePlanId: 'subscription',
+        plans: [
+          { id: 'subscription', label: 'GLM Coding Lite (Abo)', active: true },
+          { id: 'free', label: 'Free Tokens (Start-Plan)', active: false },
+        ],
+      }),
+    });
+    const result = await c.collect();
+    const zcode = result.find((r) => r.agentId === 'zcode');
+    expect(zcode?.available).toBe(true);
+    expect(zcode?.plan).toBe('GLM Coding Lite (Abo)');
+    expect(zcode?.activePlanId).toBe('subscription');
+    expect(zcode?.plans).toHaveLength(2);
+  });
+
+  it('clears cache on clearCache()', async () => {
+    let callCount = 0;
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'zcode',
+      zcodeCollector: async () => {
+        callCount++;
+        return { plan: `Plan ${callCount}` };
+      },
+    });
+    const r1 = await c.collect();
+    expect(r1.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 1');
+    const r2 = await c.collect();
+    expect(r2.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 1'); // cached
+    c.clearCache();
+    const r3 = await c.collect();
+    expect(r3.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 2'); // fresh
   });
 });

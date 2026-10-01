@@ -150,7 +150,7 @@ export class RoutineScheduler {
         text:
           trigger === 'manual'
             ? routine.prompt
-            : `${routine.prompt}\n\n_(automated routine run — ${new Date().toLocaleString()})_`,
+            : `${routine.prompt}\n\n_(automated routine run — ${new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' })})_`,
         attachments: [],
         ts: Date.now(),
         source: 'routine',

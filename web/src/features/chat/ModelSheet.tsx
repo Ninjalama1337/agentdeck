@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Sparkles, Wand2 } from 'lucide-react';
+import { Check, Sparkles, Wand2, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, ModelPreset, Session } from '@agentdeck/shared';
 import { api } from '../../api/client';
@@ -20,8 +20,12 @@ export function ModelSheet({
 }) {
   const setSessionModel = useAppStore((s) => s.setSessionModel);
   const setSessionEffort = useAppStore((s) => s.setSessionEffort);
+  const usage = useAppStore((s) => s.usage);
+  const refreshUsage = useAppStore((s) => s.refreshUsage);
+  const toast = useAppStore((s) => s.toast);
   const [presets, setPresets] = useState<ModelPreset[]>(agent?.models ?? []);
   const [custom, setCustom] = useState('');
+  const [switchingPlan, setSwitchingPlan] = useState<string | null>(null);
 
   useEffect(() => {
     setPresets(agent?.models ?? []);
@@ -39,6 +43,7 @@ export function ModelSheet({
   const locked = session.status === 'running' || session.status === 'queued';
   const efforts = agent?.efforts ?? [];
   const effort = session.thinkingEffort ?? 'default';
+  const zcodeUsage = agent?.id === 'zcode' ? usage?.find((u) => u.agentId === 'zcode') : undefined;
 
   const pick = (model: string | undefined) => {
     if (locked) return;
@@ -53,6 +58,56 @@ export function ModelSheet({
 
   return (
     <>
+      {agent?.id === 'zcode' && zcodeUsage?.plans && zcodeUsage.plans.length > 0 && (
+        <div className="mb-3 rounded-2xl border border-line bg-white/[0.03] p-3">
+          <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-dim">
+            <span className="flex items-center gap-1.5 uppercase tracking-wider text-ink">
+              <Zap size={12} className="text-accent" />
+              ZCode Modus
+            </span>
+            <span className="text-[11px] text-dim">{zcodeUsage.activePlanId === 'subscription' ? 'Abo aktiv' : 'Free Tokens aktiv'}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {zcodeUsage.plans.map((p) => {
+              const active = p.active;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={locked || switchingPlan !== null}
+                  onClick={async () => {
+                    if (active) return;
+                    setSwitchingPlan(p.id);
+                    try {
+                      await api.switchPlan('zcode', p.id);
+                      toast('ok', `ZCode Modus gewechselt: ${p.label}`);
+                      await refreshUsage();
+                    } catch (e) {
+                      toast('error', (e as Error).message);
+                    } finally {
+                      setSwitchingPlan(null);
+                    }
+                  }}
+                  className={clsx(
+                    'press tap flex flex-col items-start rounded-xl border p-2 text-left transition-all',
+                    active
+                      ? 'border-accent/60 bg-accent/20 text-ink shadow-[0_0_12px_rgba(124,92,255,0.2)]'
+                      : 'border-line/70 bg-white/[0.02] text-dim hover:text-ink',
+                    locked && 'opacity-50',
+                  )}
+                >
+                  <div className="flex w-full items-center justify-between">
+                    <span className="text-[12.5px] font-semibold">{p.id === 'subscription' ? 'Abo-Modell' : 'Free Tokens'}</span>
+                    {active && <Check size={12} className="text-accent" />}
+                  </div>
+                  <span className="mt-0.5 truncate text-[11px] opacity-75">{p.id === 'subscription' ? 'Unbegrenzt' : '100M Tokens'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-1.5">
         <ModelRow label="Agent default" description="Adapter's built-in model" selected={current === undefined} onClick={() => pick(undefined)} />
         {presets.map((preset) => (

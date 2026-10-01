@@ -161,7 +161,7 @@ Storage layout under `dataDir`:
 | GET | `/api/health` | `{ok,name,version,agents:[{id,available}],tunnel?:{status,publicUrl?}}` (no auth) |
 | POST | `/api/pair` | `PairRequest → PairResponse` |
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
-| GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached ≥60 s). Claude: parsed from `claude -p "/usage"` (session/week pct + resets + request stats, raw kept). Codex: plan hint via `codex login status` if present. Others: `{available:false, reason}` |
+| GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached ≥60 s). Claude: `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: `account/rateLimits/read` via local app-server. Reset times are shown in 24-hour format. |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |

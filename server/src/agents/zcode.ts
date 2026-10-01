@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset } from '@agentdeck/shared';
+import type { AgentCapabilities, AgentEvent, AgentId, AgentPlanOption, ModelPreset, UsageWindow } from '@agentdeck/shared';
 import { execa } from 'execa';
 import type { ResolvedAgentConfig } from '../config.js';
 import { splitCommand } from '../util/cmd.js';
@@ -240,6 +240,372 @@ export function applyZcodeModelSelection(
   const tmp = path.join(dir, `.agentdeck-prov-${process.pid}-${Date.now()}.json`);
   fs.writeFileSync(tmp, JSON.stringify(current, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, filePath);
+}
+
+function writeAtomicJson(filePath: string, data: unknown): void {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.agentdeck-${path.basename(filePath)}-${process.pid}-${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  fs.renameSync(tmp, filePath);
+}
+
+/**
+ * Switch ZCode plan between subscription (individual-coding-plan) and
+ * free tokens (start-plan). Atomically updates provider_config.json,
+ * setting.json and config.json.
+ */
+export function switchZcodePlan(
+  target: 'subscription' | 'free',
+  v2Dir = path.join(os.homedir(), '.zcode/v2'),
+): void {
+  const provPath = path.join(v2Dir, 'provider_config.json');
+  const settPath = path.join(v2Dir, 'setting.json');
+  const cfgPath = path.join(v2Dir, 'config.json');
+
+  if (!fs.existsSync(provPath)) {
+    throw new Error(`ZCode provider config not found at ${provPath}`);
+  }
+
+  // 1. provider_config.json
+  const prov = JSON.parse(fs.readFileSync(provPath, 'utf8')) as Record<string, unknown>;
+  const prevSel = (prov.defaultModelSelection ?? {}) as Record<string, unknown>;
+  if (target === 'free') {
+    prov.defaultModelSelection = {
+      ...prevSel,
+      providerId: 'account:zai-start-plan',
+      // Start-plan only supports Flash models
+      modelId: 'GLM-5.3-Flash',
+    };
+  } else {
+    prov.defaultModelSelection = {
+      ...prevSel,
+      providerId: 'account:zai-individual-coding-plan',
+      modelId: prevSel.modelId ?? 'GLM-5.3',
+    };
+  }
+  writeAtomicJson(provPath, prov);
+
+  // 2. setting.json (if exists)
+  if (fs.existsSync(settPath)) {
+    try {
+      const sett = JSON.parse(fs.readFileSync(settPath, 'utf8')) as Record<string, unknown>;
+      const keys = (sett.modelProviderFamilySelectedKeys ?? {}) as Record<string, string>;
+      const selections = (sett.providerFamilyConnectionSelections ?? {}) as Record<string, unknown>;
+
+      if (target === 'free') {
+        keys.zai = 'coding-plan:builtin:zai-start-plan';
+        selections.zai = { kind: 'start-plan' };
+      } else {
+        keys.zai = 'coding-plan:builtin:zai-coding-plan';
+        selections.zai = { kind: 'individual-coding-plan' };
+      }
+      sett.modelProviderFamilySelectedKeys = keys;
+      sett.providerFamilyConnectionSelections = selections;
+      sett.providerFamilyDomain = 'zai';
+      writeAtomicJson(settPath, sett);
+    } catch {
+      /* non-fatal setting sync */
+    }
+  }
+
+  // 3. config.json (if exists)
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+      const providers = (cfg.provider ?? {}) as Record<string, Record<string, unknown>>;
+      if (providers['builtin:zai-coding-plan']) {
+        providers['builtin:zai-coding-plan'].enabled = target === 'subscription';
+      }
+      if (providers['builtin:zai-start-plan']) {
+        providers['builtin:zai-start-plan'].enabled = target === 'free';
+      }
+      writeAtomicJson(cfgPath, cfg);
+    } catch {
+      /* non-fatal config sync */
+    }
+  }
+}
+
+export interface ZcodePlanDetails {
+  activePlanId: 'subscription' | 'free';
+  activePlanLabel: string;
+  plans: AgentPlanOption[];
+  session?: UsageWindow;
+  week?: UsageWindow;
+  raw?: string;
+}
+
+/** Formats timestamp ms into human-readable relative/absolute reset text. */
+export function formatResetTime(ms?: number | null, now = Date.now()): string | undefined {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return undefined;
+  const diff = ms - now;
+  const date = new Date(ms);
+  const timeStr = date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  if (diff <= 0) return 'abgelaufen';
+
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (diff < 24 * 3600 * 1000) {
+    if (hours === 0) return `${timeStr} (in ${Math.max(1, mins)}m)`;
+    const remMins = mins % 60;
+    return remMins > 0 ? `${timeStr} (in ${hours}h ${remMins}m)` : `${timeStr} (in ${hours}h)`;
+  }
+  if (diff < 48 * 3600 * 1000) {
+    return `Morgen ${timeStr} (in ${hours}h)`;
+  }
+  const dateStr = date.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+  return `${dateStr}, ${timeStr} (in ${days}d)`;
+}
+
+/**
+ * Reads ZCode plans (both subscription and free start-plan tokens),
+ * querying the respective APIs when keys exist and falling back to cached disk info.
+ */
+export async function getZcodePlanInfo(
+  v2Dir = path.join(os.homedir(), '.zcode/v2'),
+  dbFile = path.join(os.homedir(), '.zcode/cli/db/db.sqlite'),
+): Promise<ZcodePlanDetails> {
+  const provPath = path.join(v2Dir, 'provider_config.json');
+  const cfgPath = path.join(v2Dir, 'config.json');
+
+  let activePlanId: 'subscription' | 'free' = 'subscription';
+  if (fs.existsSync(provPath)) {
+    try {
+      const prov = JSON.parse(fs.readFileSync(provPath, 'utf8')) as Record<string, unknown>;
+      const sel = (prov.defaultModelSelection ?? {}) as Record<string, unknown>;
+      const providerId = String(sel.providerId ?? '');
+      if (providerId.includes('start-plan')) activePlanId = 'free';
+    } catch {
+      /* default to subscription */
+    }
+  }
+
+  let subApiKey: string | undefined;
+  let startApiKey: string | undefined;
+
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+      const providers = (cfg.provider ?? {}) as Record<string, Record<string, unknown>>;
+      const subOpts = (providers['builtin:zai-coding-plan']?.options ?? {}) as Record<string, unknown>;
+      const startOpts = (providers['builtin:zai-start-plan']?.options ?? {}) as Record<string, unknown>;
+      if (typeof subOpts.apiKey === 'string' && subOpts.apiKey) subApiKey = subOpts.apiKey;
+      if (typeof startOpts.apiKey === 'string' && startOpts.apiKey) startApiKey = startOpts.apiKey;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  let subLabel = 'GLM Coding Lite (Abo)';
+  let subStatus = 'VALID';
+  let subDetail = 'Monatliches Abo (GLM Coding Plan)';
+  let subRenewDate: string | undefined;
+  let subSessionWindow: UsageWindow | undefined;
+  let subWeekWindow: UsageWindow | undefined;
+
+  if (subApiKey) {
+    await Promise.allSettled([
+      (async () => {
+        try {
+          const res = await fetch('https://api.z.ai/api/biz/subscription/list', {
+            headers: { Authorization: subApiKey },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (res.ok) {
+            const json = (await res.json()) as { code?: number; data?: Array<Record<string, unknown>> };
+            if (json.code === 200 && Array.isArray(json.data) && json.data[0]) {
+              const item = json.data[0];
+              if (typeof item.productName === 'string') subLabel = `${item.productName} (Abo)`;
+              if (typeof item.status === 'string') subStatus = item.status;
+              if (typeof item.nextRenewTime === 'string') subRenewDate = item.nextRenewTime;
+              const cycle = item.billingCycle === 'monthly' ? 'Monatlich' : String(item.billingCycle ?? 'Abo');
+              subDetail = `${cycle} · Status: ${subStatus}${subRenewDate ? ` · Verlängerung: ${subRenewDate}` : ''}`;
+            }
+          }
+        } catch {
+          /* network timeout or offline */
+        }
+      })(),
+      (async () => {
+        try {
+          const res = await fetch('https://api.z.ai/api/monitor/usage/quota/limit', {
+            headers: { authorization: subApiKey },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (res.ok) {
+            const json = (await res.json()) as {
+              code?: number;
+              data?: {
+                limits?: Array<{
+                  type?: string;
+                  unit?: number;
+                  number?: number;
+                  percentage?: number;
+                  nextResetTime?: number;
+                  currentValue?: number;
+                  usage?: number;
+                  remaining?: number;
+                }>;
+              };
+            };
+            if (json.code === 200 && Array.isArray(json.data?.limits)) {
+              const limits = json.data.limits;
+              const lim5h = limits.find((l) => (l.unit === 3 && l.number === 5) || l.number === 5);
+              const limWk = limits.find((l) => (l.unit === 6 && l.number === 1) || l.unit === 6 || (l.number === 1 && l.unit !== 3));
+              if (lim5h && typeof lim5h.percentage === 'number') {
+                subSessionWindow = {
+                  pct: lim5h.percentage,
+                  resetsAt: formatResetTime(lim5h.nextResetTime),
+                };
+              }
+              if (limWk && typeof limWk.percentage === 'number') {
+                subWeekWindow = {
+                  pct: limWk.percentage,
+                  resetsAt: formatResetTime(limWk.nextResetTime),
+                };
+              }
+            }
+          }
+        } catch {
+          /* network timeout or offline */
+        }
+      })(),
+    ]);
+  }
+
+  let freeLabel = 'ZCode Free Tokens (Start-Plan)';
+  let freeStatus = 'active';
+  let freeDetail = 'Free Usage Tokens';
+  let freeTokens: number | undefined;
+  let freeEndsAt: string | undefined;
+  let freeStartsAtSec: number | undefined;
+  let freeEndsAtSec: number | undefined;
+  let freeWeekWindow: UsageWindow | undefined;
+
+  if (startApiKey) {
+    try {
+      const res = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/current?app_version=0.16.9', {
+        headers: { Authorization: `Bearer ${startApiKey}` },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          code?: number;
+          data?: { plans?: Array<{ name?: string; status?: string; starts_at?: number; ends_at?: number; entitlements?: Array<{ grant_units?: number }> }> };
+        };
+        if (json.code === 0 && json.data?.plans?.[0]) {
+          const p = json.data.plans[0];
+          if (p.name) freeLabel = `${p.name} (Free Tokens)`;
+          if (p.status) freeStatus = p.status;
+          const units = p.entitlements?.[0]?.grant_units;
+          if (typeof units === 'number') freeTokens = units;
+          if (typeof p.starts_at === 'number') freeStartsAtSec = p.starts_at;
+          if (typeof p.ends_at === 'number' && p.ends_at > 0) {
+            freeEndsAtSec = p.ends_at;
+            freeEndsAt = new Date(p.ends_at * 1000).toLocaleString('de-DE', {
+              dateStyle: 'short',
+              timeStyle: 'short',
+              hourCycle: 'h23',
+            });
+          }
+          const mTokens = freeTokens ? `${(freeTokens / 1_000_000).toFixed(0)}M Tokens` : 'Free Tokens';
+          freeDetail = `${mTokens} · Status: ${freeStatus}${freeEndsAt ? ` · Gültig bis: ${freeEndsAt}` : ''}`;
+        }
+      }
+    } catch {
+      /* network timeout or offline */
+    }
+  }
+
+  // Calculate free token usage if we have start date & sqlite turn_usage
+  if (freeTokens && freeTokens > 0) {
+    let usedTokens = 0;
+    try {
+      if (fs.existsSync(dbFile)) {
+        const { DatabaseSync } = await import('node:sqlite');
+        const db = new DatabaseSync(dbFile, { readOnly: true });
+        try {
+          const sinceMs = (freeStartsAtSec ?? 0) * 1000;
+          const row = db.prepare('SELECT SUM(input_tokens + output_tokens) as total FROM turn_usage WHERE started_at >= ?').get(sinceMs) as { total?: number } | undefined;
+          usedTokens = Number(row?.total ?? 0);
+        } finally {
+          db.close();
+        }
+      }
+    } catch {
+      /* sqlite read error non-fatal */
+    }
+    const usedPct = Math.min(100, Math.round((usedTokens / freeTokens) * 100));
+    freeWeekWindow = {
+      pct: usedPct,
+      resetsAt: formatResetTime(freeEndsAtSec ? freeEndsAtSec * 1000 : undefined),
+    };
+  }
+
+  const plans: AgentPlanOption[] = [
+    {
+      id: 'subscription',
+      label: subLabel,
+      active: activePlanId === 'subscription',
+      status: subStatus,
+      detail: subDetail,
+      resetsAt: subRenewDate,
+      session: subSessionWindow,
+      week: subWeekWindow,
+      models: ['GLM-5.3', 'GLM-5.3-Flash'],
+    },
+    {
+      id: 'free',
+      label: freeLabel,
+      active: activePlanId === 'free',
+      status: freeStatus,
+      detail: freeDetail,
+      tokens: freeTokens,
+      resetsAt: freeEndsAt,
+      session: undefined,
+      week: freeWeekWindow,
+      models: ['GLM-5.3-Flash'],
+    },
+  ];
+
+  const activePlan = plans.find((p) => p.id === activePlanId) ?? plans[0];
+
+  return {
+    activePlanId,
+    activePlanLabel: activePlan.label,
+    plans,
+    session: activePlan.session,
+    week: activePlan.week,
+    raw: `Active Plan: ${activePlanId} (${activePlan.label})\nSubscription: ${subDetail} [5h: ${subSessionWindow?.pct ?? '?'}% reset ${subSessionWindow?.resetsAt ?? '?'}, week: ${subWeekWindow?.pct ?? '?'}% reset ${subWeekWindow?.resetsAt ?? '?'}]\nFree Tokens: ${freeDetail} [quota used: ${freeWeekWindow?.pct ?? '?'}% reset ${freeWeekWindow?.resetsAt ?? '?'}]`,
+  };
+}
+
+/** Reads recent activity from ZCode's SQLite turn_usage table if available. */
+export async function readZcodeSqliteStats(
+  dbFile = path.join(os.homedir(), '.zcode/cli/db/db.sqlite'),
+  now = Date.now(),
+): Promise<{ last24h?: UsageWindow; last7d?: UsageWindow }> {
+  try {
+    if (!fs.existsSync(dbFile)) return {};
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(dbFile, { readOnly: true });
+    try {
+      const dayAgo = now - 24 * 3600 * 1000;
+      const weekAgo = now - 7 * 24 * 3600 * 1000;
+      const q24 = db.prepare('SELECT COUNT(*) as cnt, COUNT(DISTINCT session_id) as sess FROM turn_usage WHERE started_at >= ?').get(dayAgo) as { cnt?: number; sess?: number } | undefined;
+      const q7 = db.prepare('SELECT COUNT(*) as cnt, COUNT(DISTINCT session_id) as sess FROM turn_usage WHERE started_at >= ?').get(weekAgo) as { cnt?: number; sess?: number } | undefined;
+      return {
+        ...(q24 && q24.cnt !== undefined ? { last24h: { requests: Number(q24.cnt), sessions: Number(q24.sess ?? 0) } } : {}),
+        ...(q7 && q7.cnt !== undefined ? { last7d: { requests: Number(q7.cnt), sessions: Number(q7.sess ?? 0) } } : {}),
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return {};
+  }
 }
 
 const LOGIN_HINT =

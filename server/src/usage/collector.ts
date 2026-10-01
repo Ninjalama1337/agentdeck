@@ -1,22 +1,27 @@
 /**
  * Subscription usage collector for GET /api/usage → AgentUsage[].
  *
- * - claude: spawns `claude -p "/usage"` (cwd = home dir, 30s cap) and parses
- *   the plan-usage output (tolerant of locale dates / trailing detail).
- * - codex: `codex login status` (15s cap) — login status only, no numbers.
- * - zcode / antigravity: IDE agents, no usage API.
+ * - claude: `claude -p "/usage"` for session/week limits and request stats.
+ * - antigravity: `agy -p /usage` for subscription limits and model quotas.
+ * - codex: local app-server `account/rateLimits/read`, with login fallback.
+ * - zcode: plan data and local usage statistics.
  *
  * Results are cached for 60s with in-flight dedupe (concurrent calls share
  * one run). The spawn function is injectable for tests.
  */
+import { spawn as spawnProcess } from 'node:child_process';
 import os from 'node:os';
+import { createInterface } from 'node:readline';
 import { execa } from 'execa';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import type { AgentService } from '../agents/registry.js';
+import { getZcodePlanInfo, readZcodeSqliteStats } from '../agents/zcode.js';
 
 export const USAGE_TTL_MS = 60_000;
 const CLAUDE_TIMEOUT_MS = 30_000;
+const AGY_TIMEOUT_MS = 20_000;
 const CODEX_TIMEOUT_MS = 15_000;
+const CODEX_APP_SERVER_TIMEOUT_MS = 12_000;
 const RAW_CAP = 4000;
 
 /** Exec result shape used by the collector (satisfied by execa with reject:false). */
@@ -45,7 +50,11 @@ export interface CollectorOptions {
   spawn?: UsageSpawn;
   /** Availability override (tests); defaults to AgentService detection. */
   isAvailable?: (agentId: AgentId) => boolean;
+  /** Codex app-server RPC override; omitted in custom-spawn collectors. */
+  readCodexRateLimits?: () => Promise<unknown>;
   ttlMs?: number;
+  /** Optional ZCode collector override (tests). */
+  zcodeCollector?: () => Promise<Partial<AgentUsage>>;
 }
 
 interface CacheEntry {
@@ -73,6 +82,24 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
+function formatResetIso(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+
 // ---------------------------------------------------------------------------
 // Claude `/usage` parsing (English + locale dates, tolerant of trailing text)
 // ---------------------------------------------------------------------------
@@ -94,7 +121,15 @@ function pctWindow(line: RegExpExecArray | null): UsageWindow | undefined {
   if (!line) return undefined;
   const win: UsageWindow = { pct: Number(line[1]) };
   const resets = RESETS.exec(line[0]);
-  if (resets) win.resetsAt = resets[1].trim();
+  if (resets) {
+    win.resetsAt = resets[1].trim().replace(
+      /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])m\b/gi,
+      (_match, hour: string, minute: string | undefined, period: string) => {
+        const hour24 = (Number(hour) % 12) + (period.toLowerCase() === 'p' ? 12 : 0);
+        return `${String(hour24).padStart(2, '0')}${minute === undefined ? '' : `:${minute}`}`;
+      },
+    );
+  }
   return win;
 }
 
@@ -125,18 +160,272 @@ export function parseClaudeUsage(stdout: string): ClaudeUsageParse {
 }
 
 // ---------------------------------------------------------------------------
+// Antigravity (AGY) `/usage` parsing
+// ---------------------------------------------------------------------------
+
+export interface AntigravityUsageParse {
+  available: boolean;
+  reason?: string;
+  plan?: string;
+  session?: UsageWindow;
+  week?: UsageWindow;
+  modelsQuota?: { name: string; sessionLimit?: UsageWindow; weeklyLimit?: UsageWindow }[];
+}
+
+export function parseAntigravityUsage(stdout: string): AntigravityUsageParse {
+  if (!/quota|limit remaining/i.test(stdout)) {
+    return { available: false, reason: 'Could not read Antigravity quota (unexpected CLI output)' };
+  }
+
+  // Gemini models: Five Hour Limit Remaining 68% 2026-09-30T21:45:18Z
+  const gemini5h = /Gemini Models\s+Five Hour Limit Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+  const geminiWeek = /Gemini Models\s+Weekly Limit Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+
+  // Fallback pattern if prefix is absent
+  const any5h = gemini5h ?? /(?:Five\s+Hour|5\s*Hour|Session)\s+Limit\s+Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+  const anyWeek = geminiWeek ?? /(?:Weekly|Week)\s+Limit\s+Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+
+  const sessionPct = any5h ? Math.max(0, Math.min(100, 100 - Number(any5h[1]))) : undefined;
+  const weekPct = anyWeek ? Math.max(0, Math.min(100, 100 - Number(anyWeek[1]))) : undefined;
+
+  const session: UsageWindow | undefined =
+    sessionPct !== undefined
+      ? { pct: sessionPct, ...(any5h?.[2] ? { resetsAt: formatResetIso(any5h[2]) } : {}) }
+      : undefined;
+
+  const week: UsageWindow | undefined =
+    weekPct !== undefined
+      ? { pct: weekPct, ...(anyWeek?.[2] ? { resetsAt: formatResetIso(anyWeek[2]) } : {}) }
+      : undefined;
+
+  const modelsQuota: { name: string; sessionLimit?: UsageWindow; weeklyLimit?: UsageWindow }[] = [];
+  if (gemini5h || geminiWeek) {
+    modelsQuota.push({
+      name: 'Gemini Models',
+      ...(session ? { sessionLimit: session } : {}),
+      ...(week ? { weeklyLimit: week } : {}),
+    });
+  }
+
+  const claude5h = /Claude and GPT models\s+Five Hour Limit Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+  const claudeWeek = /Claude and GPT models\s+Weekly Limit Remaining\s+(\d+)%\s*(\S*)/i.exec(stdout);
+  if (claude5h || claudeWeek) {
+    const cSessionPct = claude5h ? Math.max(0, Math.min(100, 100 - Number(claude5h[1]))) : undefined;
+    const cWeekPct = claudeWeek ? Math.max(0, Math.min(100, 100 - Number(claudeWeek[1]))) : undefined;
+    modelsQuota.push({
+      name: 'Claude & GPT Models',
+      ...(cSessionPct !== undefined
+        ? { sessionLimit: { pct: cSessionPct, ...(claude5h?.[2] ? { resetsAt: formatResetIso(claude5h[2]) } : {}) } }
+        : {}),
+      ...(cWeekPct !== undefined
+        ? { weeklyLimit: { pct: cWeekPct, ...(claudeWeek?.[2] ? { resetsAt: formatResetIso(claudeWeek[2]) } : {}) } }
+        : {}),
+    });
+  }
+
+  return {
+    available: true,
+    plan: 'Gemini & Claude/GPT Quota',
+    ...(session ? { session } : {}),
+    ...(week ? { week } : {}),
+    ...(modelsQuota.length > 0 ? { modelsQuota } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Codex app-server rate limits
+// ---------------------------------------------------------------------------
+
+export interface CodexUsageParse {
+  available: boolean;
+  reason?: string;
+  plan?: string;
+  rateLimits?: { name: string; window: UsageWindow }[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function codexWindowName(durationMins: number | undefined, slot: string): string {
+  if (durationMins === 300) return '5-hour limit';
+  if (durationMins === 10_080) return 'Weekly limit';
+  if (durationMins !== undefined && durationMins % 1440 === 0) {
+    return `${durationMins / 1440}-day limit`;
+  }
+  if (durationMins !== undefined && durationMins % 60 === 0) {
+    return `${durationMins / 60}-hour limit`;
+  }
+  return durationMins !== undefined ? `${durationMins}-minute limit` : `${slot} limit`;
+}
+
+function codexResetIso(value: unknown): string | undefined {
+  let timestamp: number;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    timestamp = value > 1_000_000_000_000 ? value : value * 1000;
+  } else if (typeof value === 'string') {
+    if (/^\d{10,13}$/.test(value)) {
+      const numeric = Number(value);
+      timestamp = value.length === 13 ? numeric : numeric * 1000;
+    } else {
+      timestamp = Date.parse(value);
+    }
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(timestamp)) return undefined;
+  try {
+    return new Date(timestamp).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Parses `account/rateLimits/read`, omitting account identifiers and credits. */
+export function parseCodexRateLimits(payload: unknown): CodexUsageParse {
+  const root = asRecord(payload);
+  const byLimitId = asRecord(root?.rateLimitsByLimitId);
+  const aggregateLimits = asRecord(root?.rateLimits);
+  const codexLimits = asRecord(byLimitId?.codex);
+  const limits = aggregateLimits || codexLimits ? { ...aggregateLimits, ...codexLimits } : undefined;
+  if (!limits) return { available: false, reason: 'Codex rate limits are unavailable' };
+
+  const rateLimits: { name: string; window: UsageWindow }[] = [];
+  for (const slot of ['primary', 'secondary'] as const) {
+    const source = asRecord(limits[slot]);
+    if (!source || typeof source.usedPercent !== 'number' || !Number.isFinite(source.usedPercent)) continue;
+    const duration =
+      typeof source.windowDurationMins === 'number' && Number.isFinite(source.windowDurationMins)
+        ? source.windowDurationMins
+        : undefined;
+    const resetsAt = codexResetIso(source.resetsAt);
+    const window: UsageWindow = {
+      pct: Math.round(Math.max(0, Math.min(100, source.usedPercent))),
+      ...(resetsAt ? { resetsAt } : {}),
+    };
+    rateLimits.push({ name: codexWindowName(duration, slot), window });
+  }
+
+  if (rateLimits.length === 0) {
+    return { available: false, reason: 'Codex returned no active rate-limit windows' };
+  }
+
+  const planType = typeof limits.planType === 'string' ? limits.planType.trim() : '';
+  const plan = planType
+    ? `ChatGPT ${planType.charAt(0).toUpperCase()}${planType.slice(1)}`
+    : undefined;
+  return { available: true, ...(plan ? { plan } : {}), rateLimits };
+}
+
+/** Reads rate limits through Codex's local app-server protocol; no auth file is read by AgentDeck. */
+function readCodexRateLimitsFromAppServer(): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const child = spawnProcess('codex', ['app-server', '--stdio'], {
+      cwd: os.homedir(),
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    const stdin = child.stdin;
+    const stdout = child.stdout;
+    if (!stdin || !stdout) {
+      child.kill('SIGTERM');
+      reject(new Error('Codex app-server did not open its stdio transport'));
+      return;
+    }
+    const lines = createInterface({ input: stdout });
+    let settled = false;
+    const finish = (error?: Error, result?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      lines.close();
+      if (!child.killed) child.kill('SIGTERM');
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timer = setTimeout(
+      () => finish(new Error('Codex app-server rate-limit request timed out')),
+      CODEX_APP_SERVER_TIMEOUT_MS,
+    );
+    stdin.on('error', () => undefined);
+    lines.on('line', (line) => {
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (message.id === 1) {
+        const error = asRecord(message.error);
+        if (error) {
+          finish(new Error(typeof error.message === 'string' ? error.message : 'Codex app-server initialization failed'));
+          return;
+        }
+        try {
+          stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`);
+          stdin.write(
+            `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} })}\n`,
+          );
+        } catch (err) {
+          finish(err instanceof Error ? err : new Error(String(err)));
+        }
+      } else if (message.id === 2) {
+        const error = asRecord(message.error);
+        if (error) {
+          finish(new Error(typeof error.message === 'string' ? error.message : 'Codex rate-limit request failed'));
+        } else {
+          finish(undefined, message.result);
+        }
+      }
+    });
+    child.once('error', (error) => finish(error));
+    child.once('close', (code) => {
+      if (!settled) finish(new Error(`Codex app-server exited before returning usage (code ${code ?? 'unknown'})`));
+    });
+    try {
+      stdin.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            clientInfo: { name: 'agentdeck', title: 'AgentDeck', version: '0.1.0' },
+            capabilities: { experimentalApi: true },
+          },
+        })}\n`,
+      );
+    } catch (err) {
+      finish(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 
 export class UsageCollector {
   private readonly spawn: UsageSpawn;
   private readonly isAvailableFn: (agentId: AgentId) => boolean;
+  private readonly readCodexRateLimits?: () => Promise<unknown>;
   private readonly ttlMs: number;
   private cache?: CacheEntry;
   private inflight?: Promise<AgentUsage[]>;
 
+  private readonly zcodeCollector?: () => Promise<Partial<AgentUsage>>;
+
   constructor(opts: CollectorOptions) {
     this.spawn = opts.spawn ?? defaultSpawn;
     this.isAvailableFn = opts.isAvailable ?? ((id) => opts.agents.infoOf(id)?.available === true);
+    this.readCodexRateLimits =
+      opts.readCodexRateLimits ?? (opts.spawn ? undefined : readCodexRateLimitsFromAppServer);
     this.ttlMs = opts.ttlMs ?? USAGE_TTL_MS;
+    this.zcodeCollector = opts.zcodeCollector;
+  }
+
+  /** Clears cached usage snapshots (e.g. after a plan switch). */
+  clearCache(): void {
+    this.cache = undefined;
   }
 
   /** Cached per-agent usage snapshot; concurrent calls share one collection run. */
@@ -158,9 +447,9 @@ export class UsageCollector {
     const fetchedAt = Date.now();
     const entries = await Promise.all([
       this.collectClaude(fetchedAt),
+      this.collectAntigravity(fetchedAt),
       this.collectCodex(fetchedAt),
-      Promise.resolve(this.ideEntry('zcode', fetchedAt)),
-      Promise.resolve(this.ideEntry('antigravity', fetchedAt)),
+      this.collectZcode(fetchedAt),
     ]);
     return entries;
   }
@@ -197,6 +486,46 @@ export class UsageCollector {
     };
   }
 
+  private async collectAntigravity(fetchedAt: number): Promise<AgentUsage> {
+    const base: AgentUsage = { agentId: 'antigravity', available: false, fetchedAt };
+    if (!this.isAvailableFn('antigravity')) {
+      return { ...base, reason: 'Antigravity (AGY) CLI not available' };
+    }
+    let res: SpawnResult;
+    try {
+      res = await this.spawn('agy', ['-p', '/usage'], {
+        timeoutMs: AGY_TIMEOUT_MS,
+        cwd: os.homedir(),
+      });
+    } catch {
+      // Fallback probe via flatpak if native agy failed
+      try {
+        res = await this.spawn('flatpak', ['run', '--command=agy', 'com.google.Antigravity', '-p', '/usage'], {
+          timeoutMs: AGY_TIMEOUT_MS,
+          cwd: os.homedir(),
+        });
+      } catch (err) {
+        return { ...base, reason: `agy -p "/usage" failed: ${errorMessage(err)}`, fetchedAt };
+      }
+    }
+
+    const raw = capRaw(res.stdout || res.stderr);
+    const parsed = parseAntigravityUsage(res.stdout);
+    if (!parsed.available) {
+      return { ...base, reason: parsed.reason, ...(raw ? { raw } : {}), fetchedAt };
+    }
+    return {
+      agentId: 'antigravity',
+      available: true,
+      ...(parsed.plan ? { plan: parsed.plan } : {}),
+      ...(parsed.session ? { session: parsed.session } : {}),
+      ...(parsed.week ? { week: parsed.week } : {}),
+      ...(parsed.modelsQuota ? { modelsQuota: parsed.modelsQuota } : {}),
+      ...(raw ? { raw } : {}),
+      fetchedAt,
+    };
+  }
+
   private async collectCodex(fetchedAt: number): Promise<AgentUsage> {
     const base: AgentUsage = { agentId: 'codex', available: false, fetchedAt };
     if (!this.isAvailableFn('codex')) {
@@ -215,11 +544,31 @@ export class UsageCollector {
     const combined = `${res.stdout}\n${res.stderr}`;
     const first = firstLine(res.stdout) || firstLine(res.stderr);
     if (/logged in/i.test(combined)) {
+      let rateLimitError: string | undefined;
+      if (this.readCodexRateLimits) {
+        try {
+          const parsed = parseCodexRateLimits(await this.readCodexRateLimits());
+          if (parsed.available) {
+            return {
+              agentId: 'codex',
+              available: true,
+              ...(parsed.plan ? { plan: parsed.plan } : first ? { plan: first } : {}),
+              ...(parsed.rateLimits ? { rateLimits: parsed.rateLimits } : {}),
+              fetchedAt,
+            };
+          }
+          rateLimitError = parsed.reason;
+        } catch (err) {
+          rateLimitError = errorMessage(err);
+        }
+      }
       return {
         agentId: 'codex',
         available: true,
         ...(first ? { plan: first } : {}),
-        reason: 'Codex exposes no usage statistics via CLI — login status only',
+        reason: rateLimitError
+          ? `Could not read Codex rate limits — login status only: ${rateLimitError}`
+          : 'Could not read Codex rate limits — login status only',
         ...(raw ? { raw } : {}),
         fetchedAt,
       };
@@ -232,7 +581,36 @@ export class UsageCollector {
     };
   }
 
-  private ideEntry(agentId: AgentId, fetchedAt: number): AgentUsage {
-    return { agentId, available: false, reason: 'IDE agent — no usage API exposed', fetchedAt };
+  private async collectZcode(fetchedAt: number): Promise<AgentUsage> {
+    const base: AgentUsage = { agentId: 'zcode', available: false, fetchedAt };
+    if (!this.isAvailableFn('zcode')) {
+      return { ...base, reason: 'ZCode CLI not available' };
+    }
+    if (this.zcodeCollector) {
+      const custom = await this.zcodeCollector();
+      return { ...base, available: true, ...custom, agentId: 'zcode', fetchedAt };
+    }
+    try {
+      const [plansInfo, stats] = await Promise.all([
+        getZcodePlanInfo(),
+        readZcodeSqliteStats(),
+      ]);
+      return {
+        agentId: 'zcode',
+        available: true,
+        plan: plansInfo.activePlanLabel,
+        activePlanId: plansInfo.activePlanId,
+        plans: plansInfo.plans,
+        session: plansInfo.session,
+        week: plansInfo.week,
+        last24h: stats.last24h,
+        last7d: stats.last7d,
+        raw: plansInfo.raw,
+        fetchedAt,
+      };
+    } catch (err) {
+      return { ...base, reason: `ZCode usage collection failed: ${errorMessage(err)}` };
+    }
   }
+
 }

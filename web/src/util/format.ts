@@ -46,7 +46,22 @@ export function relTimeFuture(t: number): string {
 }
 
 export function clock(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+}
+
+/** Converts provider text such as "1:19pm" to a 24-hour clock for display. */
+export function normalizeMeridiemTimes(text: string): string {
+  return text.replace(
+    /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])m\b/gi,
+    (_match, hour: string, minute: string | undefined, period: string) => {
+      const hour24 = (Number(hour) % 12) + (period.toLowerCase() === 'p' ? 12 : 0);
+      return `${String(hour24).padStart(2, '0')}${minute === undefined ? '' : `:${minute}`}`;
+    },
+  );
 }
 
 /** Compact elapsed duration ("42s", "3m", "1h 05m") for running jobs. */

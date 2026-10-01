@@ -26,6 +26,9 @@ export const MODEL_PRESETS: Record<AgentId, ModelPreset[]> = {
   ],
   antigravity: [
     { id: 'inherit', label: 'Default', description: "Use Antigravity's configured model" },
+    { id: 'Gemini 3.8 Flash (High)', label: 'Gemini 3.8 Flash (High)', description: 'Fast with high reasoning depth' },
+    { id: 'Gemini 3.8 Pro', label: 'Gemini 3.8 Pro', description: 'Deep reasoning and coding' },
+    { id: 'Gemini 3.8 Flash', label: 'Gemini 3.8 Flash', description: 'Fast lightweight default' },
     {
       id: 'custom',
       label: 'Custom…',

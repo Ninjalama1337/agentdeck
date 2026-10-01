@@ -32,8 +32,10 @@ export function ComposeBar({ placeholder, disabled, onSend }: Props) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = '0px';
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    if (el.scrollHeight > el.clientHeight || text === '') {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    }
   }, [text]);
 
   const send = () => {
@@ -87,6 +89,7 @@ export function ComposeBar({ placeholder, disabled, onSend }: Props) {
           placeholder={placeholder}
           aria-label="Compose terminal input"
           enterKeyHint="enter"
+          style={{ fieldSizing: 'content' } as React.CSSProperties}
           className="max-h-[120px] min-h-10 flex-1 resize-none bg-transparent px-3 py-2 text-[15px] leading-snug outline-none placeholder:text-dim/60"
         />
         <MicButton dictation={dictation} size={40} />

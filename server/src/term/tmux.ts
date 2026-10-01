@@ -1,0 +1,183 @@
+/**
+ * tmux session supervisor for AgentDeck terminals.
+ *
+ * Runs each terminal shell in a detached tmux session under a dedicated private
+ * socket ($XDG_RUNTIME_DIR/agentdeck-tmux.sock). This decouples terminal
+ * processes from the Fastify server:
+ *
+ * - When the server restarts (tsx watch, service reload, crash, agent rebuilds):
+ *   the tmux session and everything running inside it (agents, compilers, shells)
+ *   STAYS ALIVE in the background.
+ * - When the server boots up again, TerminalManager re-attaches node-pty to the
+ *   existing tmux session, restores the scrollback, and resumes streaming.
+ * - The dedicated socket prevents interference with any user-managed tmux sessions.
+ */
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { findExecutable } from './presets.js';
+
+let cachedTmuxBin: string | null | undefined = undefined;
+
+/** Returns the absolute path to tmux if installed, or undefined. */
+export function getTmuxBinary(): string | undefined {
+  if (cachedTmuxBin !== undefined) {
+    return cachedTmuxBin ?? undefined;
+  }
+  const resolved = findExecutable('tmux');
+  cachedTmuxBin = resolved ?? null;
+  return resolved;
+}
+
+/** Check if tmux is installed on the host. */
+export function isTmuxAvailable(): boolean {
+  return getTmuxBinary() !== undefined;
+}
+
+/** Reset cached binary path (useful for testing). */
+export function _resetTmuxCache(): void {
+  cachedTmuxBin = undefined;
+}
+
+/**
+ * Dedicated Unix socket for AgentDeck tmux instances.
+ * Using a dedicated socket isolates AgentDeck sessions from personal tmux usage.
+ */
+export function tmuxSocketPath(): string {
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || os.tmpdir();
+  return path.join(runtimeDir, 'agentdeck-tmux.sock');
+}
+
+/** Deterministic tmux session name for a given terminal ID. */
+export function tmuxSessionName(terminalId: string): string {
+  return `ad_${terminalId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+export interface CreateTmuxSessionOptions {
+  sessionName: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+  shell: string;
+  args: string[];
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * Creates a new detached tmux session running `shell` with `args`.
+ * Sets terminal size, status bar off, and high scrollback limit.
+ */
+export function createTmuxSession(opts: CreateTmuxSessionOptions): boolean {
+  if (!isTmuxAvailable()) return false;
+  const sock = tmuxSocketPath();
+  const tmuxArgs = [
+    '-S', sock,
+    'new-session', '-d',
+    '-s', opts.sessionName,
+    '-c', opts.cwd,
+    '-x', String(Math.max(10, opts.cols)),
+    '-y', String(Math.max(4, opts.rows)),
+  ];
+
+  if (opts.env) {
+    for (const [key, val] of Object.entries(opts.env)) {
+      if (val !== undefined) {
+        tmuxArgs.push('-e', `${key}=${val}`);
+      }
+    }
+  }
+
+  tmuxArgs.push(opts.shell, ...opts.args);
+
+  const cleanEnv: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith('npm_') || k === 'INIT_CWD' || k === 'NODE_ENV') continue;
+    cleanEnv[k] = v;
+  }
+
+  try {
+    execFileSync('tmux', tmuxArgs, { env: cleanEnv, stdio: 'ignore' });
+    // Strip tmux chrome: status bar off so the app sees only pure terminal output
+    execFileSync('tmux', ['-S', sock, 'set-option', '-t', opts.sessionName, 'status', 'off'], { env: cleanEnv, stdio: 'ignore' });
+    execFileSync('tmux', ['-S', sock, 'set-option', '-t', opts.sessionName, 'history-limit', '10000'], { env: cleanEnv, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if a tmux session is currently alive. */
+export function hasTmuxSession(sessionName: string): boolean {
+  if (!isTmuxAvailable()) return false;
+  const sock = tmuxSocketPath();
+  try {
+    execFileSync('tmux', ['-S', sock, 'has-session', '-t', sessionName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Kill a tmux session and all processes running inside it. */
+export function killTmuxSession(sessionName: string): boolean {
+  if (!isTmuxAvailable()) return false;
+  const sock = tmuxSocketPath();
+  try {
+    execFileSync('tmux', ['-S', sock, 'kill-session', '-t', sessionName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resize the tmux window to match client viewport. */
+export function resizeTmuxWindow(sessionName: string, cols: number, rows: number): boolean {
+  if (!isTmuxAvailable()) return false;
+  const sock = tmuxSocketPath();
+  try {
+    execFileSync(
+      'tmux',
+      ['-S', sock, 'resize-window', '-t', sessionName, '-x', String(Math.max(10, cols)), '-y', String(Math.max(4, rows))],
+      { stdio: 'ignore' },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Captures screen content and scrollback from a tmux pane.
+ * Used to seed xterm-headless replay when re-attaching after a server restart.
+ */
+export function captureTmuxPane(sessionName: string, lines = 1500): string {
+  if (!isTmuxAvailable()) return '';
+  const sock = tmuxSocketPath();
+  try {
+    return execFileSync(
+      'tmux',
+      ['-S', sock, 'capture-pane', '-e', '-p', '-S', `-${lines}`, '-t', sessionName],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+  } catch {
+    return '';
+  }
+}
+
+/** List all active AgentDeck tmux session names. */
+export function listTmuxSessions(prefix = 'ad_'): string[] {
+  if (!isTmuxAvailable()) return [];
+  const sock = tmuxSocketPath();
+  try {
+    const raw = execFileSync('tmux', ['-S', sock, 'list-sessions', '-F', '#{session_name}'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return raw
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.startsWith(prefix));
+  } catch {
+    return [];
+  }
+}
