@@ -38,47 +38,6 @@ export interface ModifierRef {
   current: { ctrl: boolean; alt: boolean };
 }
 
-/**
- * Keep recent text in xterm's hidden textarea so mobile keyboards retain their
- * suggestion context. Compact older words after input settles; some IMEs can
- * replay stale buffer text on a later keyCode 229 event.
- */
-function installMobileImeBufferFix(term: Terminal): () => void {
-  const textarea = term.textarea;
-  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
-  if (!textarea || !touchDevice) return () => undefined;
-
-  let composing = false;
-  let compactTimer: number | null = null;
-  const scheduleCompact = () => {
-    if (compactTimer !== null) window.clearTimeout(compactTimer);
-    compactTimer = window.setTimeout(() => {
-      compactTimer = null;
-      if (composing || term.options.screenReaderMode) return;
-      const words = textarea.value.match(/\S+\s*/g);
-      if (words && words.length > 2) textarea.value = words.slice(-2).join('');
-    }, 0);
-  };
-  const onCompositionStart = () => {
-    composing = true;
-  };
-  const onCompositionEnd = () => {
-    composing = false;
-    scheduleCompact();
-  };
-  const onKeyUp = () => scheduleCompact();
-
-  textarea.addEventListener('compositionstart', onCompositionStart);
-  textarea.addEventListener('compositionend', onCompositionEnd);
-  textarea.addEventListener('keyup', onKeyUp);
-  return () => {
-    textarea.removeEventListener('compositionstart', onCompositionStart);
-    textarea.removeEventListener('compositionend', onCompositionEnd);
-    textarea.removeEventListener('keyup', onKeyUp);
-    if (compactTimer !== null) window.clearTimeout(compactTimer);
-  };
-}
-
 interface Props {
   id: string;
   visible: boolean;
@@ -124,16 +83,17 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    const disposeImeFix = installMobileImeBufferFix(term);
     termRef.current = term;
     fitRef.current = fit;
     const ta = term.textarea;
     if (ta) {
-      const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+      // Raw key input only: with suggestions on, mobile IMEs compose whole words
+      // in xterm's hidden textarea and replay or drop text. The compose bar is
+      // the place for autocorrect and suggestions.
       ta.setAttribute('autocapitalize', 'off');
       ta.setAttribute('autocorrect', 'off');
       ta.setAttribute('autocomplete', 'off');
-      ta.setAttribute('spellcheck', touchDevice ? 'true' : 'false');
+      ta.setAttribute('spellcheck', 'false');
     }
     try {
       fit.fit();
@@ -199,7 +159,6 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       if (resizeTimer) window.clearTimeout(resizeTimer);
       input.dispose();
       unsubscribe();
-      disposeImeFix();
       term.dispose();
       termRef.current = null;
     };
