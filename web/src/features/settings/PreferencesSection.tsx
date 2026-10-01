@@ -5,7 +5,7 @@ import type { DeckNotificationKind, VoiceStatus } from '@agentdeck/shared';
 import { api } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import { usePrefs, type DictationEngine } from '../../store/prefs';
-import { disablePush, enablePush, permissionState, pushSupported, requestPermission, type Permission } from '../../util/notify';
+import { disablePush, enablePush, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
 import { speechCtor } from '../../hooks/useDictation';
 import { isNativePlatform } from '../../util/platform';
 import { haptic } from '../../util/haptics';
@@ -161,7 +161,11 @@ export function PreferencesSection() {
         <div className="mt-1 border-t border-line pt-1">
           {(Object.keys(KIND_LABELS) as DeckNotificationKind[]).map((k) => (
             <Row key={k} title={KIND_LABELS[k]}>
-              <Toggle label={KIND_LABELS[k]} checked={prefs.notifyKinds[k]} onChange={(v) => prefs.set('notifyKinds', { ...prefs.notifyKinds, [k]: v })} />
+              <Toggle label={KIND_LABELS[k]} checked={prefs.notifyKinds[k]} onChange={(v) => {
+                  prefs.set('notifyKinds', { ...prefs.notifyKinds, [k]: v });
+                  void syncPushKinds();
+                }}
+              />
             </Row>
           ))}
         </div>

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Settings, SquareTerminal, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
-import { ConnectionPill } from '../../components/ConnectionPill';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -83,14 +82,11 @@ export function HomeScreen() {
   };
 
   return (
-    <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+    <div className="flex min-h-full flex-col px-4 pb-8">
       {/* header */}
       <header className="flex items-center gap-1 py-3">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[22px] font-bold tracking-tight">{greetingText}</h1>
-          <div className="mt-0.5 flex items-center gap-2">
-            <ConnectionPill />
-          </div>
         </div>
         <InboxButton />
         <button

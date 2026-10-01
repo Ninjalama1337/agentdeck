@@ -43,7 +43,7 @@ export function GitScreen() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   if (!activeProjectId) {
     return (
-      <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+      <div className="flex min-h-full flex-col px-4 pb-8">
         <header className="py-4">
           <h1 className="text-[20px] font-bold tracking-tight">Git</h1>
         </header>
@@ -179,7 +179,7 @@ function GitScreenInner({ projectId }: { projectId: string }) {
   const ahead = status?.ahead ?? 0;
 
   return (
-    <div className="safe-t flex min-h-full flex-col pb-28">
+    <div className="flex min-h-full flex-col pb-28">
       <header className="appbar flex items-center gap-1 px-4 pb-2 pt-2">
         <ProjectSwitcher className="min-w-0 flex-1" subtitle={project?.git?.remote?.replace(/^https?:\/\/|\.git$/g, '') ?? 'Local repository'} />
         <button

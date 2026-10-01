@@ -44,7 +44,7 @@ export function FilesScreen() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   if (!activeProjectId) {
     return (
-      <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+      <div className="flex min-h-full flex-col px-4 pb-8">
         <header className="py-4">
           <h1 className="text-[20px] font-bold tracking-tight">Files</h1>
         </header>
@@ -230,7 +230,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   };
 
   return (
-    <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+    <div className="flex min-h-full flex-col px-4 pb-8">
       <header className="flex items-center justify-between gap-1 py-2">
         <ProjectSwitcher className="min-w-0 flex-1" subtitle="Files" />
         <div className="flex shrink-0 items-center">

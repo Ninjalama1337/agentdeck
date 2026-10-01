@@ -49,9 +49,6 @@
   --ad-safe-top: env(safe-area-inset-top, 0px);
   --ad-safe-bottom: env(safe-area-inset-bottom, 0px);
 
-  /* Top bar height — must match TopBar.tsx (h-[52px]). */
-  --ad-topbar-h: 52px;
-
   /* Bottom tab bar height — must match TabBar.tsx (h-16). The bar is mounted
      on every route, so sheets/bottom UI reserve this via
      calc(var(--ad-tabbar-h) + var(--ad-safe-bottom)). */

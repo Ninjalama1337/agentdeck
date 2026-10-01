@@ -117,12 +117,13 @@ export class NotificationHub {
       body: 'Push notifications work 🎉',
       ts: Date.now(),
     };
+    // An explicit test ignores the per-kind filter — it checks delivery.
     return this.push(n, (s) => s.deviceId === deviceId);
   }
 
-  private async push(n: DeckNotification, filter?: (s: StoredSubscription) => boolean): Promise<number> {
+  private async push(n: DeckNotification, only?: (s: StoredSubscription) => boolean): Promise<number> {
     if (!this.vapid) return 0;
-    const targets = this.subs.filter((s) => (filter ? filter(s) : true) && (!s.kinds || s.kinds.includes(n.kind)));
+    const targets = this.subs.filter((s) => (only ? only(s) : !s.kinds || s.kinds.includes(n.kind)));
     if (targets.length === 0) return 0;
     const payload = JSON.stringify(n);
     const dead: string[] = [];

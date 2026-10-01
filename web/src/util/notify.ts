@@ -9,8 +9,9 @@
  *
  * Deep links use `/?open=<target>` so a tap lands on the right screen.
  */
-import type { DeckNotification } from '@agentdeck/shared';
+import type { DeckNotification, DeckNotificationKind } from '@agentdeck/shared';
 import { api } from '../api/client';
+import { usePrefs } from '../store/prefs';
 import { isNativePlatform } from './platform';
 
 export type Permission = 'granted' | 'denied' | 'default' | 'unsupported';
@@ -61,6 +62,40 @@ export async function requestPermission(): Promise<Permission> {
   }
 }
 
+/** Android channel for agent alerts: high importance so they pop up and buzz. */
+const NATIVE_CHANNEL = 'agentdeck-alerts';
+let nativeChannelReady = false;
+
+/**
+ * APK only: create the alert channel and, while the "Notify me" pref is on,
+ * ask for the notification permission once (Android 13+ grants nothing by
+ * default, so alerts would silently never show).
+ */
+export async function prepareNativeNotifications(): Promise<void> {
+  const plugin = localPlugin();
+  if (!isNativePlatform() || !plugin) return;
+  try {
+    await plugin.createChannel?.({
+      id: NATIVE_CHANNEL,
+      name: 'Agent alerts',
+      description: 'Finished runs, failures and terminals waiting for you',
+      importance: 4,
+      visibility: 1,
+      vibration: true,
+    });
+    nativeChannelReady = plugin.createChannel !== undefined;
+  } catch {
+    nativeChannelReady = false;
+  }
+  if (!usePrefs.getState().notifications) return;
+  try {
+    const res = (await plugin.checkPermissions?.()) as { display?: string } | undefined;
+    if (res?.display?.startsWith('prompt')) await plugin.requestPermissions?.();
+  } catch {
+    /* plugin missing in this build */
+  }
+}
+
 let nativeSeq = 1;
 
 /** Shows one notification through whatever the platform offers. */
@@ -75,6 +110,7 @@ export async function showSystemNotification(n: DeckNotification): Promise<boole
             id: (nativeSeq = (nativeSeq % 100_000) + 1),
             title: n.title,
             body: n.body,
+            ...(nativeChannelReady ? { channelId: NATIVE_CHANNEL } : {}),
             extra: { open },
           },
         ],
@@ -151,6 +187,25 @@ export async function currentPushSubscription(): Promise<PushSubscription | null
   }
 }
 
+/** Notification kinds this device wants (the per-kind toggles in Settings). */
+function enabledKinds(): DeckNotificationKind[] {
+  const kinds = usePrefs.getState().notifyKinds;
+  return (Object.keys(kinds) as DeckNotificationKind[]).filter((k) => kinds[k]);
+}
+
+function subscribeRequest(sub: PushSubscription) {
+  const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) return null;
+  return { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, kinds: enabledKinds() };
+}
+
+/** Re-registers the existing subscription so the server honours changed kind toggles. */
+export async function syncPushKinds(): Promise<void> {
+  const sub = await currentPushSubscription();
+  const req = sub && subscribeRequest(sub);
+  if (req) await api.pushSubscribe(req).catch(() => undefined);
+}
+
 export type PushResult = 'subscribed' | 'unsupported' | 'denied' | 'server-disabled' | 'error';
 
 /** Subscribes this browser to Web Push and registers it on the server. */
@@ -173,9 +228,9 @@ export async function enablePush(): Promise<PushResult> {
       }
     }
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
-    if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) return 'error';
-    await api.pushSubscribe({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } });
+    const req = subscribeRequest(sub);
+    if (!req) return 'error';
+    await api.pushSubscribe(req);
     return 'subscribed';
   } catch {
     return 'error';

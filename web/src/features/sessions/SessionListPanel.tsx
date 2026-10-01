@@ -62,7 +62,7 @@ export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: ()
   }
 
   return (
-    <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+    <div className="flex min-h-full flex-col px-4 pb-8">
       <header className="flex items-center gap-1 py-2">
         <ProjectSwitcher className="min-w-0 flex-1" subtitle={`${sessions.length} ${sessions.length === 1 ? 'chat' : 'chats'}`} />
         <InboxButton />

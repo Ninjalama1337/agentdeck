@@ -20,7 +20,6 @@ import type { AgentId, TunnelStatus } from '@agentdeck/shared';
 import { api, getApiBase, uploadApk } from '../../api/client';
 import { ADMIN_KIND_LABELS, agentDisplayName, errorMessage, useAppStore } from '../../store/appStore';
 import { AgentAvatar } from '../../components/ui/Avatar';
-import { ConnectionPill } from '../../components/ConnectionPill';
 import { Chip } from '../../components/ui/Chip';
 import { ApkCard } from '../../components/ApkCard';
 import { AgentSheet } from '../home/AgentSheet';
@@ -178,7 +177,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <div className="safe-t flex min-h-full flex-col px-4 pb-8">
+    <div className="flex min-h-full flex-col px-4 pb-8">
       <header className="flex items-center gap-1 py-3">
         <button
           type="button"
@@ -189,7 +188,6 @@ export function SettingsScreen() {
           <ArrowLeft size={20} />
         </button>
         <h1 className="min-w-0 flex-1 text-[20px] font-bold tracking-tight">Settings</h1>
-        <ConnectionPill />
       </header>
 
       <PreferencesSection />

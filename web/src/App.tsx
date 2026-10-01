@@ -14,7 +14,7 @@ import { TeamScreen } from './features/chat/TeamScreen';
 import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
-import { listenForNativeTaps } from './util/notify';
+import { listenForNativeTaps, prepareNativeNotifications } from './util/notify';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
 
@@ -61,6 +61,11 @@ export default function App() {
     listenForNativeTaps();
   }, []);
 
+  // APK: alert channel + permission prompt, once this device is paired.
+  useEffect(() => {
+    if (token) void prepareNativeNotifications();
+  }, [token]);
+
   // Deep links: ?open=session:<id> (notification tap) · ?launch=claude (app shortcut).
   useEffect(() => {
     if (!token) return;
@@ -91,13 +96,22 @@ export default function App() {
 
   // Soft keyboard tracking via visualViewport: when the visible viewport
   // shrinks well below the layout viewport, a keyboard is open → hide the
-  // tab bar so the composer keeps room (chat screens especially).
+  // tab bar so the composer keeps room (chat screens especially), and pin
+  // the app shell to the visible area so the top bar never scrolls away.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    const rootStyle = document.documentElement.style;
     const evaluate = () => {
       const open = window.innerHeight - vv.height > 120;
       useAppStore.getState().setKeyboardOpen(open);
+      if (open) {
+        rootStyle.setProperty('--ad-vvh', `${vv.height}px`);
+        rootStyle.setProperty('--ad-vv-top', `${vv.offsetTop}px`);
+      } else {
+        rootStyle.removeProperty('--ad-vvh');
+        rootStyle.removeProperty('--ad-vv-top');
+      }
     };
     evaluate();
     vv.addEventListener('resize', evaluate);
@@ -106,6 +120,8 @@ export default function App() {
       vv.removeEventListener('resize', evaluate);
       vv.removeEventListener('scroll', evaluate);
       useAppStore.getState().setKeyboardOpen(false);
+      rootStyle.removeProperty('--ad-vvh');
+      rootStyle.removeProperty('--ad-vv-top');
     };
   }, []);
 
@@ -164,22 +180,24 @@ export default function App() {
       {/* APK self-update: only inside the native shell, when the server hosts a
           newer build than the one bundled into this WebView (see UpdateBanner). */}
       <UpdateBanner apk={apkInfo} />
-      <TopBar />
-      <main
-        className={[
-          keyboardOpen ? 'screen-h-kb' : 'screen-h',
-          'relative z-10 mx-auto w-full max-w-xl',
-          route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
-        ].join(' ')}
-      >
-        {route.name === 'home' && <HomeScreen />}
-        {route.name === 'chat' && <ChatScreen />}
-        {route.name === 'code' && <CodeScreen />}
-        {route.name === 'files' && <FilesScreen />}
-        {route.name === 'git' && <GitScreen />}
-        {route.name === 'settings' && <SettingsScreen />}
-        {route.name === 'team' && <TeamScreen runId={route.runId} />}
-      </main>
+      <div className="app-shell">
+        <TopBar />
+        <main
+          className={[
+            keyboardOpen ? 'screen-h-kb' : 'screen-h',
+            'relative z-10 mx-auto w-full max-w-xl',
+            route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
+          ].join(' ')}
+        >
+          {route.name === 'home' && <HomeScreen />}
+          {route.name === 'chat' && <ChatScreen />}
+          {route.name === 'code' && <CodeScreen />}
+          {route.name === 'files' && <FilesScreen />}
+          {route.name === 'git' && <GitScreen />}
+          {route.name === 'settings' && <SettingsScreen />}
+          {route.name === 'team' && <TeamScreen runId={route.runId} />}
+        </main>
+      </div>
       <TabBar />
       <UsageSheet />
       <Lightbox />

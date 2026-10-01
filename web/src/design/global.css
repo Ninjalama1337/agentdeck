@@ -163,15 +163,34 @@ img {
   padding-bottom: var(--ad-safe-bottom);
 }
 
-/* Full-height screen area between the fixed top bar and bottom tab bar. */
-.screen-h {
-  height: calc(100vh - var(--ad-topbar-h) - var(--ad-tabbar-h) - var(--ad-safe-bottom) - var(--ad-safe-top));
-  height: calc(100dvh - var(--ad-topbar-h) - var(--ad-tabbar-h) - var(--ad-safe-bottom) - var(--ad-safe-top));
+/* App shell: top bar + screen, stacked. While the soft keyboard is open
+   App.tsx pins it to the visual viewport (--ad-vvh / --ad-vv-top), so the top
+   bar stays in view instead of being panned away with the page. */
+.app-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--ad-vv-top, 0px);
+  height: var(--ad-vvh, 100vh);
+  display: flex;
+  flex-direction: column;
 }
-/* Soft keyboard open: the tab bar slides away — use the whole (resized) viewport. */
+@supports (height: 100dvh) {
+  .app-shell {
+    height: var(--ad-vvh, 100dvh);
+  }
+}
+
+/* Screen area: whatever the top bar leaves, minus the fixed bottom tab bar. */
+.screen-h {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: calc(var(--ad-tabbar-h) + var(--ad-safe-bottom));
+}
+/* Soft keyboard open: the tab bar slides away — use everything below the top bar. */
 .screen-h-kb {
-  height: 100vh;
-  height: 100dvh;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 /* ---------------------------------------------------------------- fields */

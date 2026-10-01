@@ -123,6 +123,7 @@ export interface FileEventRecord {
 const PROJECT_KEY = 'agentdeck:project';
 const INBOX_KEY = 'agentdeck:inbox';
 const INBOX_SEEN_KEY = 'agentdeck:inbox-seen';
+const INBOX_CLEARED_KEY = 'agentdeck:inbox-cleared';
 const INBOX_LIMIT = 80;
 const MODEL_PREFS_KEY = 'agentdeck:model-prefs';
 
@@ -379,6 +380,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     socket.on('connect', () => {
       set({ connection: 'online' });
       void get().bootstrap(true);
+      void syncInbox();
     });
     socket.on('disconnect', () => {
       set({ connection: 'offline' });
@@ -566,10 +568,33 @@ export const useAppStore = create<AppStore>()((set, get) => {
     });
   }
 
+  /**
+   * Catch up on notifications that fired while this device was offline (app
+   * suspended in the background, network gone): they land in the inbox
+   * quietly, without a toast or system notification.
+   */
+  async function syncInbox(): Promise<void> {
+    try {
+      const recent = await api.notifications();
+      const clearedAt = readJson<number>(INBOX_CLEARED_KEY, 0);
+      set((st) => {
+        const known = new Set(st.inbox.map((n) => n.id));
+        const missed = recent.filter((n) => n.ts > clearedAt && !known.has(n.id));
+        if (missed.length === 0) return {};
+        const inbox = [...missed, ...st.inbox].sort((a, b) => b.ts - a.ts).slice(0, INBOX_LIMIT);
+        writeJson(INBOX_KEY, inbox);
+        return { inbox };
+      });
+    } catch {
+      /* older server without the notifications route */
+    }
+  }
+
   /** Inbox + (when the app is not in front) a system notification. */
   function receiveNotification(n: DeckNotification): void {
+    // The same event can arrive twice (socket + push relay, inbox sync).
+    if (get().inbox.some((x) => x.id === n.id)) return;
     set((st) => {
-      if (st.inbox.some((x) => x.id === n.id)) return {};
       const inbox = [n, ...st.inbox].slice(0, INBOX_LIMIT);
       writeJson(INBOX_KEY, inbox);
       return { inbox };
@@ -722,6 +747,10 @@ export const useAppStore = create<AppStore>()((set, get) => {
       navigator.serviceWorker?.addEventListener('message', (e) => {
         const data = e.data as { type?: string; open?: string; notification?: DeckNotification } | undefined;
         if (data?.type === 'agentdeck:open' && data.open) get().openTarget(data.open);
+        // Push that arrived while the app is in front (the service worker
+        // relays it instead of showing it) — covers a socket that is still
+        // reconnecting.
+        if (data?.type === 'agentdeck:push' && data.notification?.id) receiveNotification(data.notification);
       });
 
       if (get().token) {
@@ -1194,6 +1223,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     clearInbox() {
       writeJson(INBOX_KEY, []);
+      writeJson(INBOX_CLEARED_KEY, Date.now());
       set({ inbox: [] });
     },
 

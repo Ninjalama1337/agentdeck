@@ -116,7 +116,7 @@ export function CodeScreen() {
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? 'project';
 
   return (
-    <div className="safe-t flex h-full flex-col">
+    <div className="flex h-full flex-col">
       {/* header: project switcher + inbox + new */}
       <header className="flex items-center gap-1 px-4 pb-1.5 pt-2">
         <ProjectSwitcher
