@@ -52,8 +52,8 @@ export function TeamScreen({ runId }: { runId: string }) {
   };
 
   return (
-    <div className="safe-t flex min-h-full flex-col px-4 pb-8">
-      <header className="flex items-center gap-2 py-4">
+    <div className="flex min-h-full flex-col px-4 pb-8">
+      <header className="flex items-center gap-2 py-3">
         <button
           type="button"
           aria-label="Back to chat"

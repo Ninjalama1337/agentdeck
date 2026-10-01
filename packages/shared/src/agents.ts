@@ -3,7 +3,7 @@
  */
 import type { AdminCapability } from './api.js';
 
-export type AgentId = 'claude' | 'zcode' | 'antigravity' | 'codex';
+export type AgentId = 'claude' | 'zcode' | 'antigravity' | 'codex' | 'opencode';
 
 export type AgentKind = 'cli' | 'ide';
 
@@ -55,11 +55,21 @@ export const AGENT_ACCENTS: Record<AgentId, string> = {
   zcode: '#7C5CFF',
   antigravity: '#4E8CFF',
   codex: '#10B981',
+  opencode: '#F59E0B',
 };
 
 export const AGENT_LABELS: Record<AgentId, string> = {
   claude: 'Claude Code',
   zcode: 'ZCode',
-  antigravity: 'Antigravity',
+  antigravity: 'Antigravity (AGY)',
   codex: 'Codex',
+  opencode: 'OpenCode',
+};
+
+export const AGENT_SHORT_LABELS: Record<AgentId, string> = {
+  claude: 'Claude',
+  zcode: 'ZCode',
+  antigravity: 'AGY',
+  codex: 'Codex',
+  opencode: 'OpenCode',
 };

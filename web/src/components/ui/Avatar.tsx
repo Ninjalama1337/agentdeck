@@ -9,6 +9,7 @@ const ICONS: Record<AgentId, LucideIcon> = {
   zcode: Terminal,
   antigravity: Rocket,
   codex: Braces,
+  opencode: Bot,
 };
 
 const SIZES = {

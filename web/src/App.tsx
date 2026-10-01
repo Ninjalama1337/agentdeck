@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { useAppStore } from './store/appStore';
 import { Aurora } from './components/Aurora';
 import { TabBar } from './components/TabBar';
+import { TopBar } from './components/TopBar';
 import { ToastStack } from './components/ui/Toast';
 import { Lightbox } from './components/Lightbox';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -15,6 +16,7 @@ import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
 import { listenForNativeTaps } from './util/notify';
 import { SettingsScreen } from './features/settings/SettingsScreen';
+import { UsageSheet } from './features/settings/UsageSheet';
 
 /** Consume an image handed over by the PWA share_target (stashed in Cache API by sw.ts). */
 async function consumeSharedImage(): Promise<File | null> {
@@ -162,6 +164,7 @@ export default function App() {
       {/* APK self-update: only inside the native shell, when the server hosts a
           newer build than the one bundled into this WebView (see UpdateBanner). */}
       <UpdateBanner apk={apkInfo} />
+      <TopBar />
       <main
         className={[
           keyboardOpen ? 'screen-h-kb' : 'screen-h',
@@ -178,6 +181,7 @@ export default function App() {
         {route.name === 'team' && <TeamScreen runId={route.runId} />}
       </main>
       <TabBar />
+      <UsageSheet />
       <Lightbox />
       <ToastStack />
     </>

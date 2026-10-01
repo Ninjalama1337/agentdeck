@@ -94,6 +94,12 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
         { kind: 'login', label: 'codex login' },
       ];
     }
+    case 'opencode':
+      return [
+        { kind: 'update', label: 'opencode upgrade' },
+        { kind: 'install', label: 'npm install -g opencode' },
+        { kind: 'login', label: 'opencode providers login' },
+      ];
   }
 }
 
@@ -193,6 +199,20 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
         label: capability.label,
         command: 'npm',
         args: ['install', '-g', '@openai/codex@latest'],
+        cwd: home(),
+      };
+    case 'opencode':
+      if (kind === 'update') {
+        return { kind, label: capability.label, command: 'opencode', args: ['upgrade'], cwd: home() };
+      }
+      if (kind === 'login') {
+        return { kind, label: capability.label, command: 'opencode', args: ['providers', 'login'], cwd: home() };
+      }
+      return {
+        kind,
+        label: capability.label,
+        command: 'npm',
+        args: ['install', '-g', 'opencode'],
         cwd: home(),
       };
   }

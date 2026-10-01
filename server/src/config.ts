@@ -12,7 +12,7 @@ export type AgentMode = 'headless' | 'ide' | 'auto' | 'off';
 
 export const AGENT_MODES: AgentMode[] = ['headless', 'ide', 'auto', 'off'];
 
-export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex'] as const;
+export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex', 'opencode'] as const;
 
 const AgentConfigSchema = z.object({
   mode: z.enum(['headless', 'ide', 'auto', 'off']).default('auto'),
@@ -70,6 +70,7 @@ export const ConfigSchema = z.object({
         ideCommand: 'flatpak run com.google.Antigravity',
       }),
       codex: AgentConfigSchema.default({ mode: 'headless', command: 'codex' }),
+      opencode: AgentConfigSchema.default({ mode: 'auto', command: 'opencode' }),
     })
     .default({}),
 });

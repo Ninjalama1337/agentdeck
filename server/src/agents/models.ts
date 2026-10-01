@@ -37,4 +37,12 @@ export const MODEL_PRESETS: Record<AgentId, ModelPreset[]> = {
     { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', description: 'Codex-tuned flagship' },
     { id: 'gpt-5.3', label: 'GPT-5.3', description: 'General-purpose flagship' },
   ],
+  opencode: [
+    { id: 'inherit', label: 'Default', description: "Use OpenCode's configured model" },
+    {
+      id: 'custom',
+      label: 'Custom…',
+      description: 'Enter any provider/model id supported by OpenCode',
+    },
+  ],
 };

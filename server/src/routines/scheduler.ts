@@ -14,6 +14,18 @@ import { newMessageId } from '../util/ids.js';
 
 const TICK_MS = 30_000;
 
+function timestamp24h(ts = Date.now()): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(ts));
+}
+
 export interface SchedulerDeps {
   store: Store;
   manager: AgentManager;
@@ -150,7 +162,7 @@ export class RoutineScheduler {
         text:
           trigger === 'manual'
             ? routine.prompt
-            : `${routine.prompt}\n\n_(automated routine run — ${new Date().toLocaleString()})_`,
+            : `${routine.prompt}\n\n_(automated routine run — ${timestamp24h()})_`,
         attachments: [],
         ts: Date.now(),
         source: 'routine',

@@ -11,7 +11,7 @@ import {
 import { HttpError } from '../src/http/errors.js';
 import { expandHome } from '../src/util/paths.js';
 
-const AGENTS: AgentId[] = ['claude', 'zcode', 'antigravity', 'codex'];
+const AGENTS: AgentId[] = ['claude', 'zcode', 'antigravity', 'codex', 'opencode'];
 
 describe('adminCapabilities', () => {
   it('exposes update/install/login for every agent', () => {
@@ -23,7 +23,7 @@ describe('adminCapabilities', () => {
   });
 
   it('every agent exposes all three actions (logins included, none blocked)', () => {
-    for (const agentId of ['claude', 'zcode', 'antigravity', 'codex'] as const) {
+    for (const agentId of AGENTS) {
       const caps = adminCapabilities(agentId);
       expect(caps.map((c) => c.kind)).toEqual(['update', 'install', 'login']);
       for (const cap of caps) {

@@ -40,7 +40,19 @@ export class AntigravityAdapter implements AgentAdapter {
 
   async detect(): Promise<DetectResult> {
     const { bin, prefixArgs } = splitCommand(this.cfg.command);
-    // Cheap existence probe via flatpak info (does not launch the app).
+    // If command is agy (or non-flatpak), probe version directly:
+    if (bin !== 'flatpak') {
+      try {
+        const res = await withTimeoutFallback(execa(bin, ['--version'], { reject: false }), 4000, null, `${bin} --version`);
+        if (res && res.exitCode === 0) {
+          const version = /(\d+\.\d+\.\d+)/.exec(res.stdout)?.[1];
+          return { available: true, version };
+        }
+      } catch {
+        // Fall through to flatpak probe
+      }
+    }
+    // Probe via flatpak info (does not launch the app).
     try {
       const res = await withTimeoutFallback(
         execa('flatpak', ['info', FLATPAK_APP], { reject: false }),
@@ -48,20 +60,13 @@ export class AntigravityAdapter implements AgentAdapter {
         null,
         'flatpak info',
       );
-      if (!res || res.exitCode !== 0) {
-        return { available: false, reason: `Flatpak app ${FLATPAK_APP} not installed` };
+      if (res && res.exitCode === 0) {
+        const version = /Version:\s*(\S+)/.exec(res.stdout ?? '')?.[1];
+        return { available: true, version };
       }
-      // Fallback probe when the command is not flatpak-based (custom config).
-      if (bin !== 'flatpak') {
-        const which = await withTimeoutFallback(execa('which', [bin], { reject: false }), 3000, null, 'which');
-        if (!which || which.exitCode !== 0) {
-          return { available: false, reason: `Antigravity CLI not found (command: ${bin} ${prefixArgs.join(' ')})` };
-        }
-      }
-      const version = /Version:\s*(\S+)/.exec(res.stdout ?? '')?.[1];
-      return { available: true, version };
+      return { available: false, reason: `Antigravity CLI (${bin}) or Flatpak (${FLATPAK_APP}) not found` };
     } catch {
-      return { available: false, reason: `Flatpak app ${FLATPAK_APP} not installed` };
+      return { available: false, reason: `Antigravity CLI (${bin}) or Flatpak (${FLATPAK_APP}) not found` };
     }
   }
 

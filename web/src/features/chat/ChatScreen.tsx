@@ -78,8 +78,8 @@ export function ChatScreen() {
   const planRemainingPct = useMemo(() => {
     if (!usage || !session) return undefined;
     const own = usage.find((u) => u.agentId === session.agentId);
-    const week = own?.week?.pct;
-    return typeof week === 'number' ? Math.max(0, 100 - week) : undefined;
+    const usedPct = own?.week?.pct ?? own?.rateLimits?.[0]?.window.pct;
+    return typeof usedPct === 'number' ? Math.max(0, 100 - usedPct) : undefined;
   }, [usage, session]);
 
   if (!session) {
@@ -104,7 +104,7 @@ export function ChatScreen() {
     <div className="flex h-full flex-col">
       {/* header */}
       <header
-        className="glass z-20 flex items-center gap-1.5 rounded-none border-x-0 border-t-0 px-2 py-1.5 safe-t"
+        className="glass z-20 flex items-center gap-1.5 rounded-none border-x-0 border-t-0 px-2 py-1.5"
         style={{
           background: 'var(--ad-glass-strong)',
           WebkitBackdropFilter: 'blur(20px) saturate(130%)',

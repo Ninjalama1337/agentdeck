@@ -319,6 +319,14 @@ export interface AgentUsage {
   week?: UsageWindow;
   last24h?: UsageWindow;
   last7d?: UsageWindow;
+  /** Provider quota windows (e.g. Codex 5-hour, weekly, or monthly limits). */
+  rateLimits?: { name: string; window: UsageWindow }[];
+  /** Dollar cost (e.g. from OpenCode stats). */
+  cost?: string;
+  /** Token breakdown (e.g. from OpenCode stats). */
+  tokens?: { input?: string; output?: string; cache?: string };
+  /** Multi-model breakdown (e.g. from Antigravity/AGY quota). */
+  modelsQuota?: { name: string; sessionLimit?: UsageWindow; weeklyLimit?: UsageWindow }[];
   /** Unparsed CLI output for transparency / debugging. */
   raw?: string;
   fetchedAt: number;

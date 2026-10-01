@@ -215,6 +215,10 @@ export interface AppStore {
   apkInfo: ApkInfo | null;
   /** Subscription usage per agent (null = not fetched yet). */
   usage: AgentUsage[] | null;
+  /** Currently selected/active agent for the top-left usage circle button. */
+  currentUsageAgent: AgentId;
+  /** Whether the full usage sheet is currently open. */
+  usageSheetOpen: boolean;
   /** Soft keyboard visible (visualViewport heuristic) — hides the tab bar. */
   keyboardOpen: boolean;
   /** Number of currently open Sheets — any open sheet hides the tab bar. */
@@ -257,6 +261,10 @@ export interface AppStore {
   refreshApkInfo(): Promise<void>;
   /** One-shot fetch of GET /api/usage (settings screen, agent sheet). */
   refreshUsage(): Promise<void>;
+  /** Switch the active agent shown in the top-left usage circle button. */
+  setCurrentUsageAgent(agentId: AgentId): void;
+  /** Open or close the full usage details sheet. */
+  setUsageSheetOpen(open: boolean): void;
   /** One-shot fetch of GET /api/admin/jobs (settings screen). */
   refreshAdminJobs(): Promise<void>;
   /** Start an update/install/login job (409 → toast when one already runs). */
@@ -672,6 +680,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
     apkInfo: null,
     usage: null,
+    currentUsageAgent: 'claude',
+    usageSheetOpen: false,
     keyboardOpen: false,
     overlayDepth: 0,
     filesVersion: {},
@@ -837,6 +847,14 @@ export const useAppStore = create<AppStore>()((set, get) => {
       }
     },
 
+    setCurrentUsageAgent(currentUsageAgent) {
+      set({ currentUsageAgent });
+    },
+
+    setUsageSheetOpen(usageSheetOpen) {
+      set({ usageSheetOpen });
+    },
+
     async refreshAdminJobs() {
       try {
         const jobs = await api.adminJobs();
@@ -939,14 +957,18 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     async openSession(id) {
       const existing = selectSession(get(), id);
-      if (existing && get().activeProjectId !== existing.projectId) {
-        set({ activeProjectId: existing.projectId });
-        persistActiveProject(existing.projectId);
+      if (existing) {
+        if (get().activeProjectId !== existing.projectId) {
+          set({ activeProjectId: existing.projectId });
+          persistActiveProject(existing.projectId);
+        }
+        set({ currentUsageAgent: existing.agentId });
       }
       set({ activeSessionId: id });
       if (get().loadedSessions[id]) return;
       const { session, messages } = await api.session(id);
       set((st) => ({
+        currentUsageAgent: session.agentId,
         sessionsByProject: upsertSessionMap(st.sessionsByProject, session),
         messagesBySession: { ...st.messagesBySession, [id]: messages },
         loadedSessions: { ...st.loadedSessions, [id]: true },

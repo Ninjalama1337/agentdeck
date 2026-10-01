@@ -163,10 +163,10 @@ img {
   padding-bottom: var(--ad-safe-bottom);
 }
 
-/* Full-height screen area above the fixed tab bar (64px). */
+/* Full-height screen area between the fixed top bar and bottom tab bar. */
 .screen-h {
-  height: calc(100vh - 64px - var(--ad-safe-bottom));
-  height: calc(100dvh - 64px - var(--ad-safe-bottom));
+  height: calc(100vh - var(--ad-topbar-h) - var(--ad-tabbar-h) - var(--ad-safe-bottom) - var(--ad-safe-top));
+  height: calc(100dvh - var(--ad-topbar-h) - var(--ad-tabbar-h) - var(--ad-safe-bottom) - var(--ad-safe-top));
 }
 /* Soft keyboard open: the tab bar slides away — use the whole (resized) viewport. */
 .screen-h-kb {
