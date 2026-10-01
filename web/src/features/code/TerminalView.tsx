@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
 import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
+import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode } from './termScroll';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -110,6 +111,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const mouseRef = useRef<MouseMode | null>(null);
   const endedRef = useRef(false);
   const [ended, setEnded] = useState<number | null>(null);
   const fontSize = usePrefs((s) => s.termFontSize);
@@ -138,6 +140,18 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     term.loadAddon(fit);
     term.open(host);
     const disposeImeFix = installMobileImeBufferFix(term);
+    // tmux/TUI screens own the display: drags become wheel events instead of
+    // panning a viewport that never has scrollback (see termScroll.ts).
+    const mouse = trackMouseMode(term);
+    const disposeTouchScroll = installTouchWheelScroll(
+      term,
+      host,
+      () => term.buffer.active.type === 'alternate' && mouse.sgrActive(),
+      (data) => {
+        if (!endedRef.current) store.sendTerminalInput(id, data);
+      },
+    );
+    mouseRef.current = mouse;
     const viewport = host.querySelector<HTMLElement>('.xterm-viewport');
     if (viewport) {
       viewport.style.touchAction = 'pan-y';
@@ -223,6 +237,9 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       if (resizeTimer) window.clearTimeout(resizeTimer);
       input.dispose();
       unsubscribe();
+      disposeTouchScroll();
+      mouse.dispose();
+      mouseRef.current = null;
       disposeImeFix();
       term.dispose();
       termRef.current = null;
@@ -275,6 +292,20 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     return a && b ? Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) : 0;
   };
 
+  // On tmux/TUI screens the scroll buttons wheel the application instead of
+  // the local viewport (which has no scrollback there).
+  const inWheelMode = () => {
+    const term = termRef.current;
+    return !!term && term.buffer.active.type === 'alternate' && mouseRef.current?.sgrActive() === true;
+  };
+  const sendWheel = (down: boolean, ticks: number) => {
+    const term = termRef.current;
+    if (!term) return;
+    sendWheelBurst(term, down, ticks, (data) => {
+      if (!endedRef.current) useAppStore.getState().sendTerminalInput(id, data);
+    });
+  };
+
   return (
     <div className={clsx('absolute inset-0 flex flex-col', !visible && 'invisible')} aria-hidden={!visible}>
       <div
@@ -299,7 +330,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           type="button"
           aria-label="Scroll terminal up one page"
           title="Scroll up"
-          onClick={() => termRef.current?.scrollPages(-1)}
+          onClick={() => (inWheelMode() ? sendWheel(false, 8) : termRef.current?.scrollPages(-1))}
           className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
         >
           <ChevronUp size={16} />
@@ -308,7 +339,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           type="button"
           aria-label="Scroll terminal down one page"
           title="Scroll down"
-          onClick={() => termRef.current?.scrollPages(1)}
+          onClick={() => (inWheelMode() ? sendWheel(true, 8) : termRef.current?.scrollPages(1))}
           className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
         >
           <ChevronDown size={16} />
@@ -317,7 +348,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           type="button"
           aria-label="Scroll terminal to latest output"
           title="Latest output"
-          onClick={() => termRef.current?.scrollToBottom()}
+          onClick={() => (inWheelMode() ? sendWheel(true, 60) : termRef.current?.scrollToBottom())}
           className="press flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:bg-white/10 hover:text-ink"
         >
           <ChevronsDown size={15} />

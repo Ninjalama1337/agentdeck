@@ -24,6 +24,7 @@ import {
   tmuxSocketPath,
   tmuxSessionName,
   createTmuxSession,
+  applyTmuxSessionOptions,
   hasTmuxSession,
   killTmuxSession,
   resizeTmuxWindow,
@@ -404,6 +405,9 @@ export class TerminalManager {
     const id = info.id;
 
     info.persistent = true;
+
+    // Session may predate options added since it was created (e.g. mouse on).
+    applyTmuxSessionOptions(tmuxSession);
 
     const proc = pty.spawn('tmux', ['-S', tmuxSocketPath(), 'attach-session', '-t', tmuxSession], {
       name: 'xterm-256color',

@@ -41,6 +41,7 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   *Neu*, *Weiter*, *Auswählen* oder *YOLO*. Eingabezeile mit Autokorrektur und
   Diktat, Tastenleiste (Ctrl, Esc, ⇧Tab, Pfeile, ^C …), Schnellantworten für
   Rechte-Abfragen (1/2/3, y/n) und Slash-Befehle je Agent, Pinch-Zoom.
+  Scrollen in der History per Wischgeste oder Scroll-Tasten.
 - **Benachrichtigungen** — „Claude ist fertig“, „Run fehlgeschlagen“,
   „Terminal wartet auf dich“ (Bell, OSC 9/777 oder Stille nach Arbeit):
   In-App-Inbox, Web Push bei geschlossener App (HTTPS/Tunnel), lokale

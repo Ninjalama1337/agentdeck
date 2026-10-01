@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { TerminalManager } from '../src/term/manager.js';
 import type { Logger } from '../src/logging.js';
@@ -9,6 +10,7 @@ import {
   hasTmuxSession,
   killTmuxSession,
   tmuxSessionName,
+  tmuxSocketPath,
 } from '../src/term/tmux.js';
 
 const quietLogger: Logger = {
@@ -38,6 +40,43 @@ function waitsFor(predicate: () => boolean, timeoutMs = 15_000): Promise<void> {
 describe('Terminal Persistence (tmux backed)', () => {
   it('detects tmux availability', () => {
     expect(isTmuxAvailable()).toBe(true);
+  });
+
+  it('enables mouse on create and re-applies it when restoring legacy sessions', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-mouse-test-'));
+    const broadcasts = {
+      onData: () => undefined,
+      onExit: () => undefined,
+      onList: () => undefined,
+    };
+    try {
+      const manager1 = new TerminalManager(quietLogger, { dataDir: tempDir, useTmux: true });
+      const info = manager1.spawn('/tmp', 'p1', 80, 24, broadcasts, { title: 'mouse-test' });
+      expect(info.persistent).toBe(true);
+      const session = tmuxSessionName(info.id);
+      const mouseOption = () =>
+        execFileSync('tmux', ['-S', tmuxSocketPath(), 'show-options', '-t', session, 'mouse'], {
+          encoding: 'utf-8',
+        }).trim();
+
+      expect(mouseOption()).toBe('mouse on');
+
+      // Simulate a session created before the option existed, then a server
+      // restart: restoring must re-apply session options.
+      execFileSync('tmux', ['-S', tmuxSocketPath(), 'set-option', '-t', session, 'mouse', 'off'], { stdio: 'ignore' });
+      manager1.detachAll();
+      expect(hasTmuxSession(session)).toBe(true);
+
+      const manager2 = new TerminalManager(quietLogger, { dataDir: tempDir, useTmux: true });
+      manager2.restoreAll(broadcasts);
+      expect(manager2.list().map((t) => t.id)).toContain(info.id);
+      expect(mouseOption()).toBe('mouse on');
+
+      manager2.kill(info.id, broadcasts);
+      expect(hasTmuxSession(session)).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('persists a terminal session across server detachment and restores on restart', async () => {

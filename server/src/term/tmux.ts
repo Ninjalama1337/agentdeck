@@ -53,6 +53,16 @@ export function tmuxSessionName(terminalId: string): string {
   return `ad_${terminalId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 }
 
+/** Env for tmux calls: server env minus npm-run noise (breaks tmux otherwise). */
+function cleanTmuxEnv(): NodeJS.ProcessEnv {
+  const env: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith('npm_') || k === 'INIT_CWD' || k === 'NODE_ENV') continue;
+    env[k] = v;
+  }
+  return env;
+}
+
 export interface CreateTmuxSessionOptions {
   sessionName: string;
   cwd: string;
@@ -97,9 +107,32 @@ export function createTmuxSession(opts: CreateTmuxSessionOptions): boolean {
 
   try {
     execFileSync('tmux', tmuxArgs, { env: cleanEnv, stdio: 'ignore' });
-    // Strip tmux chrome: status bar off so the app sees only pure terminal output
-    execFileSync('tmux', ['-S', sock, 'set-option', '-t', opts.sessionName, 'status', 'off'], { env: cleanEnv, stdio: 'ignore' });
-    execFileSync('tmux', ['-S', sock, 'set-option', '-t', opts.sessionName, 'history-limit', '10000'], { env: cleanEnv, stdio: 'ignore' });
+    applyTmuxSessionOptions(opts.sessionName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Options every AgentDeck session gets (idempotent — also run when re-attaching
+ * to a session created before an option existed):
+ *
+ * - status off: no tmux chrome, the app sees pure terminal output
+ * - history-limit: scrollback the client reaches via wheel events
+ * - mouse on: tmux consumes wheel events (auto copy-mode scroll) or forwards
+ *   them to pane apps that use the mouse. Without it nothing can scroll: tmux
+ *   keeps the attached terminal on the alternate screen, so the client-side
+ *   xterm never builds scrollback of its own — the history lives in tmux.
+ */
+export function applyTmuxSessionOptions(sessionName: string): boolean {
+  if (!isTmuxAvailable()) return false;
+  const sock = tmuxSocketPath();
+  const env = cleanTmuxEnv();
+  try {
+    execFileSync('tmux', ['-S', sock, 'set-option', '-t', sessionName, 'status', 'off'], { env, stdio: 'ignore' });
+    execFileSync('tmux', ['-S', sock, 'set-option', '-t', sessionName, 'history-limit', '10000'], { env, stdio: 'ignore' });
+    execFileSync('tmux', ['-S', sock, 'set-option', '-t', sessionName, 'mouse', 'on'], { env, stdio: 'ignore' });
     return true;
   } catch {
     return false;
