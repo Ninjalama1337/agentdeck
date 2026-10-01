@@ -127,6 +127,28 @@ export const PRESET_DEFS: PresetDef[] = [
     ],
   },
   {
+    id: 'zcode',
+    label: 'ZCode',
+    description: 'Z.AI ZCode CLI TUI',
+    kind: 'agent',
+    command: 'zcode',
+    accent: '#7C5CFF',
+    variants: [
+      NEW,
+      { id: 'continue', label: 'Continue', args: '-c', hint: 'Resume the last session' },
+      { id: 'yolo', label: 'YOLO', args: '--mode yolo', hint: 'No permission prompts', danger: true },
+      { id: 'plan', label: 'Plan', args: '--mode plan', hint: 'Plan-only mode' },
+    ],
+    snippets: [
+      { label: '/model', text: '/model' },
+      { label: '/mode', text: '/mode' },
+      { label: '/compact', text: '/compact' },
+      { label: '/new', text: '/new' },
+      { label: '/goal', text: '/goal' },
+    ],
+    install: 'scripts/update-zcode.sh',
+  },
+  {
     id: 'aider',
     label: 'Aider',
     description: 'AI pair programming in your terminal',

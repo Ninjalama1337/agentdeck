@@ -89,6 +89,20 @@ describe('terminal presets', () => {
       agent: true,
     });
     expect(resolveLaunch('codex', undefined, undefined).command).toBe('codex');
+    expect(resolveLaunch('zcode', 'continue', undefined)).toEqual({
+      command: 'zcode -c',
+      title: 'ZCode · Continue',
+      presetId: 'zcode',
+      variantId: 'continue',
+      agent: true,
+    });
+    expect(resolveLaunch('zcode', 'yolo', undefined)).toEqual({
+      command: 'zcode --mode yolo',
+      title: 'ZCode · YOLO',
+      presetId: 'zcode',
+      variantId: 'yolo',
+      agent: true,
+    });
     expect(resolveLaunch(undefined, undefined, undefined)).toEqual({ title: 'shell', presetId: 'shell', agent: false });
     expect(resolveLaunch(undefined, undefined, '  npm run dev ')).toMatchObject({ command: 'npm run dev', title: 'npm' });
     expect(() => resolveLaunch('nope', undefined, undefined)).toThrow();
@@ -99,7 +113,7 @@ describe('terminal presets', () => {
     const presets = listPresets(true);
     expect(presets[0]?.id).toBe('shell');
     expect(presets[0]?.available).toBe(true);
-    expect(presets.map((p) => p.id)).toEqual(expect.arrayContaining(['claude', 'codex', 'opencode', 'gemini']));
+    expect(presets.map((p) => p.id)).toEqual(expect.arrayContaining(['claude', 'codex', 'opencode', 'gemini', 'zcode']));
   });
 });
 
