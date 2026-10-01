@@ -190,7 +190,8 @@ Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
 | POST | `/api/projects/clone` | `CloneProjectRequest → Project` (async clone; progress via `project:update`) |
 | DELETE | `/api/projects/:id` | `204` (removes from registry, never deletes files) |
 | GET | `/api/projects/:id/files` `?path=&all=` | `FileEntry[]` (`all=1` includes dotfiles) |
-| GET | `/api/projects/:id/files/raw` `?path=&token=` | file stream (inline for images/text, attachment otherwise) |
+| GET | `/api/projects/:id/files/raw` `?path=&token=&download=` | file stream (inline for images/text, attachment otherwise; `download=1` always attachment) |
+| GET | `/api/projects/:id/files/download-url` `?path=` | `FileDownloadUrlResponse` — signed `/files/raw` URL (`download=1`, TTL 120 s) for the system browser / download manager |
 | GET | `/api/projects/:id/files/content` `?path=` | `FileContentResponse` — UTF-8 text read, cap 1 MB (`truncated:true`), 415 NON_TEXT for binary files (null byte or NFD check) |
 | PUT | `/api/projects/:id/files/content` | `SaveFileRequest → SaveFileResponse` — atomic write (temp+rename), creates missing parent dirs, cap 1 MB, 415 NON_TEXT, 403 inside `.git/` |
 | POST | `/api/projects/:id/files/create` | `CreateEntryRequest → 204` — new empty file or dir, 409 EXISTS, same sandbox rules |

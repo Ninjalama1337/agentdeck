@@ -31,6 +31,7 @@ import type {
   EnhanceRequest,
   EnhanceResponse,
   FileContentResponse,
+  FileDownloadUrlResponse,
   FileEntry,
   GithubRepo,
   GitCommitRequest,
@@ -281,6 +282,16 @@ export const api = {
   /** Authed URL for raw file access (Bearer header). Signed URLs come from Attachment.url. */
   fileRawPath(projectId: string, path: string): string {
     return `/api/projects/${encodeURIComponent(projectId)}/files/raw?path=${encodeURIComponent(path)}`;
+  },
+
+  /** Absolute, signed (header-free) download URL — short-lived, for handing to the system browser. */
+  async fileDownloadUrl(projectId: string, path: string): Promise<string> {
+    const res = await request<FileDownloadUrlResponse>(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/files/download-url`,
+      { query: { path } },
+    );
+    return base() + res.url;
   },
 
   /** Read a UTF-8 text file (cap 1 MB → truncated:true; 415 NON_TEXT for binaries). */

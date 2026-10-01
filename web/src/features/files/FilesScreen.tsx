@@ -21,8 +21,9 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { FileEntry } from '@agentdeck/shared';
-import { api, ApiError, fetchBlob, uploadFile } from '../../api/client';
+import { api, fetchBlob, uploadFile } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
+import { downloadFile, isShareCancel } from '../../util/download';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Button, IconButton } from '../../components/ui/Button';
 import { MenuRow } from '../../components/ui/MenuRow';
@@ -154,22 +155,10 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const download = async (entry: FileEntry) => {
     setActionEntry(null);
     try {
-      const blob = await fetchBlob(api.fileRawPath(projectId, entry.path));
-      const file = new File([blob], entry.name, { type: blob.type || 'application/octet-stream' });
-      const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
-      if (canShare) {
-        await navigator.share({ files: [file], title: entry.name });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = entry.name;
-        a.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 8000);
-      }
+      const via = await downloadFile(projectId, entry.path, entry.name);
+      if (via === 'browser') toast('info', `Downloading ${entry.name} in your browser`);
     } catch (err) {
-      if (err instanceof ApiError) toast('error', errorMessage(err));
-      /* user cancelled the share sheet — ignore */
+      if (!isShareCancel(err)) toast('error', `Download failed: ${errorMessage(err)}`);
     }
   };
 

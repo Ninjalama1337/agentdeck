@@ -194,6 +194,11 @@ export interface GitCommitRequest {
   files?: string[];
 }
 
+/** Short-lived signed URL (server-relative) that downloads one file without auth headers. */
+export interface FileDownloadUrlResponse {
+  url: string;
+}
+
 // ---------------------------------------------------------------------------
 // In-app file editing
 // ---------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileQuestion, Loader2, RotateCw, TriangleAlert, X } from 'lucide-react';
-import { api, ApiError, fetchBlob } from '../../api/client';
+import { api, ApiError } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
+import { downloadFile, isShareCancel } from '../../util/download';
 import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
 import { bytes } from '../../util/format';
@@ -174,22 +175,10 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
 
   const downloadBinary = async () => {
     try {
-      const blob = await fetchBlob(api.fileRawPath(projectId, path));
-      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
-      const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
-      if (canShare) {
-        await navigator.share({ files: [file], title: fileName });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 8000);
-      }
+      const via = await downloadFile(projectId, path, fileName);
+      if (via === 'browser') toast('info', `Downloading ${fileName} in your browser`);
     } catch (err) {
-      if (err instanceof ApiError) toast('error', errorMessage(err));
-      /* user cancelled the share sheet — ignore */
+      if (!isShareCancel(err)) toast('error', `Download failed: ${errorMessage(err)}`);
     }
   };
 

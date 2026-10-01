@@ -3,14 +3,14 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
-import type { Attachment } from '@agentdeck/shared';
+import type { Attachment, FileDownloadUrlResponse } from '@agentdeck/shared';
 import { z } from 'zod';
 import { notFound, httpError } from '../http/errors.js';
 import { resolveInsideRoot } from '../files/sandbox.js';
 import { guessMime, isInlineMime, listDirectory } from '../files/browser.js';
 import { sanitizeFileName } from '../util/paths.js';
 import { newFileId } from '../util/ids.js';
-import { verifyDownloadToken } from '../auth/downloadTokens.js';
+import { signDownloadToken, verifyDownloadToken } from '../auth/downloadTokens.js';
 import { getProjectOr404 } from './projects.js';
 import { ATTACHMENTS_PROJECT_ID, signedFileUrl } from './attachments.js';
 import type { AppDeps } from './deps.js';
@@ -38,7 +38,7 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
   fastify.get('/projects/:id/files/raw', async (req, reply) => {
     const projectId = (req.params as { id: string }).id;
     const query = z
-      .object({ path: z.string().min(1), token: z.string().optional() })
+      .object({ path: z.string().min(1), token: z.string().optional(), download: z.string().optional() })
       .parse(req.query ?? {});
     const { root } = uploadTarget(deps, projectId);
 
@@ -64,13 +64,34 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
 
     const mime = guessMime(resolved.abs);
     const filename = path.basename(resolved.abs);
-    const disposition = isInlineMime(mime) ? 'inline' : 'attachment';
+    // `download=1` forces a save even for images/text (explicit "Download" tap).
+    const disposition = isInlineMime(mime) && query.download !== '1' ? 'inline' : 'attachment';
     reply.type(mime);
     reply.header('content-length', stats.size);
     reply.header('content-disposition', `${disposition}; filename="${filename.replace(/"/g, '')}"`);
     // Return the send chain: in async handlers a plain `reply.send(...)` followed
     // by an implicit `undefined` return would override the stream with "".
     return reply.send(createReadStream(resolved.abs));
+  });
+
+  // Signed, header-free URL for one file. The Android app hands it to the
+  // system browser / download manager, which cannot send the bearer token.
+  fastify.get('/projects/:id/files/download-url', async (req) => {
+    const projectId = (req.params as { id: string }).id;
+    const query = z.object({ path: z.string().min(1) }).parse(req.query ?? {});
+    const { root, tokenProjectId } = uploadTarget(deps, projectId);
+    const resolved = await resolveInsideRoot(root, query.path);
+    let stats;
+    try {
+      stats = await fsp.stat(resolved.abs);
+    } catch {
+      throw notFound('File not found');
+    }
+    if (stats.isDirectory()) throw httpError(400, 'IS_DIRECTORY', 'Path is a directory');
+    // Sign the path exactly as requested: /files/raw verifies against its own `path` query.
+    const token = signDownloadToken(deps.jwtSecret, { projectId: tokenProjectId, path: query.path });
+    const url = `/api/projects/${encodeURIComponent(tokenProjectId)}/files/raw?path=${encodeURIComponent(query.path)}&token=${token}&download=1`;
+    return { url } satisfies FileDownloadUrlResponse;
   });
 
   fastify.post('/projects/:id/files/upload', async (req, reply) => {
