@@ -161,7 +161,7 @@ Storage layout under `dataDir`:
 | GET | `/api/health` | `{ok,name,version,agents:[{id,available}],tunnel?:{status,publicUrl?}}` (no auth) |
 | POST | `/api/pair` | `PairRequest → PairResponse` |
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
-| GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached ≥60 s). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage`; Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint. |
+| GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached ≥60 s). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |

@@ -230,6 +230,11 @@ export const api = {
     return request('GET', '/api/usage');
   },
 
+  /** Switch active plan / quota mode for an agent (e.g. ZCode subscription vs free tokens). */
+  switchPlan(agentId: string, planId: string): Promise<{ ok: boolean; activePlanId: string }> {
+    return request('POST', `/api/agents/${encodeURIComponent(agentId)}/plan`, { json: { planId } });
+  },
+
   /**
    * Direct download URL for the latest APK. Plain anchor href (no headers) so
    * Android download managers and "open in browser" flows work — the server

@@ -1,24 +1,22 @@
 /**
  * Subscription usage collector for GET /api/usage → AgentUsage[].
  *
- * Collects and parses plan limits and statistics for:
- * - claude: `claude -p "/usage"` (session/week % used, resets, requests)
- * - antigravity: `agy -p "/usage"` (5h/week limit remaining %, model quotas, resets)
- * - opencode: `opencode stats` (total cost, tokens, sessions, messages, tool stats)
- * - codex: app-server `account/rateLimits/read` (login status fallback)
- * - zcode: `zcode --version` + provider config inspection (Z.AI Plan / model)
+ * - claude: `claude -p "/usage"` for session/week limits and request stats.
+ * - antigravity: `agy -p /usage` for subscription limits and model quotas.
+ * - opencode: `opencode stats` for total cost, tokens, sessions and messages.
+ * - codex: local app-server `account/rateLimits/read`, with login fallback.
+ * - zcode: plan data and local usage statistics.
  *
  * Results are cached for 60s with in-flight dedupe (concurrent calls share
  * one run). The spawn function is injectable for tests.
  */
-import fs from 'node:fs/promises';
 import { spawn as spawnProcess } from 'node:child_process';
 import os from 'node:os';
-import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { execa } from 'execa';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import type { AgentService } from '../agents/registry.js';
+import { getZcodePlanInfo, readZcodeSqliteStats } from '../agents/zcode.js';
 
 export const USAGE_TTL_MS = 60_000;
 const CLAUDE_TIMEOUT_MS = 30_000;
@@ -26,7 +24,6 @@ const AGY_TIMEOUT_MS = 20_000;
 const OPENCODE_TIMEOUT_MS = 15_000;
 const CODEX_TIMEOUT_MS = 15_000;
 const CODEX_APP_SERVER_TIMEOUT_MS = 12_000;
-const ZCODE_TIMEOUT_MS = 10_000;
 const RAW_CAP = 4000;
 
 /** Exec result shape used by the collector (satisfied by execa with reject:false). */
@@ -59,6 +56,8 @@ export interface CollectorOptions {
   /** Codex app-server RPC override; omitted in custom-spawn collectors. */
   readCodexRateLimits?: () => Promise<unknown>;
   ttlMs?: number;
+  /** Optional ZCode collector override (tests). */
+  zcodeCollector?: () => Promise<Partial<AgentUsage>>;
 }
 
 interface CacheEntry {
@@ -466,12 +465,20 @@ export class UsageCollector {
   private cache?: CacheEntry;
   private inflight?: Promise<AgentUsage[]>;
 
+  private readonly zcodeCollector?: () => Promise<Partial<AgentUsage>>;
+
   constructor(opts: CollectorOptions) {
     this.spawn = opts.spawn ?? defaultSpawn;
     this.isAvailableFn = opts.isAvailable ?? ((id) => opts.agents.infoOf(id)?.available === true);
     this.readCodexRateLimits =
       opts.readCodexRateLimits ?? (opts.spawn ? undefined : readCodexRateLimitsFromAppServer);
     this.ttlMs = opts.ttlMs ?? USAGE_TTL_MS;
+    this.zcodeCollector = opts.zcodeCollector;
+  }
+
+  /** Clears cached usage snapshots (e.g. after a plan switch). */
+  clearCache(): void {
+    this.cache = undefined;
   }
 
   /** Cached per-agent usage snapshot; concurrent calls share one collection run. */
@@ -496,7 +503,7 @@ export class UsageCollector {
       this.collectAntigravity(fetchedAt),
       this.collectOpenCode(fetchedAt),
       this.collectCodex(fetchedAt),
-      this.collectZCode(fetchedAt),
+      this.collectZcode(fetchedAt),
     ]);
     return entries;
   }
@@ -660,47 +667,36 @@ export class UsageCollector {
     };
   }
 
-  private async collectZCode(fetchedAt: number): Promise<AgentUsage> {
+  private async collectZcode(fetchedAt: number): Promise<AgentUsage> {
     const base: AgentUsage = { agentId: 'zcode', available: false, fetchedAt };
     if (!this.isAvailableFn('zcode')) {
       return { ...base, reason: 'ZCode CLI not available' };
     }
-
-    let res: SpawnResult;
+    if (this.zcodeCollector) {
+      const custom = await this.zcodeCollector();
+      return { ...base, available: true, ...custom, agentId: 'zcode', fetchedAt };
+    }
     try {
-      res = await this.spawn('zcode', ['--version'], {
-        timeoutMs: ZCODE_TIMEOUT_MS,
-        cwd: os.homedir(),
-      });
+      const [plansInfo, stats] = await Promise.all([
+        getZcodePlanInfo(),
+        readZcodeSqliteStats(),
+      ]);
+      return {
+        agentId: 'zcode',
+        available: true,
+        plan: plansInfo.activePlanLabel,
+        activePlanId: plansInfo.activePlanId,
+        plans: plansInfo.plans,
+        session: plansInfo.session,
+        week: plansInfo.week,
+        last24h: stats.last24h,
+        last7d: stats.last7d,
+        raw: plansInfo.raw,
+        fetchedAt,
+      };
     } catch (err) {
-      return { ...base, reason: `zcode --version failed: ${errorMessage(err)}`, fetchedAt };
+      return { ...base, reason: `ZCode usage collection failed: ${errorMessage(err)}` };
     }
-
-    // Inspect provider config if available
-    let plan = 'Z.AI Coding Plan';
-    let model = 'GLM-5.3';
-    try {
-      const cfgPath = path.join(os.homedir(), '.zcode', 'cli', 'provider_config.json');
-      const content = await fs.readFile(cfgPath, 'utf8');
-      const json = JSON.parse(content);
-      if (json?.defaultModelSelection?.modelId) {
-        model = json.defaultModelSelection.modelId;
-      }
-      if (json?.defaultModelSelection?.providerId) {
-        plan = json.defaultModelSelection.providerId.replace(/^account:/, '').replace(/-/g, ' ');
-      }
-    } catch {
-      // Default to known plan
-    }
-
-    const version = firstLine(res.stdout) || '0.16.9';
-    return {
-      agentId: 'zcode',
-      available: true,
-      plan: `${plan} (${model})`,
-      reason: `ZCode v${version} · Model: ${model}`,
-      raw: capRaw(res.stdout || res.stderr),
-      fetchedAt,
-    };
   }
+
 }

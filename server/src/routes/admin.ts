@@ -54,4 +54,25 @@ export async function adminRoutes(fastify: FastifyInstance, deps: AppDeps): Prom
     }
     reply.code(204).send();
   });
+
+  fastify.post('/admin/server/restart', async (_req, reply) => {
+    deps.log.info('admin requested server restart');
+    reply.code(200).send({ ok: true, message: 'Server restarting' });
+
+    setTimeout(async () => {
+      try {
+        const { execSync } = await import('node:child_process');
+        try {
+          execSync('systemctl --user is-active agentdeck.service', { stdio: 'ignore' });
+          execSync('systemctl --user restart agentdeck.service', { stdio: 'ignore' });
+          return;
+        } catch {
+          // not systemd unit
+        }
+      } catch {
+        // ignore
+      }
+      process.kill(process.pid, 'SIGTERM');
+    }, 250);
+  });
 }

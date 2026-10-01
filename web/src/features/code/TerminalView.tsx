@@ -33,6 +33,60 @@ export const TERM_THEME = {
   brightWhite: '#ffffff',
 };
 
+/** Idle time before xterm's hidden textarea is emptied on touch devices. */
+const IME_IDLE_CLEAR_MS = 2000;
+
+/**
+ * Mobile IMEs keep committed text in xterm's hidden textarea, and a later
+ * keyCode 229 event can make xterm resend that stale buffer. Empty it only at
+ * safe points — after Enter, or once typing has paused — never between two
+ * keystrokes: rewriting the field mid-typing restarts the IME (the suggestion
+ * strip flickers) and races xterm's own diff of the textarea. Left alone in
+ * xterm's screen-reader mode.
+ */
+function installMobileImeBufferFix(term: Terminal): () => void {
+  const textarea = term.textarea;
+  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+  if (!textarea || !touchDevice) return () => undefined;
+
+  let composing = false;
+  let clearTimer: number | null = null;
+  const cancelClear = () => {
+    if (clearTimer !== null) window.clearTimeout(clearTimer);
+    clearTimer = null;
+  };
+  const scheduleClear = (delay: number) => {
+    cancelClear();
+    clearTimer = window.setTimeout(() => {
+      clearTimer = null;
+      if (composing || term.options.screenReaderMode) return;
+      textarea.value = '';
+    }, delay);
+  };
+  const onCompositionStart = () => {
+    composing = true;
+    cancelClear();
+  };
+  const onCompositionEnd = () => {
+    composing = false;
+    scheduleClear(IME_IDLE_CLEAR_MS);
+  };
+  const onKeyDown = () => cancelClear();
+  const onKeyUp = (e: KeyboardEvent) => scheduleClear(e.key === 'Enter' ? 100 : IME_IDLE_CLEAR_MS);
+
+  textarea.addEventListener('compositionstart', onCompositionStart);
+  textarea.addEventListener('compositionend', onCompositionEnd);
+  textarea.addEventListener('keydown', onKeyDown);
+  textarea.addEventListener('keyup', onKeyUp);
+  return () => {
+    textarea.removeEventListener('compositionstart', onCompositionStart);
+    textarea.removeEventListener('compositionend', onCompositionEnd);
+    textarea.removeEventListener('keydown', onKeyDown);
+    textarea.removeEventListener('keyup', onKeyUp);
+    cancelClear();
+  };
+}
+
 /** Sticky modifier shared by key bar and direct typing ("Ctrl" then a key). */
 export interface ModifierRef {
   current: { ctrl: boolean; alt: boolean };
@@ -83,13 +137,17 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    const disposeImeFix = installMobileImeBufferFix(term);
+    const viewport = host.querySelector<HTMLElement>('.xterm-viewport');
+    if (viewport) {
+      viewport.style.touchAction = 'pan-y';
+      viewport.style.setProperty('-webkit-overflow-scrolling', 'touch');
+      viewport.style.overscrollBehaviorY = 'contain';
+    }
     termRef.current = term;
     fitRef.current = fit;
     const ta = term.textarea;
     if (ta) {
-      // Raw key input only: with suggestions on, mobile IMEs compose whole words
-      // in xterm's hidden textarea and replay or drop text. The compose bar is
-      // the place for autocorrect and suggestions.
       ta.setAttribute('autocapitalize', 'off');
       ta.setAttribute('autocorrect', 'off');
       ta.setAttribute('autocomplete', 'off');
@@ -143,14 +201,20 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     });
 
     let resizeTimer: number | null = null;
+    let lastCols = term.cols;
+    let lastRows = term.rows;
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
+        if (term.cols !== lastCols || term.rows !== lastRows) {
+          lastCols = term.cols;
+          lastRows = term.rows;
+          if (resizeTimer) window.clearTimeout(resizeTimer);
+          resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows), 80);
+        }
       } catch {
         return; // host not measurable yet
       }
-      if (resizeTimer) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows), 80);
     });
     observer.observe(host);
 
@@ -159,6 +223,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       if (resizeTimer) window.clearTimeout(resizeTimer);
       input.dispose();
       unsubscribe();
+      disposeImeFix();
       term.dispose();
       termRef.current = null;
     };

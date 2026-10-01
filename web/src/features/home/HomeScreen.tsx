@@ -58,7 +58,7 @@ export function HomeScreen() {
     [routines],
   );
 
-  const quickAgents = (presets ?? []).filter((p) => p.kind === 'agent' && p.available && p.id !== 'antigravity');
+  const quickAgents = (presets ?? []).filter((p) => p.kind === 'agent' && p.available);
   const activeProject = projects.find((p) => p.id === activeProjectId);
 
   const quickLaunch = async (presetId: string) => {

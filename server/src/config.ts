@@ -66,7 +66,7 @@ export const ConfigSchema = z.object({
       zcode: AgentConfigSchema.default({ mode: 'auto', command: 'zcode' }),
       antigravity: AgentConfigSchema.default({
         mode: 'auto',
-        command: 'flatpak run --command=antigravity com.google.Antigravity',
+        command: 'agy',
         ideCommand: 'flatpak run com.google.Antigravity',
       }),
       codex: AgentConfigSchema.default({ mode: 'headless', command: 'codex' }),

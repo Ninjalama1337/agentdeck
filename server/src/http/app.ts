@@ -152,7 +152,11 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   const notifiedTeams = new Set<string>();
   // PTY terminals — broadcast callbacks are built per call in the routes
   // (they close over `deps.broadcast`, which is bound by then).
-  const terminals = new TerminalManager(log);
+  const terminals = new TerminalManager(log, {
+    dataDir: config.dataDir,
+    serverPort: config.port,
+    serverPid: process.pid,
+  });
   const routines = new RoutineScheduler({ store, manager, log });
   const io = attachGateway({
     httpServer: app.server,
@@ -262,6 +266,9 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     ...(webDist ? { webDist } : {}),
   };
 
+  // Restore persistent tmux terminals that survived a server restart
+  terminals.restoreAll(terminalBroadcasts(deps));
+
   // Auth for /api/* (health, pair and the bridge scope are handled separately).
   app.addHook('onRequest', makeDeviceAuthHook(jwtSecret, (deviceId) => store.touchDevice(deviceId)));
 
@@ -290,10 +297,10 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   await app.register(registerRoutes, { deps, prefix: '/api' });
 
   // Watchers must not keep the process alive past app close (tests, shutdown);
-  // an active admin job is killed (SIGTERM → SIGKILL) so nothing outlives us.
+  // terminals detach so background tmux sessions stay alive across restarts.
   app.addHook('onClose', async () => {
     routines.stop();
-    terminals.killAll();
+    terminals.detachAll();
     adminJobRunner.stop('Server shutting down');
     await adminJobRunner.idle().catch(() => undefined);
     fileWatchers.stopAll();

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AGENT_IDS } from '../config.js';
 import { MODEL_PRESETS } from '../agents/models.js';
+import { switchZcodePlan } from '../agents/zcode.js';
 import { httpError, notFound } from '../http/errors.js';
 import type { AppDeps } from './deps.js';
 
@@ -22,5 +23,36 @@ export async function agentRoutes(fastify: FastifyInstance, deps: AppDeps): Prom
       throw notFound('Agent is disabled');
     }
     reply.send({ models: MODEL_PRESETS[agentId] });
+  });
+
+  fastify.post('/agents/:agentId/plan', async (req, reply) => {
+    const parse = z.enum(AGENT_IDS).safeParse((req.params as { agentId?: string }).agentId);
+    if (!parse.success) {
+      throw httpError(
+        404,
+        'NOT_FOUND',
+        `Unknown agent: ${String((req.params as { agentId?: string }).agentId ?? '')}`,
+      );
+    }
+    const agentId = parse.data;
+    if (deps.config.agents[agentId].mode === 'off') {
+      throw notFound('Agent is disabled');
+    }
+    const body = z.object({
+      planId: z.enum(['subscription', 'free']),
+    }).parse(req.body);
+
+    if (agentId === 'zcode') {
+      try {
+        switchZcodePlan(body.planId);
+        deps.usage.clearCache();
+        reply.send({ ok: true, activePlanId: body.planId });
+        return;
+      } catch (err) {
+        throw httpError(500, 'PLAN_SWITCH_FAILED', (err as Error).message);
+      }
+    }
+
+    throw httpError(400, 'BAD_REQUEST', `Agent ${agentId} does not support plan switching`);
   });
 }

@@ -23,6 +23,7 @@ export function connectSocket(): DeckSocket {
   const base = getApiBase().replace(/\/+$/, '');
   const opts = {
     auth: { token },
+    transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 800,
     reconnectionDelayMax: 6000,

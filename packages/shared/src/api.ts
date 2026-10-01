@@ -310,6 +310,19 @@ export interface UsageWindow {
   sessions?: number;
 }
 
+export interface AgentPlanOption {
+  id: string;
+  label: string;
+  active: boolean;
+  status?: string;
+  detail?: string;
+  resetsAt?: string;
+  tokens?: number;
+  models?: string[];
+  session?: UsageWindow;
+  week?: UsageWindow;
+}
+
 export interface AgentUsage {
   agentId: AgentId;
   available: boolean;
@@ -317,16 +330,20 @@ export interface AgentUsage {
   plan?: string;
   session?: UsageWindow;
   week?: UsageWindow;
+  /** Provider-specific subscription rate-limit windows (e.g. Codex). */
+  rateLimits?: { name: string; window: UsageWindow }[];
+  /** Antigravity quota breakdown by model family. */
+  modelsQuota?: { name: string; sessionLimit?: UsageWindow; weeklyLimit?: UsageWindow }[];
   last24h?: UsageWindow;
   last7d?: UsageWindow;
-  /** Provider quota windows (e.g. Codex 5-hour, weekly, or monthly limits). */
-  rateLimits?: { name: string; window: UsageWindow }[];
   /** Dollar cost (e.g. from OpenCode stats). */
   cost?: string;
   /** Token breakdown (e.g. from OpenCode stats). */
   tokens?: { input?: string; output?: string; cache?: string };
-  /** Multi-model breakdown (e.g. from Antigravity/AGY quota). */
-  modelsQuota?: { name: string; sessionLimit?: UsageWindow; weeklyLimit?: UsageWindow }[];
+  /** Active plan id when multiple plans/modes exist (e.g. 'subscription' vs 'free'). */
+  activePlanId?: string;
+  /** Available plan choices (e.g. ZCode subscription vs free tokens). */
+  plans?: AgentPlanOption[];
   /** Unparsed CLI output for transparency / debugging. */
   raw?: string;
   fetchedAt: number;
@@ -360,6 +377,8 @@ export interface TerminalInfo {
   lastOutputAt?: number;
   /** The terminal rang / went quiet after work and waits for the user. */
   attention?: boolean;
+  /** Whether the terminal session is persistent across server restarts (tmux-backed). */
+  persistent?: boolean;
 }
 
 export interface CreateTerminalRequest {

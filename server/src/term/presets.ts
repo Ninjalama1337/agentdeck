@@ -107,13 +107,24 @@ export const PRESET_DEFS: PresetDef[] = [
   },
   {
     id: 'antigravity',
-    label: 'Antigravity',
-    description: 'Opens the project in the Antigravity IDE on the host',
+    label: 'Antigravity CLI',
+    description: 'Google Antigravity agent CLI (agy)',
     kind: 'agent',
-    command: 'flatpak run com.google.Antigravity .',
-    bin: 'flatpak',
-    accent: '#7C9CFF',
-    variants: [NEW],
+    command: 'agy',
+    bin: 'agy',
+    accent: '#4E8CFF',
+    variants: [
+      NEW,
+      { id: 'continue', label: 'Continue', args: '-c', hint: 'Continue most recent session' },
+      { id: 'yolo', label: 'YOLO', args: '--dangerously-skip-permissions', hint: 'Auto-approve all tool permission requests', danger: true },
+      { id: 'plan', label: 'Plan', args: '--mode plan', hint: 'Plan-only mode' },
+    ],
+    snippets: [
+      { label: '/help', text: '/help' },
+      { label: '/status', text: '/status' },
+      { label: '/clear', text: '/clear' },
+      { label: '/exit', text: '/exit' },
+    ],
   },
   {
     id: 'aider',
@@ -231,10 +242,11 @@ export function listPresets(force = false): TerminalPreset[] {
     const binName = bin ?? def.command.split(/\s+/)[0] ?? def.command;
     const resolved = findExecutable(binName, pathValue);
     let available = resolved !== undefined;
-    // flatpak alone does not prove Antigravity is installed.
-    if (available && def.id === 'antigravity') {
-      available = fs.existsSync('/var/lib/flatpak/app/com.google.Antigravity') ||
-        fs.existsSync(path.join(os.homedir(), '.local/share/flatpak/app/com.google.Antigravity'));
+    if (!available && def.id === 'antigravity') {
+      const agyAlt = findExecutable('antigravity', pathValue);
+      if (agyAlt) {
+        available = true;
+      }
     }
     presets.push({ ...rest, available, ...(resolved && available ? { resolvedPath: resolved } : {}) });
   }

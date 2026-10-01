@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Coins, Gauge, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Coins, Gauge, Loader2, RefreshCw, Sparkles, Zap } from 'lucide-react';
+import { clsx } from 'clsx';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import { AGENT_ACCENTS, AGENT_LABELS, AGENT_SHORT_LABELS } from '@agentdeck/shared';
+import { api } from '../../api/client';
 import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { AgentAvatar } from '../../components/ui/Avatar';
@@ -61,15 +63,17 @@ function Bar({ label, win, accent }: { label: string; win: UsageWindow; accent: 
   const danger = pct >= 80;
   const fill = danger ? '#F43F5E' : accent;
   const resetAt = win.resetsAt ? Date.parse(win.resetsAt) : NaN;
-  const resetLabel = Number.isNaN(resetAt)
-    ? win.resetsAt
-    : new Intl.DateTimeFormat(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-      }).format(new Date(resetAt));
+  const resetLabel = win.resetsAt
+    ? Number.isNaN(resetAt)
+      ? normalizeMeridiemTimes(win.resetsAt)
+      : new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+        }).format(new Date(resetAt))
+    : undefined;
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
@@ -94,11 +98,15 @@ function UsageCard({
   accent,
   isActive,
   onSelectActive,
+  onSwitchPlan,
+  switchingPlan,
 }: {
   usage: AgentUsage;
   accent: string;
   isActive: boolean;
   onSelectActive: () => void;
+  onSwitchPlan?: (agentId: string, planId: string) => Promise<void>;
+  switchingPlan?: string | null;
 }) {
   const [rawOpen, setRawOpen] = useState(false);
   const agentLabel = AGENT_LABELS[usage.agentId] ?? usage.agentId;
@@ -179,13 +187,127 @@ function UsageCard({
         </div>
       </div>
 
+      {/* Multi-plan switcher (ZCode subscription vs. free tokens) */}
+      {usage.plans && usage.plans.length > 0 && (
+        <div className="mb-3 flex flex-col gap-2 rounded-xl border border-line bg-black/20 p-3">
+          <div className="flex items-center justify-between text-[12px] font-semibold text-ink">
+            <span className="flex items-center gap-1.5">
+              <Zap size={13} className="text-accent" />
+              Tarife & Token
+            </span>
+            <span className="text-[11px] font-normal text-dim">Modus umschalten</span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {usage.plans.map((p) => {
+              const isSwitching = switchingPlan === p.id;
+              return (
+                <div
+                  key={p.id}
+                  className={clsx(
+                    'flex items-start justify-between gap-2 rounded-xl border p-2.5 transition-all',
+                    p.active
+                      ? 'border-accent/60 bg-accent/15 shadow-[0_0_14px_rgba(124,92,255,0.18)]'
+                      : 'border-line/70 bg-white/[0.02]',
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-ink">{p.label}</span>
+                      {p.active && (
+                        <span className="rounded-full bg-accent/25 px-2 py-[1px] text-[10.5px] font-semibold text-accent">
+                          Aktiv
+                        </span>
+                      )}
+                    </div>
+                    {/* Quota & Reset indicators */}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                      {p.session?.pct !== undefined && (
+                        <span className="flex items-center gap-1 text-dim">
+                          <span className="font-medium text-ink">5h:</span>
+                          <span className={p.session.pct >= 80 ? 'font-semibold text-danger' : 'font-medium text-ink'}>
+                            {p.session.pct}%
+                          </span>
+                          {p.session.resetsAt && (
+                            <span className="text-dim/80">({p.session.resetsAt})</span>
+                          )}
+                        </span>
+                      )}
+                      {p.week?.pct !== undefined && (
+                        <span className="flex items-center gap-1 text-dim">
+                          <span className="font-medium text-ink">Woche:</span>
+                          <span className={p.week.pct >= 80 ? 'font-semibold text-danger' : 'font-medium text-ink'}>
+                            {p.week.pct}%
+                          </span>
+                          {p.week.resetsAt && (
+                            <span className="text-dim/80">({p.week.resetsAt})</span>
+                          )}
+                        </span>
+                      )}
+                      {p.tokens !== undefined && (
+                        <span className="flex items-center gap-1 text-dim">
+                          <span className="font-medium text-ink">Kontingent:</span>
+                          <span className="text-ink">{(p.tokens / 1_000_000).toFixed(0)}M Tokens</span>
+                          {p.resetsAt && (
+                            <span className="text-dim/80">(bis {p.resetsAt})</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    {p.detail && (
+                      <p className="mt-1 text-[11px] text-dim/75">{p.detail}</p>
+                    )}
+                  </div>
+                  {!p.active && onSwitchPlan && (
+                    <button
+                      type="button"
+                      disabled={switchingPlan !== null && switchingPlan !== undefined}
+                      onClick={() => void onSwitchPlan(usage.agentId, p.id)}
+                      className="press tap mt-0.5 shrink-0 rounded-lg border border-accent/40 bg-accent/20 px-3 py-1.5 text-[11.5px] font-semibold text-accent hover:bg-accent/30 disabled:opacity-50"
+                    >
+                      {isSwitching ? (
+                        <span className="flex items-center gap-1">
+                          <Loader2 size={12} className="animate-spin" />
+                          Wechsle…
+                        </span>
+                      ) : (
+                        'Aktivieren'
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Progress Bars for Session & Weekly Limits */}
       <div className="flex flex-col gap-3">
-        {usage.session && typeof usage.session.pct === 'number' && (
-          <Bar label={usage.agentId === 'antigravity' ? '5-Hour quota' : 'Session limit'} win={usage.session} accent={accent} />
+        {usage.session && (usage.agentId === 'zcode' || typeof usage.session.pct === 'number') && (
+          <Bar
+            label={
+              usage.agentId === 'antigravity'
+                ? '5-Hour quota'
+                : usage.agentId === 'zcode'
+                  ? '5h-Limit (Sitzung)'
+                  : 'Session limit'
+            }
+            win={usage.session}
+            accent={accent}
+          />
         )}
-        {usage.week && typeof usage.week.pct === 'number' && (
-          <Bar label="Weekly limit" win={usage.week} accent={accent} />
+        {usage.week && (usage.agentId === 'zcode' || typeof usage.week.pct === 'number') && (
+          <Bar
+            label={
+              usage.agentId === 'zcode'
+                ? usage.activePlanId === 'free'
+                  ? 'Gültigkeit (Free Tokens)'
+                  : 'Wochenlimit (Abo)'
+                : 'Weekly limit'
+            }
+            win={usage.week}
+            accent={accent}
+          />
         )}
         {usage.rateLimits?.map((limit) => (
           <Bar key={limit.name} label={limit.name} win={limit.window} accent={accent} />
@@ -272,7 +394,9 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
   const setCurrentUsageAgent = useAppStore((s) => s.setCurrentUsageAgent);
   const usage = useAppStore((s) => s.usage);
   const refreshUsage = useAppStore((s) => s.refreshUsage);
+  const toast = useAppStore((s) => s.toast);
   const [busy, setBusy] = useState(false);
+  const [switchingPlan, setSwitchingPlan] = useState<string | null>(null);
 
   const isOpen = open !== undefined ? open : storeUsageOpen;
   const handleClose = () => {
@@ -288,6 +412,19 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
     setBusy(true);
     await refreshUsage();
     setBusy(false);
+  };
+
+  const handleSwitchPlan = async (agentId: string, planId: string) => {
+    setSwitchingPlan(planId);
+    try {
+      await api.switchPlan(agentId, planId);
+      toast('info', `ZCode Plan gewechselt: ${planId === 'subscription' ? 'Abo-Modell' : 'Free Tokens'}`);
+      await refreshUsage();
+    } catch (err) {
+      toast('error', `Fehler beim Planwechsel: ${(err as Error).message}`);
+    } finally {
+      setSwitchingPlan(null);
+    }
   };
 
   const newest = usage?.reduce((acc, u) => Math.max(acc, u.fetchedAt ?? 0), 0);
@@ -311,7 +448,7 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
         <button
           type="button"
           onClick={() => void refresh()}
-          disabled={busy}
+          disabled={busy || switchingPlan !== null}
           className="press tap flex items-center gap-1.5 rounded-full border border-line bg-white/[0.05] px-3 py-1.5 text-[12px] font-medium text-ink disabled:opacity-50 hover:bg-white/[0.1]"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
@@ -333,6 +470,8 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
               accent={AGENT_ACCENTS[u.agentId] ?? '#7C5CFF'}
               isActive={currentUsageAgent === u.agentId}
               onSelectActive={() => setCurrentUsageAgent(u.agentId)}
+              onSwitchPlan={u.agentId === 'zcode' ? handleSwitchPlan : undefined}
+              switchingPlan={switchingPlan}
             />
           ))}
           <p className="flex items-start gap-1.5 px-1 pb-1 text-[11.5px] leading-relaxed text-dim">

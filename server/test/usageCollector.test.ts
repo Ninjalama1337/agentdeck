@@ -139,6 +139,8 @@ describe('UsageCollector', () => {
       agents,
       isAvailable: (id) => ['claude', 'antigravity', 'opencode', 'codex', 'zcode'].includes(id),
       spawn,
+      // ZCode reads plan data and local stats instead of spawning a CLI.
+      zcodeCollector: async () => ({ plan: 'Z.AI Coding Plan' }),
     });
   }
 
@@ -150,7 +152,6 @@ describe('UsageCollector', () => {
       if (cmd === 'agy') return ok(AGY_SAMPLE);
       if (cmd === 'opencode') return ok(OPENCODE_SAMPLE);
       if (cmd === 'codex') return ok('Logged in using ChatGPT');
-      if (cmd === 'zcode') return ok('0.16.9');
       return ok('');
     });
     const result = await c.collect();
@@ -174,8 +175,9 @@ describe('UsageCollector', () => {
 
     const zcode = result.find((r) => r.agentId === 'zcode');
     expect(zcode?.available).toBe(true);
+    expect(zcode?.plan).toBe('Z.AI Coding Plan');
 
-    expect(calls).toBe(5);
+    expect(calls).toBe(4);
   });
 
   it('caches within TTL and dedupes concurrent calls', async () => {
@@ -186,14 +188,13 @@ describe('UsageCollector', () => {
       if (cmd === 'agy') return ok(AGY_SAMPLE);
       if (cmd === 'opencode') return ok(OPENCODE_SAMPLE);
       if (cmd === 'codex') return ok('Logged in using ChatGPT');
-      if (cmd === 'zcode') return ok('0.16.9');
       return ok('');
     });
     const [a, b] = await Promise.all([c.collect(), c.collect()]);
     expect(a).toEqual(b);
-    expect(spawns).toBe(5);
+    expect(spawns).toBe(4);
     await c.collect();
-    expect(spawns).toBe(5); // cache hit
+    expect(spawns).toBe(4); // cache hit
   });
 
   it('degrades gracefully on spawn errors', async () => {
@@ -204,5 +205,45 @@ describe('UsageCollector', () => {
     const claude = result.find((r) => r.agentId === 'claude');
     expect(claude?.available).toBe(false);
     expect(claude?.reason).toContain('failed');
+  });
+
+  it('collects zcode when available and supports plan choices', async () => {
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'zcode',
+      zcodeCollector: async () => ({
+        plan: 'GLM Coding Lite (Abo)',
+        activePlanId: 'subscription',
+        plans: [
+          { id: 'subscription', label: 'GLM Coding Lite (Abo)', active: true },
+          { id: 'free', label: 'Free Tokens (Start-Plan)', active: false },
+        ],
+      }),
+    });
+    const result = await c.collect();
+    const zcode = result.find((r) => r.agentId === 'zcode');
+    expect(zcode?.available).toBe(true);
+    expect(zcode?.plan).toBe('GLM Coding Lite (Abo)');
+    expect(zcode?.activePlanId).toBe('subscription');
+    expect(zcode?.plans).toHaveLength(2);
+  });
+
+  it('clears cache on clearCache()', async () => {
+    let callCount = 0;
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'zcode',
+      zcodeCollector: async () => {
+        callCount++;
+        return { plan: `Plan ${callCount}` };
+      },
+    });
+    const r1 = await c.collect();
+    expect(r1.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 1');
+    const r2 = await c.collect();
+    expect(r2.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 1'); // cached
+    c.clearCache();
+    const r3 = await c.collect();
+    expect(r3.find((r) => r.agentId === 'zcode')?.plan).toBe('Plan 2'); // fresh
   });
 });

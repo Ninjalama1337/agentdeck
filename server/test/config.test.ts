@@ -25,7 +25,8 @@ describe('loadConfig', () => {
     expect(config.corsOrigins).toContain('capacitor://localhost');
     expect(config.agents.claude).toMatchObject({ mode: 'headless', command: 'claude' });
     expect(config.agents.zcode).toMatchObject({ mode: 'auto', command: 'zcode' });
-    expect(config.agents.antigravity?.command).toContain('com.google.Antigravity');
+    expect(config.agents.antigravity).toMatchObject({ mode: 'auto', command: 'agy' });
+    expect(config.agents.antigravity?.ideCommand).toContain('com.google.Antigravity');
     expect(config.agents.codex).toMatchObject({ mode: 'headless', command: 'codex' });
     // dataDir resolved & absolutized; projectsRoot defaults under it
     expect(path.isAbsolute(config.dataDir)).toBe(true);

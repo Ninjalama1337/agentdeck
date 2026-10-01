@@ -36,6 +36,8 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
   const io: DeckIo = new Server(opts.httpServer, {
     path: '/socket.io',
     cors: { origin: opts.corsOrigins, credentials: true },
+    transports: ['websocket', 'polling'],
+    perMessageDeflate: false,
   });
 
   io.use(async (socket, next) => {

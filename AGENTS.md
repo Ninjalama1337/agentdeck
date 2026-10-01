@@ -20,8 +20,9 @@ dem Code. Schritt für Schritt, bei einem Fehler anhalten und melden:
      zeigen). Gepaarte Geräte sehen danach das Update-Banner.
 5. **Laufenden Server aktualisieren:** im Checkout, aus dem der Server läuft
    (`readlink /proc/<server-pid>/cwd`), `main` pullen, bei geändertem
-   `package-lock.json` `npm install`, dann `npm run build` und den Server neu
-   starten. Liegen dort uncommittete Änderungen, erst nachfragen statt sie zu
+   `package-lock.json` `npm install`, dann `npm run build` und
+   `scripts/restart.sh` (Terminals laufen in tmux und überleben den Neustart).
+   Liegen dort uncommittete Änderungen, erst nachfragen statt sie zu
    überschreiben.
 
 Details zu APK-Bau und -Verteilung: [docs/ANDROID.md](docs/ANDROID.md).
