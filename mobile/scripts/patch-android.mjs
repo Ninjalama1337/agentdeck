@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Adds the Android permissions AgentDeck needs to the generated (uncommitted)
- * android/ project: microphone for Whisper dictation, notifications for
- * "agent finished / waiting" alerts, vibration for haptics. Idempotent.
+ * Adds what AgentDeck needs to the generated (uncommitted) android/ project:
+ * permissions (microphone for Whisper dictation, notifications for "agent
+ * finished / waiting" alerts, vibration for haptics) and the foreground
+ * service that keeps the connection alive in the background. Idempotent.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +22,41 @@ const PERMISSIONS = [
   'android.permission.MODIFY_AUDIO_SETTINGS',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.VIBRATE',
+  // Background connection (web/src/util/backgroundService.ts).
+  'android.permission.FOREGROUND_SERVICE',
+  'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+  'android.permission.WAKE_LOCK',
 ];
+
+// Foreground service of @capawesome-team/capacitor-android-foreground-service.
+// Type "specialUse": no fixed category fits "hold a socket to the user's own
+// server", and unlike "dataSync" it has no daily time limit on Android 15.
+const FGS_PACKAGE = 'io.capawesome.capacitorjs.plugins.foregroundservice';
+const FGS_COMPONENTS = `
+        <receiver android:name="${FGS_PACKAGE}.NotificationActionBroadcastReceiver" />
+        <service
+            android:name="${FGS_PACKAGE}.AndroidForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the connection to the user's own AgentDeck server open to deliver agent notifications" />
+        </service>
+`;
+
+// Small icon of the service's permanent notification. Without a valid icon the
+// service cannot enter the foreground and Android kills the app.
+const STAT_ICON = `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,3 L20,21 H16.6 L15,17 H9 L7.4,21 H4 Z M12,9.2 L10.1,14.2 H13.9 Z" />
+</vector>
+`;
 
 let xml = fs.readFileSync(manifest, 'utf8');
 const missing = PERMISSIONS.filter((p) => !xml.includes(`"${p}"`));
@@ -32,6 +67,21 @@ if (missing.length === 0) {
   xml = xml.replace(/(<\/manifest>\s*)$/, `${lines}\n$1`);
   fs.writeFileSync(manifest, xml);
   console.log(`patch-android: added ${missing.join(', ')}`);
+}
+
+if (xml.includes(`${FGS_PACKAGE}.AndroidForegroundService`)) {
+  console.log('patch-android: foreground service already present');
+} else {
+  xml = xml.replace(/(\n\s*<\/application>)/, `\n${FGS_COMPONENTS.trimEnd()}$1`);
+  fs.writeFileSync(manifest, xml);
+  console.log('patch-android: added foreground service');
+}
+
+const statIcon = path.resolve(here, '../android/app/src/main/res/drawable/ic_stat_agentdeck.xml');
+if (!fs.existsSync(statIcon) || fs.readFileSync(statIcon, 'utf8') !== STAT_ICON) {
+  fs.mkdirSync(path.dirname(statIcon), { recursive: true });
+  fs.writeFileSync(statIcon, STAT_ICON);
+  console.log('patch-android: wrote ic_stat_agentdeck drawable');
 }
 
 // versionName/versionCode from the release version (VITE_AGENTDECK_APK_VERSION or

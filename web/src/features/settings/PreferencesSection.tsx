@@ -7,6 +7,7 @@ import { errorMessage, useAppStore } from '../../store/appStore';
 import { usePrefs, type DictationEngine } from '../../store/prefs';
 import { disablePush, enablePush, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
 import { speechCtor } from '../../hooks/useDictation';
+import { backgroundServiceSupported } from '../../util/backgroundService';
 import { isNativePlatform } from '../../util/platform';
 import { haptic } from '../../util/haptics';
 
@@ -146,7 +147,7 @@ export function PreferencesSection() {
               ? 'Web Push active — works with the app closed'
               : perm === 'granted'
                 ? native
-                  ? 'Shown while the app runs in the background'
+                  ? 'Shown while the app is open or connected in the background'
                   : canPush
                     ? 'Enabled while the app is open — toggle to register push'
                     : 'Shown while the app is open (push needs HTTPS)'
@@ -158,6 +159,18 @@ export function PreferencesSection() {
           <Toggle label="Notifications" checked={prefs.notifications && perm === 'granted'} onChange={(v) => void toggleNotifications(v)} />
         </Row>
         {busy && <p className="text-[12px] text-dim">Registering…</p>}
+        {backgroundServiceSupported() && (
+          <Row
+            title="Stay connected in background"
+            hint="Keeps alerts coming while terminals or runs are active. Shows a permanent notification and uses more battery."
+          >
+            <Toggle
+              label="Stay connected in background"
+              checked={prefs.notifications && prefs.backgroundService}
+              onChange={(v) => prefs.set('backgroundService', v)}
+            />
+          </Row>
+        )}
         <div className="mt-1 border-t border-line pt-1">
           {(Object.keys(KIND_LABELS) as DeckNotificationKind[]).map((k) => (
             <Row key={k} title={KIND_LABELS[k]}>

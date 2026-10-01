@@ -138,8 +138,27 @@ Aufnahme ist aber erst sinnvoll, wenn Signing und Release-Prozess stehen.
 
 ## Berechtigungen
 
-Die APK fragt genau **eine** Berechtigung an: `INTERNET`. Kein Standort, kein
-Speicherzugriff, keine Kamera — Uploads (z. B. Screenshots) laufen über den
-normalen WebView-Datei-Dialog des Systems. Der gesamte AgentDeck-Traffic geht
-als REST/WebSocket an deinen Server; die WebView lädt ausschließlich lokal
-gebaute Assets aus dem APK.
+`mobile/scripts/patch-android.mjs` trägt beim Bau ein, was die APK über
+`INTERNET` hinaus braucht:
+
+| Berechtigung | Wofür |
+|---|---|
+| `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | Diktat |
+| `POST_NOTIFICATIONS` | „Agent fertig / wartet“-Meldungen |
+| `VIBRATE` | Haptik |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK` | Hintergrundverbindung (siehe unten) |
+
+Kein Standort, kein Speicherzugriff, keine Kamera — Uploads (z. B.
+Screenshots) laufen über den normalen WebView-Datei-Dialog des Systems. Der
+gesamte AgentDeck-Traffic geht als REST/WebSocket an deinen Server; die
+WebView lädt ausschließlich lokal gebaute Assets aus dem APK.
+
+### Hintergrundverbindung
+
+Die WebView kennt kein Web Push; Meldungen kommen über den WebSocket. Damit
+Android die App im Hintergrund nicht einfriert, startet sie einen
+Vordergrund-Dienst (dauerhafte Benachrichtigung „AgentDeck — Connected“),
+solange ein Terminal offen ist oder eine Session läuft. Abschaltbar unter
+Settings → *Notifications* → *Stay connected in background*. Der Dienst hält
+einen Wake-Lock und kostet Akku; im tiefen Doze-Modus kann Android die
+Verbindung trotzdem pausieren — Meldungen kommen dann verspätet.

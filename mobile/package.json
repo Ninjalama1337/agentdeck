@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@capacitor/haptics": "^7.0.0",
-    "@capacitor/local-notifications": "^7.0.0"
+    "@capacitor/local-notifications": "^7.0.0",
+    "@capawesome-team/capacitor-android-foreground-service": "^7.0.1"
   }
 }

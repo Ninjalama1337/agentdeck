@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAppStore } from './store/appStore';
+import { usePrefs } from './store/prefs';
 import { Aurora } from './components/Aurora';
 import { TabBar } from './components/TabBar';
 import { TopBar } from './components/TopBar';
@@ -15,6 +16,7 @@ import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
 import { listenForNativeTaps, prepareNativeNotifications } from './util/notify';
+import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
 
@@ -65,6 +67,30 @@ export default function App() {
   useEffect(() => {
     if (token) void prepareNativeNotifications();
   }, [token]);
+
+  // APK: stay connected in the background while there is something to wait
+  // for — a live terminal or a running session. Re-checked when the app
+  // comes back to the front, the only time Android lets the service start.
+  useEffect(() => {
+    if (!backgroundServiceSupported()) return;
+    const evaluate = () => {
+      const st = useAppStore.getState();
+      const prefs = usePrefs.getState();
+      const busy =
+        st.terminals.length > 0 ||
+        Object.values(st.sessionsByProject).some((list) => list.some((s) => s.status === 'running' || s.status === 'queued'));
+      syncBackgroundService(Boolean(st.token) && prefs.notifications && prefs.backgroundService && busy);
+    };
+    evaluate();
+    const unsubStore = useAppStore.subscribe(evaluate);
+    const unsubPrefs = usePrefs.subscribe(evaluate);
+    document.addEventListener('visibilitychange', evaluate);
+    return () => {
+      unsubStore();
+      unsubPrefs();
+      document.removeEventListener('visibilitychange', evaluate);
+    };
+  }, []);
 
   // Deep links: ?open=session:<id> (notification tap) · ?launch=claude (app shortcut).
   useEffect(() => {

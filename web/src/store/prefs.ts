@@ -11,6 +11,8 @@ export interface Prefs {
   /** Show system notifications (and register Web Push when possible). */
   notifications: boolean;
   notifyKinds: Record<DeckNotificationKind, boolean>;
+  /** APK: keep the connection alive in the background while agents are active. */
+  backgroundService: boolean;
   /** Short vibration on key taps and events. */
   haptics: boolean;
   termFontSize: number;
@@ -35,6 +37,7 @@ export const DEFAULT_PREFS: Prefs = {
     'team-error': true,
     info: true,
   },
+  backgroundService: true,
   haptics: true,
   termFontSize: 12,
   termCompose: true,
