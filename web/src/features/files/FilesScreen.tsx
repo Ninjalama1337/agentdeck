@@ -155,8 +155,9 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const download = async (entry: FileEntry) => {
     setActionEntry(null);
     try {
-      const via = await downloadFile(projectId, entry.path, entry.name);
-      if (via === 'browser') toast('info', `Downloading ${entry.name} in your browser`);
+      const via = await downloadFile(projectId, entry.path, entry.name, () => toast('info', `Downloading ${entry.name}…`));
+      if (via === 'saved') toast('info', `Saved ${entry.name} to Downloads`);
+      else if (via === 'browser') toast('info', `Downloading ${entry.name} in your browser`);
     } catch (err) {
       if (!isShareCancel(err)) toast('error', `Download failed: ${errorMessage(err)}`);
     }

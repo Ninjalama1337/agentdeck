@@ -149,7 +149,12 @@ Aufnahme ist aber erst sinnvoll, wenn Signing und Release-Prozess stehen.
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK` | Hintergrundverbindung (siehe unten) |
 
 Kein Standort, kein Speicherzugriff, keine Kamera — Uploads (z. B.
-Screenshots) laufen über den normalen WebView-Datei-Dialog des Systems. Der
+Screenshots) laufen über den normalen WebView-Datei-Dialog des Systems.
+Datei-Downloads übernimmt der Download-Manager von Android (eigenes Plugin
+`FileDownload` in `mobile/native/`, vom Patch-Skript ins Android-Projekt
+kopiert): Die Datei landet im Ordner „Downloads“, Fortschritt und Abschluss
+zeigt die System-Benachrichtigung. Das braucht ab Android 10 keine
+Berechtigung; ältere Geräte laden über den System-Browser. Der
 gesamte AgentDeck-Traffic geht als REST/WebSocket an deinen Server; die
 WebView lädt ausschließlich lokal gebaute Assets aus dem APK.
 

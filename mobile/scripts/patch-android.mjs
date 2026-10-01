@@ -2,8 +2,10 @@
 /**
  * Adds what AgentDeck needs to the generated (uncommitted) android/ project:
  * permissions (microphone for Whisper dictation, notifications for "agent
- * finished / waiting" alerts, vibration for haptics) and the foreground
- * service that keeps the connection alive in the background. Idempotent.
+ * finished / waiting" alerts, vibration for haptics), the foreground
+ * service that keeps the connection alive in the background, and the app's own
+ * Java sources from mobile/native (MainActivity, file download plugin).
+ * Idempotent.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -82,6 +84,19 @@ if (!fs.existsSync(statIcon) || fs.readFileSync(statIcon, 'utf8') !== STAT_ICON)
   fs.mkdirSync(path.dirname(statIcon), { recursive: true });
   fs.writeFileSync(statIcon, STAT_ICON);
   console.log('patch-android: wrote ic_stat_agentdeck drawable');
+}
+
+// App-local Java sources (MainActivity registers the plugins next to it).
+const nativeSrc = path.resolve(here, '../native');
+const javaDir = path.resolve(here, '../android/app/src/main/java/com/ninjalama/agentdeck');
+for (const name of fs.readdirSync(nativeSrc).filter((f) => f.endsWith('.java'))) {
+  const source = fs.readFileSync(path.join(nativeSrc, name), 'utf8');
+  const target = path.join(javaDir, name);
+  if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== source) {
+    fs.mkdirSync(javaDir, { recursive: true });
+    fs.writeFileSync(target, source);
+    console.log(`patch-android: wrote ${name}`);
+  }
 }
 
 // versionName/versionCode from the release version (VITE_AGENTDECK_APK_VERSION or

@@ -175,8 +175,9 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
 
   const downloadBinary = async () => {
     try {
-      const via = await downloadFile(projectId, path, fileName);
-      if (via === 'browser') toast('info', `Downloading ${fileName} in your browser`);
+      const via = await downloadFile(projectId, path, fileName, () => toast('info', `Downloading ${fileName}…`));
+      if (via === 'saved') toast('info', `Saved ${fileName} to Downloads`);
+      else if (via === 'browser') toast('info', `Downloading ${fileName} in your browser`);
     } catch (err) {
       if (!isShareCancel(err)) toast('error', `Download failed: ${errorMessage(err)}`);
     }

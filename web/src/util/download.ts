@@ -1,21 +1,48 @@
-import { api, fetchBlob } from '../api/client';
+import { api, fetchBlob, getApiBase, getToken } from '../api/client';
 import { isNativePlatform } from './platform';
 
+/** Outcome of {@link downloadFile}: saved to Downloads, handed to the browser, or shared/saved by the browser itself. */
+export type DownloadResult = 'saved' | 'browser' | 'done';
+
 /**
- * Saves one project file to the device. Resolves to `'browser'` when the
- * download was handed to the system browser (APK), `'done'` otherwise.
+ * Saves one project file to the device.
  *
  * - APK: the Android WebView has neither the Web Share API nor a download
- *   handler for blob: URLs, so a fetched blob can't leave the app. Navigate to
- *   a signed, header-free URL instead — Capacitor passes foreign origins to
- *   the system browser, whose download manager saves the file (same route the
- *   APK update takes).
+ *   handler for blob: URLs, so a fetched blob can't leave the app. The native
+ *   FileDownload plugin (mobile/native) lets Android's download manager fetch
+ *   the file straight into the Downloads folder; `onStarted` fires once it is
+ *   queued, the promise resolves when it is complete. APKs without the plugin
+ *   (or below Android 10) navigate to a signed, header-free URL instead —
+ *   Capacitor passes foreign origins to the system browser.
  * - Browser/PWA: share sheet where files can be shared, else a blob anchor.
  *
  * Throws on failure; a dismissed share sheet rejects with an `AbortError`.
  */
-export async function downloadFile(projectId: string, path: string, name: string): Promise<'browser' | 'done'> {
+export async function downloadFile(
+  projectId: string,
+  path: string,
+  name: string,
+  onStarted?: () => void,
+): Promise<DownloadResult> {
   if (isNativePlatform()) {
+    const native = window.Capacitor?.Plugins?.FileDownload;
+    const token = getToken();
+    if (native?.download && token) {
+      // Announce right away: the call itself only settles when the file is complete.
+      onStarted?.();
+      try {
+        await native.download({
+          url: `${getApiBase()}${api.fileRawPath(projectId, path)}&download=1`,
+          fileName: name,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return 'saved';
+      } catch (err) {
+        const { code, message } = (err ?? {}) as { code?: string; message?: string };
+        if (code === 'DOWNLOAD_FAILED') throw new Error(message || 'Download failed');
+        /* could not be started natively — let the browser do it */
+      }
+    }
     const a = document.createElement('a');
     a.href = await api.fileDownloadUrl(projectId, path);
     a.rel = 'noopener';
