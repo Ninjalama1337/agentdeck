@@ -7,7 +7,7 @@
  * - codex: local app-server `account/rateLimits/read`, with login fallback.
  * - zcode: plan data and local usage statistics.
  *
- * Results are cached for 60s with in-flight dedupe (concurrent calls share
+ * Results are cached for 30s with in-flight dedupe (concurrent calls share
  * one run). The spawn function is injectable for tests.
  */
 import { spawn as spawnProcess } from 'node:child_process';
@@ -18,7 +18,7 @@ import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import type { AgentService } from '../agents/registry.js';
 import { getZcodePlanInfo, readZcodeSqliteStats } from '../agents/zcode.js';
 
-export const USAGE_TTL_MS = 60_000;
+export const USAGE_TTL_MS = 30_000;
 const CLAUDE_TIMEOUT_MS = 30_000;
 const AGY_TIMEOUT_MS = 20_000;
 const OPENCODE_TIMEOUT_MS = 15_000;

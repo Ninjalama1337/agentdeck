@@ -216,7 +216,7 @@ export interface AppStore {
   apkInfo: ApkInfo | null;
   /** Subscription usage per agent (null = not fetched yet). */
   usage: AgentUsage[] | null;
-  /** Currently selected/active agent for the top-left usage circle button. */
+  /** Agent shown in the top-left usage button: follows the agent in use (hooks/useUsageTracking), or a manual pick. */
   currentUsageAgent: AgentId;
   /** Whether the full usage sheet is currently open. */
   usageSheetOpen: boolean;
@@ -260,8 +260,8 @@ export interface AppStore {
   refreshDevices(): Promise<void>;
   /** One-shot fetch of GET /api/apk/info (app start, settings screen). */
   refreshApkInfo(): Promise<void>;
-  /** One-shot fetch of GET /api/usage (settings screen, agent sheet). */
-  refreshUsage(): Promise<void>;
+  /** Fetch GET /api/usage. `silent` (background polling) keeps the old numbers and skips the error toast. */
+  refreshUsage(opts?: { silent?: boolean }): Promise<void>;
   /** Switch the active agent shown in the top-left usage circle button. */
   setCurrentUsageAgent(agentId: AgentId): void;
   /** Open or close the full usage details sheet. */
@@ -868,11 +868,11 @@ export const useAppStore = create<AppStore>()((set, get) => {
       }
     },
 
-    async refreshUsage() {
+    async refreshUsage(opts) {
       try {
         set({ usage: await api.getUsage() });
       } catch (err) {
-        get().toast('error', errorMessage(err));
+        if (!opts?.silent) get().toast('error', errorMessage(err));
       }
     },
 

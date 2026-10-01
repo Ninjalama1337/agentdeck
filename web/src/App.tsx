@@ -19,6 +19,7 @@ import { listenForNativeTaps, prepareNativeNotifications } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
+import { useUsageTracking } from './hooks/useUsageTracking';
 
 /** Consume an image handed over by the PWA share_target (stashed in Cache API by sw.ts). */
 async function consumeSharedImage(): Promise<File | null> {
@@ -62,6 +63,9 @@ export default function App() {
     useAppStore.getState().init();
     listenForNativeTaps();
   }, []);
+
+  // Usage button: follow the agent in use, refresh every minute.
+  useUsageTracking();
 
   // APK: alert channel + permission prompt, once this device is paired.
   useEffect(() => {

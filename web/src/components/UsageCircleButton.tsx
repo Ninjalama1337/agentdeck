@@ -12,23 +12,12 @@ interface UsageCircleButtonProps {
 
 export function UsageCircleButton({ agentId: propAgentId, className = '', showLabel = false }: UsageCircleButtonProps) {
   const currentUsageAgent = useAppStore((s) => s.currentUsageAgent);
-  const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const sessionsByProject = useAppStore((s) => s.sessionsByProject);
   const usageList = useAppStore((s) => s.usage);
   const refreshUsage = useAppStore((s) => s.refreshUsage);
   const setUsageSheetOpen = useAppStore((s) => s.setUsageSheetOpen);
 
-  // Determine active agent: prop override > active session's agent > store's currentUsageAgent
-  const activeAgentId: AgentId = useMemo(() => {
-    if (propAgentId) return propAgentId;
-    if (activeSessionId) {
-      for (const list of Object.values(sessionsByProject)) {
-        const found = list.find((sess) => sess.id === activeSessionId);
-        if (found) return found.agentId;
-      }
-    }
-    return currentUsageAgent || 'claude';
-  }, [propAgentId, activeSessionId, sessionsByProject, currentUsageAgent]);
+  // Prop override, else the store's agent — kept on the agent in use by useUsageTracking.
+  const activeAgentId: AgentId = propAgentId ?? currentUsageAgent ?? 'claude';
 
   const agentUsage: AgentUsage | undefined = useMemo(() => {
     return usageList?.find((u) => u.agentId === activeAgentId);

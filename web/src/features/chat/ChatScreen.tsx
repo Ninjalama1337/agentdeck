@@ -57,7 +57,7 @@ export function ChatScreen() {
     });
   }, [activeSessionId, loadedSessions, openSession]);
 
-  /* plan usage for the header chip (60 s server cache; refresh when stale) */
+  /* plan usage for the header chip (kept fresh by useUsageTracking; this covers the first open) */
   useEffect(() => {
     if (!activeSessionId || !usage) void refreshUsage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
