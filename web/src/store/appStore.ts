@@ -44,6 +44,15 @@ import {
   setToken as persistToken,
 } from '../api/client';
 import { connectSocket, disconnectSocket, emitInterrupt, getSocket } from '../api/socket';
+import {
+  activateServer,
+  addServer as addSavedServer,
+  getActiveServer,
+  listServers,
+  removeServer as removeSavedServer,
+  scopedKey,
+  updateActiveServer,
+} from '../api/servers';
 import { usePrefs } from './prefs';
 import { haptic } from '../util/haptics';
 import { currentPushSubscription, showSystemNotification } from '../util/notify';
@@ -120,12 +129,40 @@ export interface FileEventRecord {
 
 /* ----------------------------------------------------------------- helpers */
 
-const PROJECT_KEY = 'agentdeck:project';
-const INBOX_KEY = 'agentdeck:inbox';
-const INBOX_SEEN_KEY = 'agentdeck:inbox-seen';
-const INBOX_CLEARED_KEY = 'agentdeck:inbox-cleared';
+// Per-server data: keyed by the active saved server. Resolved once per page
+// load — changing the server reloads the app (see reloadApp).
+const PROJECT_KEY = scopedKey('agentdeck:project');
+const INBOX_KEY = scopedKey('agentdeck:inbox');
+const INBOX_SEEN_KEY = scopedKey('agentdeck:inbox-seen');
+const INBOX_CLEARED_KEY = scopedKey('agentdeck:inbox-cleared');
 const INBOX_LIMIT = 80;
 const MODEL_PREFS_KEY = 'agentdeck:model-prefs';
+
+/** A saved server as the UI sees it (the login itself stays in api/servers). */
+export interface SavedServer {
+  id: string;
+  /** Name the server reported at pairing; '' while never paired. */
+  name: string;
+  /** API base URL; '' = same origin. */
+  base: string;
+  paired: boolean;
+}
+
+function savedServers(): SavedServer[] {
+  return listServers().map((s) => ({ id: s.id, name: s.name, base: s.base, paired: s.token !== null }));
+}
+
+/** Label for a saved server: its name, else its address. */
+export function serverLabel(server: Pick<SavedServer, 'name' | 'base'>): string {
+  return server.name || server.base.replace(/^https?:\/\//i, '') || 'This server';
+}
+
+/** Full reload onto the home route — the one clean way to change servers. */
+function reloadApp(): void {
+  disconnectSocket();
+  window.history.replaceState(null, '', `${window.location.pathname}#/`);
+  window.location.reload();
+}
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -194,6 +231,9 @@ export interface AppStore {
   serverInfo: PairResponse['server'] | null;
   connection: 'online' | 'offline';
   booted: boolean;
+  /** Servers saved on this device (one login each); the app talks to the active one. */
+  servers: SavedServer[];
+  activeServerId: string;
   route: Route;
   agents: Partial<Record<AgentId, AgentInfo>>;
   agentOrder: AgentId[];
@@ -257,6 +297,12 @@ export interface AppStore {
   pair(code: string, deviceName: string): Promise<void>;
   unpair(silent?: boolean): void;
   setServerBase(base: string): void;
+  /** Switch to another saved server — reloads the app, nothing of the old one survives. */
+  switchServer(id: string): void;
+  /** Start pairing an additional server (lands on the pairing screen). */
+  addServer(): void;
+  /** Forget a saved server and its login on this device. */
+  removeServer(id: string): void;
   refreshDevices(): Promise<void>;
   /** One-shot fetch of GET /api/apk/info (app start, settings screen). */
   refreshApkInfo(): Promise<void>;
@@ -677,6 +723,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
   return {
     token: getToken(),
     serverBase: getApiBase(),
+    servers: savedServers(),
+    activeServerId: getActiveServer().id,
     serverInfo: null,
     connection: 'online',
     booted: false,
@@ -786,6 +834,15 @@ export const useAppStore = create<AppStore>()((set, get) => {
         persistActiveProject(active);
 
         const jobs: Promise<unknown>[] = [
+          // Server identity: a login from before saved servers has no name yet,
+          // and after a reload nothing else carries it. Older servers 404 here.
+          api
+            .server()
+            .then((info) => {
+              if (getActiveServer().name !== info.name) updateActiveServer({ name: info.name });
+              set({ serverInfo: info, servers: savedServers() });
+            })
+            .catch(() => undefined),
           get().refreshTerminalPresets(),
           get().refreshDevices(),
           get().fetchTeamRuns(),
@@ -803,7 +860,15 @@ export const useAppStore = create<AppStore>()((set, get) => {
     async pair(code, deviceName) {
       const res = await api.pair({ code, deviceName });
       persistToken(res.token);
-      set({ token: res.token, serverInfo: res.server, connection: 'online' });
+      updateActiveServer({ name: res.server.name });
+      set({
+        token: res.token,
+        serverInfo: res.server,
+        connection: 'online',
+        // The pairing screen writes the address straight to storage.
+        serverBase: getApiBase(),
+        servers: savedServers(),
+      });
       attachSocket();
       get().toast('info', `Paired with ${res.server.name}`);
       await get().bootstrap();
@@ -816,6 +881,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
       persistActiveProject(null);
       set({
         token: null,
+        servers: savedServers(),
         serverInfo: null,
         booted: false,
         agents: {},
@@ -843,13 +909,30 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     setServerBase(base) {
       persistApiBase(base);
-      set({ serverBase: base.trim().replace(/\/+$/, '') });
+      set({ serverBase: getApiBase(), servers: savedServers() });
       disconnectSocket();
       socketAttached = false;
       if (get().token) {
         attachSocket();
         void get().bootstrap();
       }
+    },
+
+    switchServer(id) {
+      if (id === get().activeServerId || !activateServer(id)) return;
+      reloadApp();
+    },
+
+    addServer() {
+      addSavedServer();
+      reloadApp();
+    },
+
+    removeServer(id) {
+      const wasActive = id === get().activeServerId;
+      removeSavedServer(id);
+      if (wasActive) reloadApp();
+      else set({ servers: savedServers() });
     },
 
     async refreshDevices() {

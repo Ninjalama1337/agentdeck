@@ -47,6 +47,7 @@ import type {
   SendTurnResponse,
   Session,
   StartAdminJobRequest,
+  ServerInfo,
   TeamRun,
   TeamRunRequest,
   TerminalInfo,
@@ -54,9 +55,7 @@ import type {
   TunnelStatus,
   UpdateRoutineRequest,
 } from '@agentdeck/shared';
-
-const TOKEN_KEY = 'agentdeck:token';
-const SERVER_KEY = 'agentdeck:server';
+import { getActiveServer, updateActiveServer } from './servers';
 
 export class ApiError extends Error {
   constructor(
@@ -71,40 +70,22 @@ export class ApiError extends Error {
 
 /* ------------------------------------------------------------------ config */
 
+/** Login and address of the active saved server (see servers.ts). */
 export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return getActiveServer().token;
 }
 
 export function setToken(token: string | null): void {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable */
-  }
+  updateActiveServer({ token });
 }
 
 /** '' means same-origin (backend serves the app). */
 export function getApiBase(): string {
-  try {
-    return localStorage.getItem(SERVER_KEY) ?? '';
-  } catch {
-    return '';
-  }
+  return getActiveServer().base;
 }
 
 export function setApiBase(base: string): void {
-  try {
-    const clean = base.trim().replace(/\/+$/, '');
-    if (clean) localStorage.setItem(SERVER_KEY, clean);
-    else localStorage.removeItem(SERVER_KEY);
-  } catch {
-    /* storage unavailable */
-  }
+  updateActiveServer({ base });
 }
 
 function base(): string {
@@ -211,6 +192,11 @@ export const api = {
 
   pair(body: PairRequest): Promise<PairResponse> {
     return request('POST', '/api/pair', { json: body, noAuth: true });
+  },
+
+  /** Name/version of the paired server (404 on servers older than this route). */
+  server(): Promise<ServerInfo> {
+    return request('GET', '/api/server');
   },
 
   /** Public remote-access tunnel status (bearer sent when a token exists). */

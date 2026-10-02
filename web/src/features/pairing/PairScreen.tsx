@@ -6,6 +6,7 @@ import { errorMessage, useAppStore } from '../../store/appStore';
 import { guessDeviceName } from '../../util/format';
 import { isNativePlatform } from '../../util/platform';
 import { ApkCard } from '../../components/ApkCard';
+import { OtherServers } from '../../components/SavedServers';
 
 const CODE_LENGTH = 6;
 
@@ -16,7 +17,11 @@ export function PairScreen() {
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [deviceName, setDeviceName] = useState(guessDeviceName());
   const [serverUrl, setServerUrl] = useState(getApiBase());
-  const [showAdvanced, setShowAdvanced] = useState(() => getApiBase() !== '' || isNativePlatform());
+  // The address field starts open wherever it has to be filled in: in the
+  // native app, off-origin setups, and when pairing an additional server.
+  const [showAdvanced, setShowAdvanced] = useState(
+    () => getApiBase() !== '' || isNativePlatform() || useAppStore.getState().servers.length > 1,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
@@ -240,12 +245,17 @@ export function PairScreen() {
           )}
         </div>
 
+        {/* this device is paired with other servers: one tap back to them */}
+        <OtherServers className="mt-4" />
+
         {/* instructions */}
         <div className="glass-soft mt-4 flex items-start gap-3 p-4 text-[13px] leading-relaxed text-dim">
           <Server size={16} className="mt-0.5 shrink-0 text-accent-blue" />
           <p>
             Start the AgentDeck server on your machine — the pairing code (with QR) is printed to its
             console and saved to <span className="font-mono text-[12px] text-ink">~/.local/share/agentdeck/pairing-code.txt</span>.
+            Pairing works on the server's local network (its LAN address); afterwards you can switch to
+            its remote address in Settings.
           </p>
         </div>
       </div>

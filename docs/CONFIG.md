@@ -46,7 +46,10 @@ Server neu starten — es gibt kein Hot-Reload.
   // Max. Größe einer APK für /api/apk/upload in Bytes (200 MB).
   "maxApkBytes": 209715200,
 
-  // Zusätzliche CORS-Origins (Dev-Frontend, Capacitor-WebView).
+  // Zusätzliche CORS-Origins (Dev-Frontend, Capacitor-WebView). Wer in der
+  // PWA eines Servers einen zweiten Server hinzufügt ("Saved servers"), trägt
+  // beim zweiten Server die Adresse der PWA hier ein, z. B.
+  // "https://agentdeck.example.com". Die Android-App braucht das nicht.
   "corsOrigins": [
     "http://localhost:5173",
     "capacitor://localhost",

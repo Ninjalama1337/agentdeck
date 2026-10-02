@@ -71,6 +71,10 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 - **Remote-Zugriff ohne Portfreigabe** — optionaler Cloudflare-Tunnel
   (Quick-Tunnel mit einer Config-Zeile, Named Tunnel mit fester URL); Status
   und Adresse sichtbar in der App.
+- **Mehrere Server in einer App** — weitere AgentDeck-Server hinzufügen und
+  mit einem Tipp in der Kopfleiste wechseln; jeder Server behält seinen eigenen
+  Login, neu pairen ist beim Wechsel nicht nötig. Benachrichtigungen kommen vom
+  gerade verbundenen Server.
 - **APK-Self-Update** — der Server verteilt die Android-App selbst
   (`/api/apk/latest`); die App prüft beim Start gegen `/api/apk/info` und
   bietet Updates mit einem Tap zum Download an.

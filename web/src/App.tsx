@@ -8,6 +8,7 @@ import { TopBar } from './components/TopBar';
 import { ToastStack } from './components/ui/Toast';
 import { Lightbox } from './components/Lightbox';
 import { UpdateBanner } from './components/UpdateBanner';
+import { OtherServers } from './components/SavedServers';
 import { PairScreen } from './features/pairing/PairScreen';
 import { HomeScreen } from './features/home/HomeScreen';
 import { ChatScreen } from './features/chat/ChatScreen';
@@ -50,6 +51,12 @@ export default function App() {
     window.history.replaceState(null, '', window.location.pathname + window.location.hash);
     const store = useAppStore.getState();
     if (store.serverBase !== clean) {
+      // A server saved under this address: switch to it, keeping the current one.
+      const saved = store.servers.find((sv) => sv.base === clean && sv.id !== store.activeServerId);
+      if (saved) {
+        store.switchServer(saved.id);
+        return;
+      }
       store.setServerBase(clean);
       store.toast('info', `Server address updated: ${clean}`);
     }
@@ -198,6 +205,8 @@ export default function App() {
             <Loader2 size={15} className="animate-spin" />
             Connecting to AgentDeck…
           </div>
+          {/* This server may be out of reach right now — another saved one may not be. */}
+          <OtherServers className="mt-4 w-full max-w-xs" />
         </main>
         <ToastStack />
       </>

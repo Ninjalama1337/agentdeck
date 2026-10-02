@@ -1,5 +1,6 @@
 import { UsageCircleButton } from './UsageCircleButton';
 import { ConnectionPill } from './ConnectionPill';
+import { ServerSwitcher } from './SavedServers';
 
 /**
  * Always-visible app bar (usage button + connection state). It is the first
@@ -20,7 +21,8 @@ export function TopBar() {
     >
       <div className="mx-auto flex h-[52px] w-full max-w-xl items-center justify-between px-3">
         <UsageCircleButton showLabel={true} />
-        <ConnectionPill />
+        <ServerSwitcher />
+        <ConnectionPill className="shrink-0" />
       </div>
     </header>
   );

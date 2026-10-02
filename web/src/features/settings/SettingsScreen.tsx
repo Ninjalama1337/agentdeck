@@ -18,7 +18,8 @@ import {
 import { clsx } from 'clsx';
 import type { AgentId, TunnelStatus } from '@agentdeck/shared';
 import { api, getApiBase, uploadApk } from '../../api/client';
-import { ADMIN_KIND_LABELS, agentDisplayName, errorMessage, useAppStore } from '../../store/appStore';
+import { ADMIN_KIND_LABELS, agentDisplayName, errorMessage, serverLabel, useAppStore } from '../../store/appStore';
+import { serverAddress } from '../../components/SavedServers';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { Chip } from '../../components/ui/Chip';
 import { ApkCard } from '../../components/ApkCard';
@@ -48,6 +49,12 @@ export function SettingsScreen() {
   const serverInfo = useAppStore((s) => s.serverInfo);
   const serverBase = useAppStore((s) => s.serverBase);
   const setServerBase = useAppStore((s) => s.setServerBase);
+  const servers = useAppStore((s) => s.servers);
+  const activeServerId = useAppStore((s) => s.activeServerId);
+  const switchServer = useAppStore((s) => s.switchServer);
+  const addServer = useAppStore((s) => s.addServer);
+  const removeServer = useAppStore((s) => s.removeServer);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const devices = useAppStore((s) => s.devices);
   const refreshDevices = useAppStore((s) => s.refreshDevices);
   const agents = useAppStore((s) => s.agents);
@@ -134,6 +141,23 @@ export function SettingsScreen() {
     } finally {
       setChecking(false);
     }
+  };
+
+  /** Two taps: the first arms the button, the second forgets the server. */
+  const removeSavedServer = (id: string) => {
+    if (confirmRemoveId === id) {
+      setConfirmRemoveId(null);
+      removeServer(id);
+      return;
+    }
+    setConfirmRemoveId(id);
+    window.setTimeout(() => setConfirmRemoveId((cur) => (cur === id ? null : cur)), 3000);
+  };
+
+  const useTunnelUrl = () => {
+    if (!tunnel?.publicUrl) return;
+    setServerBase(tunnel.publicUrl);
+    toast('info', 'Now using the remote address — reconnecting…');
   };
 
   const copyTunnelUrl = async () => {
@@ -225,6 +249,15 @@ export function SettingsScreen() {
                 {tunnel.publicUrl ?? tunnel.status}
               </span>
             </span>
+            {tunnel.publicUrl && tunnel.publicUrl !== serverBase && (
+              <button
+                type="button"
+                onClick={useTunnelUrl}
+                className="press shrink-0 rounded-full border border-accent/40 bg-accent/15 px-3 py-1.5 text-[12px] font-semibold text-accent"
+              >
+                Use
+              </button>
+            )}
             {tunnel.publicUrl && (
               <button
                 type="button"
@@ -274,6 +307,68 @@ export function SettingsScreen() {
             className="press tap ml-auto rounded-xl bg-accent/20 px-4 py-2 text-[13px] font-semibold text-accent disabled:opacity-35"
           >
             Save &amp; reconnect
+          </button>
+        </div>
+      </section>
+
+      {/* saved servers: one login each, switch without pairing again */}
+      <section className="glass mb-4 p-4" aria-label="Saved servers">
+        <h2 className="mb-1 flex items-center gap-2 text-[14px] font-semibold">
+          <Server size={15} className="text-accent" /> Saved servers
+        </h2>
+        <p className="mb-3 text-[12px] leading-snug text-dim">
+          Each server keeps its own login on this device. Notifications come from the one you are connected to.
+        </p>
+        <div className="flex flex-col gap-1.5">
+          {servers.map((server) => {
+            const active = server.id === activeServerId;
+            return (
+              <div
+                key={server.id}
+                className={clsx(
+                  'flex items-center gap-1 rounded-2xl border pl-3.5',
+                  active ? 'border-accent/40 bg-accent/10' : 'border-line bg-bg-raise',
+                )}
+              >
+                <button
+                  type="button"
+                  disabled={active}
+                  onClick={() => switchServer(server.id)}
+                  className="press tap flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold">{serverLabel(server)}</span>
+                    <span className="block truncate font-mono text-[10.5px] text-dim">
+                      {serverAddress(server)}
+                      {active ? ' · connected now' : server.paired ? '' : ' · not paired'}
+                    </span>
+                  </span>
+                  {active && <Check size={16} className="shrink-0 text-accent" />}
+                </button>
+                <button
+                  type="button"
+                  aria-label={
+                    confirmRemoveId === server.id
+                      ? `Tap again to remove ${serverLabel(server)}`
+                      : `Remove ${serverLabel(server)}`
+                  }
+                  onClick={() => removeSavedServer(server.id)}
+                  className={clsx(
+                    'tap flex h-11 shrink-0 items-center justify-center rounded-xl px-3 text-[12px] font-semibold',
+                    confirmRemoveId === server.id ? 'bg-danger text-white' : 'text-dim active:bg-danger/10 active:text-danger',
+                  )}
+                >
+                  {confirmRemoveId === server.id ? 'Remove?' : <Trash2 size={15} />}
+                </button>
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={addServer}
+            className="press tap mt-1 flex items-center justify-center gap-1.5 rounded-2xl border border-line bg-surface-2 py-2.5 text-[13.5px] font-semibold active:bg-surface-3"
+          >
+            <Plus size={15} /> Add server
           </button>
         </div>
       </section>
