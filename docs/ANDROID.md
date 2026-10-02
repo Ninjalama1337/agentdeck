@@ -109,10 +109,13 @@ Banner **„Update available — v<version>“** mit einem **Download**-Button
 (`GET /api/apk/latest`) und einem × zum Ausblenden (pro Server-Version, im
 `sessionStorage` — die nächste Version blendet es wieder ein).
 
-Der Download ist ein schlichter Link, den Androids Download-Manager übernimmt.
-Beim ersten Mal fragt Android, ob der Browser aus **unbekannten Quellen**
-installieren darf — einmal erlauben, APK öffnen, **„App aktualisieren?“**
-bestätigen: Daten und Pairing bleiben erhalten.
+In der App lädt Androids Download-Manager die APK direkt in den
+Downloads-Ordner (natives `FileDownload`-Plugin) — ohne Umweg über den
+Browser, der sonst für jeden Download einen Tab offen ließe. Auf die
+Benachrichtigung „Download abgeschlossen“ tippen, beim ersten Mal die
+Installation aus **unbekannten Quellen** erlauben und **„App aktualisieren?“**
+bestätigen: Daten und Pairing bleiben erhalten. Im Browser/PWA (und in alten
+APKs ohne das Plugin) ist der Button ein schlichter Download-Link.
 
 ### APK auf den Server bringen
 

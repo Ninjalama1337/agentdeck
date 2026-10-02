@@ -65,6 +65,29 @@ export async function downloadFile(
   return 'done';
 }
 
+/**
+ * APK only: lets Android's download manager fetch the server's latest app
+ * build into Downloads. A plain link leaves the WebView for the system
+ * browser, which opens a tab for every download and never closes it.
+ *
+ * Resolves `false` when the download could not be started natively (no
+ * plugin, below Android 10) — the caller falls back to the link. Throws when
+ * it started but failed.
+ */
+export async function downloadApkNatively(fileName: string, onStarted?: () => void): Promise<boolean> {
+  const native = isNativePlatform() ? window.Capacitor?.Plugins?.FileDownload : undefined;
+  if (!native?.download) return false;
+  onStarted?.();
+  try {
+    await native.download({ url: api.apkLatestUrl(), fileName });
+    return true;
+  } catch (err) {
+    const { code, message } = (err ?? {}) as { code?: string; message?: string };
+    if (code === 'DOWNLOAD_FAILED') throw new Error(message || 'Download failed');
+    return false;
+  }
+}
+
 /** True for the rejection of a share sheet the user closed. */
 export function isShareCancel(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';

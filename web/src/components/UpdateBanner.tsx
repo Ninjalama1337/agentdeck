@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Download, X } from 'lucide-react';
 import type { ApkInfo } from '@agentdeck/shared';
-import { api } from '../api/client';
+import { ApkDownloadLink } from './ApkDownloadLink';
 import { compareVersions } from '../util/version';
 import { isNativePlatform } from '../util/platform';
 
@@ -31,7 +31,7 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
   const version = apk?.available ? apk.version : undefined;
   const updateAvailable = native && !!version && compareVersions(__APK_VERSION__, version) < 0;
 
-  if (!updateAvailable || !version || dismissedVersion === version) return null;
+  if (!apk || !updateAvailable || !version || dismissedVersion === version) return null;
 
   const dismiss = () => {
     try {
@@ -58,14 +58,13 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
           <span className="font-semibold">Update available — v{version}</span>
           <span className="block text-[12px] text-dim">Download and install to get the latest app.</span>
         </p>
-        <a
-          href={api.apkLatestUrl()}
-          download
+        <ApkDownloadLink
+          info={apk}
           className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white btn-primary"
         >
           <Download size={14} />
           Download
-        </a>
+        </ApkDownloadLink>
         <button
           type="button"
           aria-label="Dismiss update banner"
