@@ -4,9 +4,14 @@
 import { lanAddresses } from './util/net.js';
 import { loadConfig } from './config.js';
 import { findWebDist, buildApp } from './http/app.js';
+import { augmentedPath } from './term/presets.js';
 import { NAME, VERSION } from './version.js';
 
 async function main(): Promise<void> {
+  // systemd and other minimal environments start us without ~/.local/bin, nvm
+  // etc. on PATH; agent detection and headless runs need the same lookup dirs
+  // the terminals already get.
+  process.env.PATH = augmentedPath(process.env.PATH);
   const config = loadConfig();
   const { app, io, deps, manager, agents, tunnel, logger } = await buildApp(config);
 
