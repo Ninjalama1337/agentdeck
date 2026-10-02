@@ -75,6 +75,11 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   mit einem Tipp in der Kopfleiste wechseln; jeder Server behält seinen eigenen
   Login, neu pairen ist beim Wechsel nicht nötig. Benachrichtigungen kommen vom
   gerade verbundenen Server.
+- **Server-Update per Tipp** — Releases entstehen auf GitHub (Tag `vX.Y.Z`,
+  getestet und mit APK gebaut). Die App zeigt unter Settings, welche Version
+  der Server fährt und ob es eine neuere gibt; ein Tipp bringt den Server auf
+  das Release, hinterlegt die passende APK und startet ihn neu
+  ([docs/RELEASES.md](docs/RELEASES.md)).
 - **APK-Self-Update** — der Server verteilt die Android-App selbst
   (`/api/apk/latest`); die App prüft beim Start gegen `/api/apk/info` und
   bietet Updates mit einem Tap zum Download an.
@@ -209,7 +214,7 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `server/` | server | Fastify + socket.io, Agent-Adapter, MCP-Bridge |
 | `web/` | web | React-PWA (mobil-first), wird vom Server ausgeliefert |
 | `mobile/` | agentdeck-mobile | Capacitor-7-Wrapper → Android-APK ([mobile/README.md](mobile/README.md)) |
-| `docs/` | — | [Architektur](docs/ARCHITECTURE.md) · [Sicherheit](docs/SECURITY.md) · [Remote-Zugriff](docs/REMOTE.md) · [Android](docs/ANDROID.md) · [MCP-Bridge](docs/MCP-BRIDGE.md) · [Konfiguration](docs/CONFIG.md) |
+| `docs/` | — | [Architektur](docs/ARCHITECTURE.md) · [Sicherheit](docs/SECURITY.md) · [Remote-Zugriff](docs/REMOTE.md) · [Android](docs/ANDROID.md) · [Releases & Updates](docs/RELEASES.md) · [MCP-Bridge](docs/MCP-BRIDGE.md) · [Konfiguration](docs/CONFIG.md) |
 | `scripts/` | — | Helfer-Skripte (siehe unten) |
 
 ## Skripte
@@ -220,9 +225,11 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `scripts/dev.sh` | Server (Hot Reload) + Vite-Dev-Server parallel, mit `[server]`/`[web]`-Präfixen |
 | `scripts/build-android.sh` | Android-APK bauen (prüft SDK und `android/`-Ordner) |
 | `scripts/upload-apk.sh` | gebaute APK an den Server hochladen (`POST /api/apk/upload`) |
+| `scripts/release.sh` | Release anlegen: testen, `vX.Y.Z` taggen und pushen — GitHub baut APK und Release (`--wait` wartet darauf) |
+| `scripts/update.sh` | diesen Checkout auf das neueste Release bringen, bauen, APK hinterlegen, Server neu starten |
 | `scripts/restart.sh` | laufenden Server neu starten (Terminals in tmux bleiben); Log: `~/.local/state/agentdeck/server.log` oder `AGENTDECK_LOG_FILE` |
 | `npm start` | gebauten Server starten (`server/dist/index.js`) |
-| `npm test` | Server-Tests |
+| `npm test` | Tests (Server und Web-App) |
 | `npm run typecheck` | Typecheck über alle Workspaces |
 
 ## Roadmap

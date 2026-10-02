@@ -12,7 +12,8 @@
 # Checkout auf den alten Stand zurueck — der laufende Server bleibt unberuehrt.
 #
 # Umgebungsvariablen (der Server setzt sie selbst):
-#   AGENTDECK_URL         lokale Adresse des Servers (Default: http://127.0.0.1:8787)
+#   AGENTDECK_URL         lokale Adresse des Servers (Default: Port des laufenden
+#                         Servers, sonst http://127.0.0.1:8787)
 #   AGENTDECK_DATA_DIR    Datenverzeichnis (fuer den Bridge-Token des APK-Uploads)
 #   AGENTDECK_SERVER_PID  welcher Prozess neu gestartet wird
 #   AGENTDECK_UPDATE_LOG  Logdatei fuer den Neustart am Ende
@@ -84,8 +85,18 @@ main() {
 
   # Release-APK beim (noch laufenden) Server hinterlegen: gepaarte Handys sehen
   # danach das Update-Banner. Fehlt die APK am Release, geht es ohne weiter.
-  local URL VERSION HOSTED TMP
-  URL="${AGENTDECK_URL:-http://127.0.0.1:8787}"
+  local URL VERSION HOSTED TMP SPID SPORT SDATA
+  URL="${AGENTDECK_URL:-}"
+  if [[ -z "$URL" ]]; then
+    # Von Hand gestartet: Port und Datenverzeichnis vom laufenden Server ablesen.
+    SPID="$(pgrep -f "node.*server/dist/index.js" | head -n 1 || true)"
+    if [[ -n "$SPID" && -r "/proc/$SPID/environ" ]]; then
+      SPORT="$(grep -z '^AGENTDECK_PORT=' "/proc/$SPID/environ" 2>/dev/null | cut -z -d= -f2 | tr -d '\0' || true)"
+      SDATA="$(grep -z '^AGENTDECK_DATA_DIR=' "/proc/$SPID/environ" 2>/dev/null | cut -z -d= -f2 | tr -d '\0' || true)"
+      [[ -n "$SDATA" && -z "${AGENTDECK_DATA_DIR:-}" ]] && export AGENTDECK_DATA_DIR="$SDATA"
+    fi
+    URL="http://127.0.0.1:${SPORT:-${AGENTDECK_PORT:-8787}}"
+  fi
   VERSION="${TAG#v}"
   HOSTED="$(curl -sf --max-time 10 "$URL/api/apk/info" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
   if [[ "$HOSTED" == "$VERSION" ]]; then

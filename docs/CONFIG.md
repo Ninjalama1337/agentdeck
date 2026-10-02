@@ -188,7 +188,10 @@ Hinweise:
   auch ohne aktive Session bootfest).
 - `Restart=on-failure` fängt Crashes ab; `AGENTDECK_PORT` in der Unit
   überschreibt wie gehabt die JSON-Konfiguration.
-- Zum Aktualisieren: `git pull && npm run build && systemctl --user restart agentdeck`.
+- `KillMode=process` in der Unit sorgt dafür, dass ein Neustart nur den Server
+  beendet — die Terminals (tmux) laufen weiter.
+- Zum Aktualisieren: in der App unter Settings → Server update, oder
+  `scripts/update.sh` im Checkout ([RELEASES.md](RELEASES.md)).
 
 ## Speicherlayout unter `dataDir`
 

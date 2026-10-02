@@ -93,6 +93,11 @@ beiden APKs und generierten Release-Notes.
 
 ## Updates & APK-Verteilung
 
+Releases (`vX.Y.Z`) baut GitHub Actions samt APK; Server holen sich Release und
+APK selbst — der ganze Ablauf steht in [RELEASES.md](RELEASES.md). Wichtig für
+Updates der installierten App: alle Builds müssen **dieselbe Signatur** tragen,
+siehe dort „Signatur".
+
 ### Update-Banner in der App
 
 Jeder CI- und Local-Build brennt seine Version in die App ein

@@ -10,19 +10,20 @@ dem Code. Schritt für Schritt, bei einem Fehler anhalten und melden:
 1. **Prüfen:** `npm run typecheck && npm test`
 2. **Committen und pushen:** auf `main` committen, `git push origin main`.
    Gemergte Branches löschen, lokal und auf `origin`.
-3. **Bauen:** `npm run build`
-4. **APK bauen und hinterlegen:**
-   - Version = nächste Patch-Version über der gehosteten
-     (`curl -s $AGENTDECK_URL/api/apk/info`).
-   - `VITE_AGENTDECK_APK_VERSION=<version> scripts/build-android.sh`
-   - `scripts/upload-apk.sh mobile/android/app/build/outputs/apk/debug/app-debug.apk <version>`
-     (`AGENTDECK_URL` und `AGENTDECK_DATA_DIR` müssen auf den laufenden Server
-     zeigen). Gepaarte Geräte sehen danach das Update-Banner.
-5. **Laufenden Server aktualisieren:** im Checkout, aus dem der Server läuft
-   (`readlink /proc/<server-pid>/cwd`), `main` pullen, bei geändertem
-   `package-lock.json` `npm install`, dann `npm run build` und
-   `scripts/restart.sh` (Terminals laufen in tmux und überleben den Neustart).
-   Liegen dort uncommittete Änderungen, erst nachfragen statt sie zu
-   überschreiben.
+3. **Release anlegen:** `scripts/release.sh --wait` (nächste Patch-Version;
+   `minor`, `major` oder `X.Y.Z` als Argument). GitHub Actions testet, baut
+   die APK und veröffentlicht das Release; das Skript wartet, bis es online
+   ist.
+4. **Laufenden Server aktualisieren:** im Checkout, aus dem der Server läuft
+   (`readlink /proc/<server-pid>/cwd`), `scripts/update.sh`. Es holt das
+   Release, baut, hinterlegt die APK und startet den Server neu (Terminals
+   laufen in tmux und überleben den Neustart). Liegen dort uncommittete
+   Änderungen, bricht es ab — dann nachfragen statt sie zu überschreiben.
 
-Details zu APK-Bau und -Verteilung: [docs/ANDROID.md](docs/ANDROID.md).
+Ändert sich nur Doku, genügen Schritt 1 und 2.
+
+Weitere Server (zweiter Rechner) aktualisiert der Nutzer selbst in der App:
+Settings → Server update.
+
+Details: [docs/RELEASES.md](docs/RELEASES.md), APK-Bau
+[docs/ANDROID.md](docs/ANDROID.md).

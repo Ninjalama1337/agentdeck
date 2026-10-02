@@ -164,6 +164,8 @@ Storage layout under `dataDir`:
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
 | GET | `/api/server` | `ServerInfo` `{name,version,host}` (authed) — same object as `server` in the pairing response |
 | GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached 30 s; the app polls every minute while an agent is in use). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
+| GET | `/api/update` | `UpdateInfo` `{current,latest?,updateAvailable,checkedAt?,checkError?,blockedReason?,job?}` (authed). `current` comes from `git describe` (`1.2.3`, or `1.2.3-4-gabc1234` past a release); `latest` is the newest GitHub release via `gh` (cached 10 min, `?refresh=1` asks again). |
+| POST | `/api/update` | `→ UpdateInfo` (202). Runs `scripts/update.sh <tag>`: fast-forward to the release tag, build, publish the release APK, restart. 409 `UPDATE_RUNNING` / `UPDATE_NOT_NEEDED` / `UPDATE_UNAVAILABLE`, 502 `UPDATE_CHECK_FAILED`. Progress streams via WS `update:state` `{update: UpdateInfo}`; a successful job ends with the server restarting. |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |

@@ -81,7 +81,7 @@ export function ServerUpdateSection() {
 
       <div className="flex items-center gap-3 rounded-xl border border-line bg-white/[0.04] px-3 py-2.5">
         <span className="min-w-0 flex-1">
-          <span className="block text-[10px] uppercase tracking-wider text-dim">Running</span>
+          <span className="block text-[10px] uppercase tracking-wider text-dim">Installed version</span>
           <span className="block truncate font-mono text-[12.5px] text-ink">v{update.current}</span>
           <span
             className={clsx(
