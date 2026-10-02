@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
 import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
+import { installMobileIme } from './termIme';
 import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode } from './termScroll';
 
 export const TERM_THEME = {
@@ -33,60 +34,6 @@ export const TERM_THEME = {
   brightCyan: '#67e8f9',
   brightWhite: '#ffffff',
 };
-
-/** Idle time before xterm's hidden textarea is emptied on touch devices. */
-const IME_IDLE_CLEAR_MS = 2000;
-
-/**
- * Mobile IMEs keep committed text in xterm's hidden textarea, and a later
- * keyCode 229 event can make xterm resend that stale buffer. Empty it only at
- * safe points — after Enter, or once typing has paused — never between two
- * keystrokes: rewriting the field mid-typing restarts the IME (the suggestion
- * strip flickers) and races xterm's own diff of the textarea. Left alone in
- * xterm's screen-reader mode.
- */
-function installMobileImeBufferFix(term: Terminal): () => void {
-  const textarea = term.textarea;
-  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
-  if (!textarea || !touchDevice) return () => undefined;
-
-  let composing = false;
-  let clearTimer: number | null = null;
-  const cancelClear = () => {
-    if (clearTimer !== null) window.clearTimeout(clearTimer);
-    clearTimer = null;
-  };
-  const scheduleClear = (delay: number) => {
-    cancelClear();
-    clearTimer = window.setTimeout(() => {
-      clearTimer = null;
-      if (composing || term.options.screenReaderMode) return;
-      textarea.value = '';
-    }, delay);
-  };
-  const onCompositionStart = () => {
-    composing = true;
-    cancelClear();
-  };
-  const onCompositionEnd = () => {
-    composing = false;
-    scheduleClear(IME_IDLE_CLEAR_MS);
-  };
-  const onKeyDown = () => cancelClear();
-  const onKeyUp = (e: KeyboardEvent) => scheduleClear(e.key === 'Enter' ? 100 : IME_IDLE_CLEAR_MS);
-
-  textarea.addEventListener('compositionstart', onCompositionStart);
-  textarea.addEventListener('compositionend', onCompositionEnd);
-  textarea.addEventListener('keydown', onKeyDown);
-  textarea.addEventListener('keyup', onKeyUp);
-  return () => {
-    textarea.removeEventListener('compositionstart', onCompositionStart);
-    textarea.removeEventListener('compositionend', onCompositionEnd);
-    textarea.removeEventListener('keydown', onKeyDown);
-    textarea.removeEventListener('keyup', onKeyUp);
-    cancelClear();
-  };
-}
 
 /** Sticky modifier shared by key bar and direct typing ("Ctrl" then a key). */
 export interface ModifierRef {
@@ -139,7 +86,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    const disposeImeFix = installMobileImeBufferFix(term);
+    // Soft keyboards edit the textarea instead of sending keys (see termIme.ts).
+    const disposeIme = installMobileIme(term, (data) => term.input(data, true));
     // tmux/TUI screens own the display: drags become wheel events instead of
     // panning a viewport that never has scrollback (see termScroll.ts).
     const mouse = trackMouseMode(term);
@@ -240,7 +188,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       disposeTouchScroll();
       mouse.dispose();
       mouseRef.current = null;
-      disposeImeFix();
+      disposeIme();
       term.dispose();
       termRef.current = null;
     };
