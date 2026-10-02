@@ -15,6 +15,7 @@ import type { AppDeps } from '../src/routes/deps.js';
 import { loadConfig } from '../src/config.js';
 import { buildApp } from '../src/http/app.js';
 import { signDeviceToken } from '../src/auth/jwt.js';
+import { FileWatchers } from '../src/files/watcher.js';
 
 const DEBOUNCE_MS = 400;
 const WAIT = { timeout: 4000, interval: 25 };
@@ -103,6 +104,39 @@ afterAll(async () => {
 });
 
 describe('FileWatchers', () => {
+  it('reports a new file as create even when its change event overtakes the existence check', async () => {
+    // fs.watch reports rename + change for a new file; the rename is classified
+    // asynchronously, so on a slow machine the change used to win the batch.
+    const dir = await fsp.mkdtemp(path.join(tmp, 'race-'));
+    await fsp.writeFile(path.join(dir, 'new.txt'), 'x', 'utf8');
+    const batches: { type: string; path: string }[][] = [];
+    const watchers = new FileWatchers({
+      broadcast: ((event: string, payload: { events: { type: string; path: string }[] }) => {
+        if (event === 'files:changed') batches.push(payload.events);
+      }) as never,
+      log: { warn: () => undefined, info: () => undefined } as never,
+      debounceMs: 20,
+    });
+    try {
+      watchers.ensureStarted('race', dir);
+      const internals = watchers as unknown as {
+        states: Map<string, unknown>;
+        onFsEvent(state: unknown, type: 'rename' | 'change', filename: string): void;
+      };
+      const state = internals.states.get('race');
+      internals.onFsEvent(state, 'rename', 'new.txt');
+      internals.onFsEvent(state, 'change', 'new.txt');
+      await vi.waitFor(() => expect(batches.flat()).toEqual([{ type: 'create', path: 'new.txt' }]), WAIT);
+
+      // A later edit of the now-known file is a change.
+      batches.length = 0;
+      internals.onFsEvent(state, 'change', 'new.txt');
+      await vi.waitFor(() => expect(batches.flat()).toEqual([{ type: 'change', path: 'new.txt' }]), WAIT);
+    } finally {
+      watchers.stopAll();
+    }
+  });
+
   it('emits create for a file written directly on disk', async () => {
     await fsp.writeFile(path.join(projectDir, 'direct.txt'), 'from disk', 'utf8');
     await vi.waitFor(

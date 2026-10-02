@@ -55,6 +55,8 @@ interface WatchState {
   batch: Map<string, FileChangeEvent>;
   /** Rel paths observed to exist — drives the create-vs-change heuristic. */
   seen: Set<string>;
+  /** Rel paths with a `rename` still being classified (existence check running). */
+  classifying: Map<string, number>;
 }
 
 export interface FileWatchersOptions {
@@ -134,6 +136,7 @@ export class FileWatchers {
       batchTimer: null,
       batch: new Map(),
       seen: new Set(),
+      classifying: new Map(),
     };
     this.states.set(projectId, state);
     this.openWatcher(state);
@@ -211,15 +214,24 @@ export class FileWatchers {
     if (this.states.get(state.projectId) !== state) return;
     let type: FileChangeEventKind;
     if (eventType === 'change') {
+      // A new file reports `rename` then `change`. While the rename is still
+      // being classified it decides the outcome — queuing `change` now would
+      // win the batch slot and turn the create into a change.
+      if (state.classifying.has(rel)) return;
       type = 'change';
       state.seen.add(rel);
     } else {
       let exists = false;
+      state.classifying.set(rel, (state.classifying.get(rel) ?? 0) + 1);
       try {
         const stats = await fsp.stat(path.join(state.root, rel));
         exists = stats.isFile() || stats.isDirectory();
       } catch {
         exists = false;
+      } finally {
+        const pending = (state.classifying.get(rel) ?? 1) - 1;
+        if (pending > 0) state.classifying.set(rel, pending);
+        else state.classifying.delete(rel);
       }
       if (this.states.get(state.projectId) !== state) return;
       if (exists) {
