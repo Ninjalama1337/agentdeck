@@ -170,20 +170,23 @@ Storage layout under `dataDir`:
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |
 | POST | `/api/admin/jobs/:id/stop` | `204` — cancels the ACTIVE job (status → `stopped`); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` |
-| POST | `/api/admin/jobs/:id/input` | `AdminJobInputRequest` `{text}` → `204` — types one line plus Enter into the ACTIVE interactive job (`AdminJob.interactive`, e.g. the sign-in code); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` when it is not running or takes no input |
+| POST | `/api/admin/jobs/:id/input` | `AdminJobInputRequest` `{text}` or `{key}` → `204` — `text` types one line plus Enter into the ACTIVE interactive job (`AdminJob.interactive`, e.g. the sign-in code), `key` (`up` \| `down` \| `enter`) presses a single key (picking from a list); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` when it is not running or takes no input |
 
 ### Admin recipes (fixed, server-side — never free-form commands)
 
 | Agent | update | install | login |
 |---|---|---|---|
 | claude | `claude update` | `npm install -g @anthropic-ai/claude-code` | `claude auth login` in a pseudo-terminal (interactive: the app shows the sign-in URL as a button and sends the pasted code via `/input`) |
-| zcode | `scripts/update-zcode.sh` (builds from zai-org/ZCode → `~/.zcode/runtime`) | same script (clone-if-missing) | `zcode login zai` (browser on the machine / fallback URL in the console) |
+| zcode | `scripts/update-zcode.sh` (builds from zai-org/ZCode → `~/.zcode/runtime`) | same script (clone-if-missing) | `zcode login zai` (browser on the machine; the app shows the fallback URL as a button) |
 | antigravity | `flatpak update -y com.google.Antigravity` | `flatpak install -y flathub com.google.Antigravity` | opens the IDE window for Google sign-in (job finishes immediately) |
-| codex | `npm install -g @openai/codex@latest` | same | `codex login` (browser on the machine) |
+| codex | `codex update` | `npm install -g @openai/codex@latest` | `codex login --device-auth` (the app shows the sign-in page as a button and the one-time code to enter there) |
+| opencode | `opencode upgrade` | `npm install -g opencode-ai` | `opencode providers login` in a pseudo-terminal (interactive: provider and method are picked with typed text and the `up`/`down`/`enter` keys, then an API key or a browser sign-in) |
 
 Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
 500-line output ring buffer; the active job can be cancelled from the app
-(status `stopped`). Interactive jobs run in a pseudo-terminal; their output is
+(status `stopped`). Commands are looked up on the server's PATH plus the user
+bin dirs (`~/.local/bin`, `~/.npm-global/bin`, …) and the directory of the
+server's own `node`. Interactive jobs run in a pseudo-terminal; their output is
 reduced to plain text lines. After a successful Claude login — and on server
 start when a sign-in is already stored — the server sets
 `hasCompletedOnboarding` in Claude Code's config (`~/.claude.json`), otherwise

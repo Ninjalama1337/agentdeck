@@ -46,10 +46,17 @@ fi
 cd "$SRC"
 
 say "4/7 Abhängigkeiten installieren"
-pnpm install --filter zcode-cli... --filter ./packages/*
+# Der Filter muss in Anführungszeichen stehen: sonst löst die Shell ihn zu
+# Pfaden auf, und pnpm trägt die als neue Abhängigkeiten ein, statt zu installieren.
+# Die CLI-Pakete unter apps/zcode-cli hängen nicht am Paket "zcode-cli" selbst
+# und müssen eigens genannt werden, sonst fehlen ihnen die node_modules.
+pnpm install --filter "zcode-cli..." --filter "./packages/*" \
+  --filter "./apps/zcode-cli/packages/*" --filter "./apps/zcode-cli/tools/*"
 
 say "5/7 Pakete bauen (root + apps/zcode-cli)"
-pnpm -r --filter "./packages/*" build || true   # desktop build darf schehen oder nicht — CLI braucht ihn nicht zwingend
+# Ohne die Desktop-App: die CLI braucht sie nicht, und ihr Build lädt Node für
+# alle Plattformen herunter (mehrere hundert MB).
+pnpm -r --filter "./packages/*" --filter "!@zcode/desktop" build
 ( cd apps/zcode-cli && pnpm -r --filter "./packages/*" build )
 # @zcode/shared ist source-only, der Packager will aber dist/index.ts …
 if [ ! -f packages/shared/dist/index.js ]; then

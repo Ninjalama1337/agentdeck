@@ -11,6 +11,11 @@ const StartJobBody = z.object({
   kind: z.enum(ADMIN_JOB_KINDS),
 });
 
+const InputBody = z.union([
+  z.object({ text: z.string().trim().min(1).max(2000) }).strict(),
+  z.object({ key: z.enum(['up', 'down', 'enter']) }).strict(),
+]);
+
 /**
  * Agent administration jobs (CONTRACT.md): list/start/inspect the fixed
  * update/install/login recipes. Runs are one-at-a-time and streamed live via
@@ -57,10 +62,12 @@ export async function adminRoutes(fastify: FastifyInstance, deps: AppDeps): Prom
 
   fastify.post('/admin/jobs/:id/input', async (req, reply) => {
     const id = (req.params as { id?: string }).id ?? '';
-    const body = z.object({ text: z.string().trim().min(1).max(2000) }).safeParse(req.body);
-    if (!body.success) throw httpError(400, 'BAD_REQUEST', 'text: 1–2000 characters');
+    const body = InputBody.safeParse(req.body);
+    if (!body.success) throw httpError(400, 'BAD_REQUEST', 'text: 1–2000 characters, or key: up | down | enter');
     if (!deps.adminJobs.get(id)) throw notFound('Admin job not found');
-    if (!deps.adminJobs.input(id, body.data.text)) {
+    const sent =
+      'key' in body.data ? deps.adminJobs.key(id, body.data.key) : deps.adminJobs.input(id, body.data.text);
+    if (!sent) {
       throw httpError(409, 'ADMIN_JOB_NOT_ACTIVE', 'Job is not running or takes no input.');
     }
     reply.code(204).send();

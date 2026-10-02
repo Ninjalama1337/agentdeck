@@ -14,9 +14,16 @@
  *   AgentInfo is broadcast, then emits a `notify` toast
  * - keeps the last 20 finished jobs in memory (newest first)
  */
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { execa } from 'execa';
-import { AGENT_LABELS, type AdminJob, type AdminJobKind, type AgentId } from '@agentdeck/shared';
+import {
+  AGENT_LABELS,
+  type AdminJob,
+  type AdminJobKey,
+  type AdminJobKind,
+  type AgentId,
+} from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import type { AgentService } from '../agents/registry.js';
 import type { Broadcaster } from '../ws/gateway.js';
@@ -39,6 +46,8 @@ const PTY_ROWS = 50;
 const PARTIAL_LINE_FLUSH_MS = 300;
 /** Gap between typed text and Enter, so a TUI does not swallow it as a paste. */
 const INPUT_ENTER_DELAY_MS = 120;
+const ANSI_STYLE = /\x1b\[[0-9;]*m/g;
+const KEY_SEQUENCES: Record<AdminJobKey, string> = { up: '\x1b[A', down: '\x1b[B', enter: '\r' };
 
 /** Exec result shape (satisfied by execa with reject:false). */
 export interface AdminSpawnResult {
@@ -89,10 +98,21 @@ export function plainTerminalText(raw: string): string {
     .replace(/\r/g, '\n');
 }
 
-function spawnInPty(recipe: AdminRecipe): AdminChild {
+/**
+ * Environment and resolved command of a recipe. The server's own PATH (systemd
+ * unit) has no user bin dirs, so `npm`, `codex` or `opencode` would not be
+ * found — and `npm` needs `node` on PATH, which sits next to the server's own.
+ */
+export function recipeProcess(recipe: AdminRecipe): { file: string; env: Record<string, string> } {
   const env = { ...process.env, ...recipe.envAdd } as Record<string, string>;
-  const file = findExecutable(recipe.command, augmentedPath(env.PATH));
+  env.PATH = augmentedPath(`${env.PATH ?? ''}:${path.dirname(process.execPath)}`);
+  const file = findExecutable(recipe.command, env.PATH);
   if (!file) throw new Error(`${recipe.command} not found on PATH`);
+  return { file, env };
+}
+
+function spawnInPty(recipe: AdminRecipe): AdminChild {
+  const { file, env } = recipeProcess(recipe);
   const term = pty.spawn(file, recipe.args, {
     name: 'xterm-256color',
     cols: PTY_COLS,
@@ -120,9 +140,10 @@ function spawnInPty(recipe: AdminRecipe): AdminChild {
 
 const defaultSpawn: AdminSpawn = (recipe) => {
   if (recipe.interactive) return spawnInPty(recipe);
-  const child = execa(recipe.command, recipe.args, {
+  const { file, env } = recipeProcess(recipe);
+  const child = execa(file, recipe.args, {
     cwd: recipe.cwd,
-    env: { ...process.env, ...recipe.envAdd },
+    env,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -249,6 +270,17 @@ export class AdminJobRunner {
     return true;
   }
 
+  /**
+   * Presses one key in the ACTIVE interactive job (picking from a list the
+   * sign-in shows). False when the job is not running or takes no input.
+   */
+  key(id: string, key: AdminJobKey): boolean {
+    const child = this.child;
+    if (!this.active || this.active.id !== id || !child?.write) return false;
+    child.write(KEY_SEQUENCES[key]);
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
 
   private killActive(signal: NodeJS.Signals): void {
@@ -356,7 +388,8 @@ export class AdminJobRunner {
     let flushTimer: NodeJS.Timeout | undefined;
     const push = (line: string) => {
       if (job.interactive) this.pushTerminalText(job, line);
-      else this.pushLine(job, line);
+      // Some tools color their output even without a terminal (codex login).
+      else this.pushLine(job, line.replace(ANSI_STYLE, ''));
     };
     stream.setEncoding?.('utf8');
     stream.on('data', (chunk: string) => {

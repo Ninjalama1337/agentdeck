@@ -28,7 +28,7 @@ export interface AdminRecipe {
   envAdd?: Record<string, string>;
   /**
    * Run in a pseudo-terminal and accept input from the app. Needed for
-   * sign-ins that print a URL and then wait for a pasted code.
+   * sign-ins that wait for a pasted code or let the user pick from a list.
    */
   interactive?: boolean;
   /** Follow-up after the command exited successfully. */
@@ -94,19 +94,17 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
         { kind: 'install', label: 'flatpak install -y flathub com.google.Antigravity' },
         { kind: 'login', label: 'Open Antigravity for Google sign-in' },
       ];
-    case 'codex': {
-      const label = 'npm install -g @openai/codex@latest';
+    case 'codex':
       return [
-        { kind: 'update', label },
-        { kind: 'install', label },
-        { kind: 'login', label: 'codex login' },
+        { kind: 'update', label: 'codex update' },
+        { kind: 'install', label: 'npm install -g @openai/codex@latest' },
+        { kind: 'login', label: 'codex login --device-auth (sign-in page + one-time code)' },
       ];
-    }
     case 'opencode':
       return [
         { kind: 'update', label: 'opencode upgrade' },
-        { kind: 'install', label: 'npm install -g opencode' },
-        { kind: 'login', label: 'opencode providers login' },
+        { kind: 'install', label: 'npm install -g opencode-ai' },
+        { kind: 'login', label: 'opencode providers login (pick provider and method)' },
       ];
   }
 }
@@ -204,7 +202,15 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
       };
     case 'codex':
       if (kind === 'login') {
-        return { kind, label: capability.label, command: 'codex', args: ['login'], cwd: home() };
+        // Plain `codex login` redirects the browser to localhost:1455 on the
+        // server, which a phone cannot reach. The device flow prints a page
+        // and a one-time code instead and waits until the sign-in is done.
+        return { kind, label: capability.label, command: 'codex', args: ['login', '--device-auth'], cwd: home() };
+      }
+      if (kind === 'update') {
+        // Updates whichever way codex was installed (standalone or npm);
+        // `npm install -g` would collide with a standalone install.
+        return { kind, label: capability.label, command: 'codex', args: ['update'], cwd: home() };
       }
       return {
         kind,
@@ -218,13 +224,24 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
         return { kind, label: capability.label, command: 'opencode', args: ['upgrade'], cwd: home() };
       }
       if (kind === 'login') {
-        return { kind, label: capability.label, command: 'opencode', args: ['providers', 'login'], cwd: home() };
+        // Asks for the provider and the login method in lists, then for an
+        // API key or a browser sign-in — it needs a terminal, typed text and
+        // arrow keys from the app.
+        return {
+          kind,
+          label: capability.label,
+          command: 'opencode',
+          args: ['providers', 'login'],
+          cwd: home(),
+          interactive: true,
+        };
       }
       return {
         kind,
         label: capability.label,
         command: 'npm',
-        args: ['install', '-g', 'opencode'],
+        // The npm package is `opencode-ai`; `opencode` does not exist there.
+        args: ['install', '-g', 'opencode-ai'],
         cwd: home(),
       };
   }

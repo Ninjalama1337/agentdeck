@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Copy,
+  CornerDownLeft,
   Download,
   ExternalLink,
   Info,
@@ -14,7 +18,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AGENT_LABELS } from '@agentdeck/shared';
-import type { AdminJob, AdminJobKind, AdminJobStatus, AgentId } from '@agentdeck/shared';
+import type { AdminJob, AdminJobKey, AdminJobKind, AdminJobStatus, AgentId } from '@agentdeck/shared';
 import { ADMIN_KIND_LABELS, useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import { Sheet } from '../../components/ui/Sheet';
@@ -36,6 +40,9 @@ const STATUS_STYLES: Record<AdminJobStatus, { pill: string; dot: string }> = {
   error: { pill: 'border-danger/30 bg-danger/12 text-danger', dot: 'bg-danger' },
   stopped: { pill: 'border-line bg-white/[0.05] text-dim', dot: 'bg-dim' },
 };
+
+/** Agents whose sign-in can be finished from the phone (link, code, prompts). */
+const SIGN_IN_FROM_APP: ReadonlySet<AgentId> = new Set(['claude', 'codex', 'opencode', 'zcode']);
 
 function isActive(job: AdminJob): boolean {
   return job.status === 'queued' || job.status === 'running';
@@ -97,7 +104,7 @@ function StopJobButton({ jobId }: { jobId: string }) {
   );
 }
 
-/** Sign-in link in the output of an interactive login job (newest wins). */
+/** Sign-in link in the output of a login job (newest wins). */
 function signInUrl(output: string[]): string | undefined {
   for (let i = output.length - 1; i >= 0; i--) {
     const match = /https:\/\/[^\s"'<>]+/.exec(output[i] ?? '');
@@ -107,34 +114,87 @@ function signInUrl(output: string[]): string | undefined {
 }
 
 /**
- * Sign-in from the phone: open the link the login command printed, then send
- * the code the page shows back to the command (POST /api/admin/jobs/:id/input).
+ * One-time code a device sign-in prints, to type into the sign-in page. Only
+ * where the output calls it a code (same or previous line) — a list of
+ * provider or model names can contain something of the same shape.
+ */
+function oneTimeCode(output: string[]): string | undefined {
+  for (let i = output.length - 1; i >= 0; i--) {
+    const line = output[i] ?? '';
+    if (line.includes('://')) continue;
+    const match = /\b[A-Z0-9]{4}-[A-Z0-9]{4,6}\b/.exec(line);
+    if (match && /code/i.test(`${output[i - 1] ?? ''} ${line}`)) return match[0];
+  }
+  return undefined;
+}
+
+const KEY_BUTTONS: { key: AdminJobKey; label: string; Icon: LucideIcon }[] = [
+  { key: 'up', label: 'Up', Icon: ArrowUp },
+  { key: 'down', label: 'Down', Icon: ArrowDown },
+  { key: 'enter', label: 'Enter', Icon: CornerDownLeft },
+];
+
+function signInHint(job: AdminJob, url: string | undefined, code: string | undefined): string {
+  if (!job.interactive) {
+    if (!url) return 'Waiting for the sign-in link…';
+    return code
+      ? 'Open the sign-in page, sign in and enter this code there. The job finishes on its own afterwards.'
+      : 'Open the sign-in page and sign in. The job finishes on its own afterwards.';
+  }
+  if (job.agentId === 'claude') {
+    return url
+      ? 'Open the sign-in page, sign in, then paste the code it shows here. If a browser opened on the computer and you signed in there, no code is needed.'
+      : 'Waiting for the sign-in link…';
+  }
+  return 'Answer what the output above asks: type to search or to enter a key and send it, pick from a list with the arrows, confirm with Enter.';
+}
+
+/**
+ * Sign-in from the phone: open the link the login command printed and, where
+ * the command asks for something, answer it — typed text and single keys go
+ * to the command (POST /api/admin/jobs/:id/input).
  */
 function SignInPanel({ job }: { job: AdminJob }) {
   const toast = useAppStore((s) => s.toast);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const url = signInUrl(job.output);
+  const deviceCode = job.interactive && job.agentId === 'claude' ? undefined : oneTimeCode(job.output);
 
-  const send = async () => {
+  const run = async (action: () => Promise<void>, failure: string) => {
     setBusy(true);
     try {
-      await api.sendAdminJobInput(job.id, code.trim());
-      setCode('');
+      await action();
     } catch (err) {
-      toast('warn', err instanceof Error ? err.message : 'Sending the code failed');
+      toast('warn', err instanceof Error ? err.message : failure);
     } finally {
       setBusy(false);
     }
   };
+  const send = () =>
+    run(async () => {
+      await api.sendAdminJobInput(job.id, code.trim());
+      setCode('');
+    }, 'Sending failed');
+  const copy = () =>
+    run(async () => {
+      await navigator.clipboard.writeText(deviceCode ?? '');
+      toast('info', 'Code copied');
+    }, 'Copying failed');
 
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-line bg-bg-raise p-3">
-      <p className="text-[11.5px] leading-relaxed text-dim">
-        {url
-          ? 'Open the sign-in page, sign in, then paste the code it shows here. If a browser opened on the computer and you signed in there, no code is needed.'
-          : 'Waiting for the sign-in link…'}
-      </p>
+      <p className="text-[11.5px] leading-relaxed text-dim">{signInHint(job, url, deviceCode)}</p>
+      {deviceCode && (
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="press tap flex items-center justify-center gap-2 rounded-2xl border border-line bg-black/30 py-2.5 font-mono text-[17px] font-semibold tracking-widest text-ink"
+        >
+          {deviceCode}
+          <Copy size={14} className="text-dim" aria-label="Copy code" />
+        </button>
+      )}
       {url && (
         <a
           href={url}
@@ -146,27 +206,45 @@ function SignInPanel({ job }: { job: AdminJob }) {
           Open sign-in page
         </a>
       )}
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (code.trim() && !busy) void send();
-        }}
-      >
-        <input
-          className="field min-w-0 flex-1 font-mono text-[13px]"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Paste code"
-          autoCapitalize="off"
-          autoCorrect="off"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Button type="submit" variant="primary" size="sm" className="h-11 px-4" disabled={!code.trim() || busy}>
-          Send
-        </Button>
-      </form>
+      {job.interactive && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (code.trim() && !busy) void send();
+          }}
+        >
+          <input
+            className="field min-w-0 flex-1 font-mono text-[13px]"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder={job.agentId === 'claude' ? 'Paste code' : 'Type or paste'}
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Button type="submit" variant="primary" size="sm" className="h-11 px-4" disabled={!code.trim() || busy}>
+            Send
+          </Button>
+        </form>
+      )}
+      {job.interactive && job.agentId !== 'claude' && (
+        <div className="flex gap-2">
+          {KEY_BUTTONS.map(({ key, label, Icon }) => (
+            <Button
+              key={key}
+              size="sm"
+              className="h-11 flex-1"
+              icon={<Icon size={15} />}
+              disabled={busy}
+              onClick={() => void run(() => api.sendAdminJobKey(job.id, key), 'Sending failed')}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -203,11 +281,11 @@ function JobConsole({ job }: { job: AdminJob }) {
         {lines.length > 0 ? lines.join('\n') : 'Waiting for output…'}
       </pre>
 
-      {job.interactive && active && <SignInPanel job={job} />}
-      {job.kind === 'login' && active && !job.interactive && (
+      {job.kind === 'login' && active && SIGN_IN_FROM_APP.has(job.agentId) && <SignInPanel job={job} />}
+      {job.kind === 'login' && active && !SIGN_IN_FROM_APP.has(job.agentId) && (
         <p className="mt-1.5 flex items-start gap-1.5 px-1 text-[11.5px] leading-relaxed text-dim">
           <Info size={12} className="mt-0.5 shrink-0" />
-          Browser opens on the computer — this can take a moment; watch the output here.
+          The sign-in window opens on the computer — this can take a moment; watch the output here.
         </p>
       )}
       {job.status === 'stopped' && (

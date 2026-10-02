@@ -92,12 +92,31 @@ describe('recipeFor', () => {
     expect(recipeFor('antigravity', 'update').command).toBe('flatpak');
   });
 
-  it('codex update/install + login have the documented shapes', () => {
-    const update = recipeFor('codex', 'update');
-    expect(update.command).toBe('npm');
-    expect(update.args).toEqual(['install', '-g', '@openai/codex@latest']);
-    expect(recipeFor('codex', 'install').args).toEqual(update.args);
-    expect(recipeFor('codex', 'login')).toMatchObject({ command: 'codex', args: ['login'], cwd: os.homedir() });
+  it('codex updates itself, installs from npm and signs in with the device flow', () => {
+    expect(recipeFor('codex', 'update')).toMatchObject({ command: 'codex', args: ['update'] });
+    const install = recipeFor('codex', 'install');
+    expect(install.command).toBe('npm');
+    expect(install.args).toEqual(['install', '-g', '@openai/codex@latest']);
+    // Plain `codex login` redirects to localhost on the server — unreachable from a phone.
+    const login = recipeFor('codex', 'login');
+    expect(login).toMatchObject({ command: 'codex', args: ['login', '--device-auth'], cwd: os.homedir() });
+    expect(login.interactive).toBeUndefined();
+  });
+
+  it('opencode installs the npm package that exists and signs in in a terminal', () => {
+    expect(recipeFor('opencode', 'update')).toMatchObject({ command: 'opencode', args: ['upgrade'] });
+    expect(recipeFor('opencode', 'install').args).toEqual(['install', '-g', 'opencode-ai']);
+    const login = recipeFor('opencode', 'login');
+    expect(login).toMatchObject({ command: 'opencode', args: ['providers', 'login'], interactive: true });
+  });
+
+  it('labels name the command that runs', () => {
+    for (const agentId of ['codex', 'opencode'] as const) {
+      for (const cap of adminCapabilities(agentId)) {
+        const recipe = recipeFor(agentId, cap.kind);
+        expect(cap.label.startsWith([recipe.command, ...recipe.args].join(' '))).toBe(true);
+      }
+    }
   });
 
   it('returns the login recipe for claude (no longer unavailable)', () => {

@@ -1,8 +1,11 @@
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AgentInfo } from '@agentdeck/shared';
 import type { Broadcaster } from '../src/ws/gateway.js';
-import { AdminJobRunner, type AdminChild, type AdminSpawn } from '../src/admin/runner.js';
+import { AdminJobRunner, recipeProcess, type AdminChild, type AdminSpawn } from '../src/admin/runner.js';
 import { recipeFor } from '../src/admin/recipes.js';
 import type { AgentService } from '../src/agents/registry.js';
 import { HttpError } from '../src/http/errors.js';
@@ -343,6 +346,27 @@ describe('AdminJobRunner interactive jobs', () => {
     expect(runner.input(job.id, 'late')).toBe(false);
   });
 
+  it('presses single keys in the active interactive job only', async () => {
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+
+    const job = runner.start('opencode', 'login', recipeFor('opencode', 'login'));
+    await drainMicrotasks();
+    const handle = spawn.handles[0]!;
+    const typed: string[] = [];
+    handle.child.write = (data) => typed.push(data);
+
+    expect(runner.key('j_other', 'down')).toBe(false);
+    expect(runner.key(job.id, 'down')).toBe(true);
+    expect(runner.key(job.id, 'up')).toBe(true);
+    expect(runner.key(job.id, 'enter')).toBe(true);
+    expect(typed).toEqual(['\x1b[B', '\x1b[A', '\r']);
+
+    handle.end({ exitCode: 0 });
+    await runner.idle();
+    expect(runner.key(job.id, 'enter')).toBe(false);
+  });
+
   it('runs the recipe follow-up after a successful exit only', async () => {
     const spawn = fakeSpawnFactory();
     const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
@@ -394,6 +418,49 @@ describe('AdminJobRunner interactive jobs', () => {
     expect(finished.status).toBe('done');
     expect(finished.output).toContain('visit: https://example.test/login');
     expect(finished.output).toContain('got abc#123');
+  });
+});
+
+describe('AdminJobRunner jobs without a terminal', () => {
+  it('drops colors from the output so a sign-in link stays clean', async () => {
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+
+    const job = runner.start('codex', 'login', recipeFor('codex', 'login'));
+    await drainMicrotasks();
+    spawn.handles[0]!.write('   \x1b[94mhttps://auth.example.test/codex/device\x1b[0m\n   \x1b[94mA8RS-QE3DR\x1b[0m\n');
+    spawn.handles[0]!.end({ exitCode: 0 });
+    await runner.idle();
+
+    expect(runner.get(job.id)!.output).toEqual(['   https://auth.example.test/codex/device', '   A8RS-QE3DR']);
+  });
+
+  it('finds commands in the user bin dirs and next to node, not only on the server PATH', async () => {
+    const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'agentdeck-admin-'));
+    const tool = path.join(home, '.local/bin/agentdeck-fake-tool');
+    await fsp.mkdir(path.dirname(tool), { recursive: true });
+    await fsp.writeFile(tool, '#!/bin/sh\ncommand -v node >/dev/null && echo "node found"\n', { mode: 0o755 });
+    const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+    const before = process.env.PATH;
+    process.env.PATH = '/usr/bin:/bin'; // like the systemd unit: no user dirs
+    try {
+      const { file, env } = recipeProcess({ kind: 'install', label: 'fake', command: 'agentdeck-fake-tool', args: [], cwd: home });
+      expect(file).toBe(tool);
+      expect(env.PATH.split(':')).toContain(path.dirname(process.execPath));
+
+      const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn });
+      const job = runner.start('codex', 'install', { kind: 'install', label: 'fake', command: 'agentdeck-fake-tool', args: [], cwd: home });
+      await runner.idle();
+      expect(runner.get(job.id)).toMatchObject({ status: 'done', output: ['node found'] });
+
+      expect(() => recipeProcess({ kind: 'install', label: 'x', command: 'agentdeck-no-such-tool', args: [], cwd: home })).toThrow(
+        'agentdeck-no-such-tool not found on PATH',
+      );
+    } finally {
+      process.env.PATH = before;
+      homedir.mockRestore();
+      await fsp.rm(home, { recursive: true, force: true });
+    }
   });
 });
 

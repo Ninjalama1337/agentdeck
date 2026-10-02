@@ -65,6 +65,7 @@ beforeAll(async () => {
           : undefined),
     stopJob: vi.fn(() => true),
     input: vi.fn(() => true),
+    key: vi.fn(() => true),
   } as unknown as AdminJobRunner;
   deps.adminJobs = stub;
 });
@@ -80,6 +81,10 @@ function startMock(): ReturnType<typeof vi.fn> {
 
 function stopMock(): ReturnType<typeof vi.fn> {
   return (deps.adminJobs as unknown as { stopJob: ReturnType<typeof vi.fn> }).stopJob;
+}
+
+function keyMock(): ReturnType<typeof vi.fn> {
+  return (deps.adminJobs as unknown as { key: ReturnType<typeof vi.fn> }).key;
 }
 
 function inputMock(): ReturnType<typeof vi.fn> {
@@ -177,6 +182,22 @@ describe('POST /api/admin/jobs', () => {
     inputMock().mockReturnValueOnce(true);
     expect((await input('j_x', { text: ' abc#def ' })).statusCode).toBe(204);
     expect(inputMock()).toHaveBeenLastCalledWith('j_x', 'abc#def');
+  });
+
+  it('input endpoint presses a single key instead of typing a line', async () => {
+    const input = (payload: unknown) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/admin/jobs/j_x/input',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: payload as Record<string, unknown>,
+      });
+    expect((await input({ key: 'down' })).statusCode).toBe(204);
+    expect(keyMock()).toHaveBeenLastCalledWith('j_x', 'down');
+    expect((await input({ key: 'escape' })).statusCode).toBe(400);
+    expect((await input({ key: 'down', text: 'abc' })).statusCode).toBe(400);
+    keyMock().mockReturnValueOnce(false);
+    expect((await input({ key: 'enter' })).statusCode).toBe(409);
   });
 
   it('maps the runner conflict to 409 ADMIN_JOB_ACTIVE', async () => {

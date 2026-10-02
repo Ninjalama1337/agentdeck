@@ -280,10 +280,14 @@ export interface StartAdminJobRequest {
   kind: AdminJobKind;
 }
 
-/** One line typed into an interactive admin job (the pasted sign-in code). */
-export interface AdminJobInputRequest {
-  text: string;
-}
+/** A key pressed in an interactive admin job (picking from a list it shows). */
+export type AdminJobKey = 'up' | 'down' | 'enter';
+
+/**
+ * Input for an interactive admin job: one typed line (the pasted sign-in
+ * code), or a single key.
+ */
+export type AdminJobInputRequest = { text: string } | { key: AdminJobKey };
 
 // ---------------------------------------------------------------------------
 // Server self-update (GitHub releases)

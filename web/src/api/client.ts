@@ -5,6 +5,7 @@
 import type {
   Account,
   AdminJob,
+  AdminJobKey,
   AgentInfo,
   AgentUsage,
   ApkInfo,
@@ -395,6 +396,11 @@ export const api = {
   /** Types one line (the sign-in code) into the running interactive job. */
   sendAdminJobInput(id: string, text: string): Promise<void> {
     return request('POST', `/api/admin/jobs/${encodeURIComponent(id)}/input`, { json: { text } });
+  },
+
+  /** Presses one key in the running interactive job (picking from a list). */
+  sendAdminJobKey(id: string, key: AdminJobKey): Promise<void> {
+    return request('POST', `/api/admin/jobs/${encodeURIComponent(id)}/input`, { json: { key } });
   },
 
   /** Single admin job with its current output ring buffer. */
