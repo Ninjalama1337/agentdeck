@@ -74,6 +74,25 @@ describe('loadConfig', () => {
     expect(withEnv.port).toBe(8888);
   });
 
+  it('AGENTDECK_CONFIG names the config file; an explicit configDir still wins', async () => {
+    const file = path.join(tmp, 'elsewhere', 'deck.json');
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(file, JSON.stringify({ port: 7001, serverName: 'from-env-path' }), 'utf8');
+
+    const fromEnvPath = loadConfig({ env: { AGENTDECK_CONFIG: file } });
+    expect(fromEnvPath.port).toBe(7001);
+    expect(fromEnvPath.serverName).toBe('from-env-path');
+
+    // Other env vars keep winning over the file it points to.
+    expect(loadConfig({ env: { AGENTDECK_CONFIG: file, AGENTDECK_PORT: '7002' } }).port).toBe(7002);
+
+    // A path that does not exist behaves like a missing default file.
+    expect(loadConfig({ env: { AGENTDECK_CONFIG: path.join(tmp, 'nope.json') } }).port).toBe(8787);
+
+    const explicitDir = loadConfig({ env: { AGENTDECK_CONFIG: file }, configDir: path.join(tmp, 'none') });
+    expect(explicitDir.port).toBe(8787);
+  });
+
   it('reads an existing real config file when present (smoke sanity)', () => {
     // Ensure the loader does not crash on machines without config files.
     expect(() => loadConfig({ env: {}, configDir: path.join(tmp, 'missing') })).not.toThrow();

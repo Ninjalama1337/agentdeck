@@ -1,6 +1,7 @@
 /**
  * Configuration: defaults per CONTRACT.md, deep-merged with
- * `~/.config/agentdeck/config.json`, then overridden by `AGENTDECK_*` env vars.
+ * `~/.config/agentdeck/config.json` (or the file named by `AGENTDECK_CONFIG`),
+ * then overridden by `AGENTDECK_*` env vars.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -187,15 +188,20 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
 export interface LoadConfigOptions {
   /** Environment variables to consult (defaults to process.env). */
   env?: Record<string, string | undefined>;
-  /** Directory holding config.json (defaults to ~/.config/agentdeck). */
+  /**
+   * Directory holding config.json. Wins over `AGENTDECK_CONFIG`; without
+   * either the file is `~/.config/agentdeck/config.json`.
+   */
   configDir?: string;
 }
 
 export function loadConfig(opts: LoadConfigOptions = {}): Config {
   const env = opts.env ?? process.env;
-  const configDir = expandHome(opts.configDir ?? '~/.config/agentdeck');
   let fileJson: Record<string, unknown> = {};
-  const configFile = path.join(configDir, 'config.json');
+  const configFile =
+    opts.configDir !== undefined
+      ? path.join(expandHome(opts.configDir), 'config.json')
+      : path.resolve(expandHome(env.AGENTDECK_CONFIG || '~/.config/agentdeck/config.json'));
   if (fs.existsSync(configFile)) {
     const raw = fs.readFileSync(configFile, 'utf8');
     try {

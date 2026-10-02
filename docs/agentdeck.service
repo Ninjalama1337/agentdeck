@@ -25,9 +25,9 @@ Environment=NODE_ENV=production
 Restart=on-failure
 RestartSec=3
 
-# Server braucht keine Privilegien; TempDir haelt Restarts sauber.
-NoNewPrivileges=true
-PrivateTmp=true
+# Bewusst ohne NoNewPrivileges/PrivateTmp: die Terminals und Agents laufen als
+# Kinder dieses Dienstes und sollen sich wie eine normale Shell verhalten
+# (sudo, gemeinsames /tmp).
 
 [Install]
 WantedBy=default.target

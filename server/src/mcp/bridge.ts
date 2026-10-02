@@ -47,7 +47,8 @@ function resolveConfig(): BridgeConfig {
   let port = Number(process.env.AGENTDECK_PORT);
   if (!Number.isFinite(port) || port <= 0) {
     try {
-      const cfg = JSON.parse(readFileSync(expandHome('~/.config/agentdeck/config.json'), 'utf8')) as {
+      const configFile = expandHome(process.env.AGENTDECK_CONFIG || '~/.config/agentdeck/config.json');
+      const cfg = JSON.parse(readFileSync(configFile, 'utf8')) as {
         port?: number;
       };
       if (typeof cfg.port === 'number' && cfg.port > 0) port = cfg.port;

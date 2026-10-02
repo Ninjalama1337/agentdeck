@@ -13,7 +13,8 @@ Präzedenz (höchste zuerst):
 3. Eingebaute Defaults
 
 Die Datei liegt standardmäßig unter `~/.config/agentdeck/config.json`
-(XDG-konform); ein anderer Pfad via `AGENTDECK_CONFIG`. Nach Änderungen den
+(XDG-konform); ein anderer Pfad via `AGENTDECK_CONFIG` (gilt für Server,
+MCP-Bridge und `scripts/setup-tunnel.sh`). Nach Änderungen den
 Server neu starten — es gibt kein Hot-Reload.
 
 ## Vollständige `config.json`-Referenz
