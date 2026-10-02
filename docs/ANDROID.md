@@ -105,17 +105,18 @@ Jeder CI- und Local-Build brennt seine Version in die App ein
 sehen das Banner nie — die PWA aktualisiert sich ohnehin selbst über den
 Service Worker). Beim Start fragt die APK `GET /api/apk/info` ab: Ist die auf
 dem Server liegende APK **neuer** als die installierte, erscheint oben das
-Banner **„Update available — v<version>“** mit einem **Download**-Button
+Banner **„Update available — v<version>“** mit einem **Install**-Button
 (`GET /api/apk/latest`) und einem × zum Ausblenden (pro Server-Version, im
 `sessionStorage` — die nächste Version blendet es wieder ein).
 
-In der App lädt Androids Download-Manager die APK direkt in den
-Downloads-Ordner (natives `FileDownload`-Plugin) — ohne Umweg über den
-Browser, der sonst für jeden Download einen Tab offen ließe. Auf die
-Benachrichtigung „Download abgeschlossen“ tippen, beim ersten Mal die
-Installation aus **unbekannten Quellen** erlauben und **„App aktualisieren?“**
-bestätigen: Daten und Pairing bleiben erhalten. Im Browser/PWA (und in alten
-APKs ohne das Plugin) ist der Button ein schlichter Download-Link.
+In der App lädt der Button die APK selbst herunter (Fortschritt im Button)
+und öffnet danach Androids Installer (natives `ApkInstall`-Plugin, Recht
+`REQUEST_INSTALL_PACKAGES`) — ohne Umweg über den Browser, der sonst für jeden
+Download einen Tab offen ließe. Beim ersten Mal die Installation aus dieser
+Quelle erlauben, dann **„App aktualisieren?“** bestätigen: Daten und Pairing
+bleiben erhalten. APKs vor v0.11.6 kennen das Plugin noch nicht und legen die
+Datei stattdessen in den Downloads-Ordner (dort antippen). Im Browser/PWA ist
+der Button ein schlichter Download-Link.
 
 ### APK auf den Server bringen
 

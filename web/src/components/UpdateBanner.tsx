@@ -56,14 +56,14 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
         </span>
         <p className="min-w-0 flex-1 text-[13.5px] leading-snug">
           <span className="font-semibold">Update available — v{version}</span>
-          <span className="block text-[12px] text-dim">Download and install to get the latest app.</span>
+          <span className="block text-[12px] text-dim">Downloads it and opens the installer.</span>
         </p>
         <ApkDownloadLink
           info={apk}
           className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white btn-primary"
         >
           <Download size={14} />
-          Download
+          Install
         </ApkDownloadLink>
         <button
           type="button"

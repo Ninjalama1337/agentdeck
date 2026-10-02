@@ -3,6 +3,7 @@ import type { ApkInfo } from '@agentdeck/shared';
 import { clsx } from 'clsx';
 import { ApkDownloadLink } from './ApkDownloadLink';
 import { bytes, relTime } from '../util/format';
+import { isNativePlatform } from '../util/platform';
 
 /**
  * "Android app" card — rendered on the pairing screen and in settings.
@@ -22,6 +23,8 @@ export function ApkCard({ info, className }: { info: ApkInfo | null; className?:
       </p>
     );
   }
+
+  const native = isNativePlatform();
 
   return (
     <div
@@ -69,7 +72,7 @@ export function ApkCard({ info, className }: { info: ApkInfo | null; className?:
         style={{ background: 'linear-gradient(135deg,#7C5CFF,#4E8CFF)', boxShadow: '0 8px 32px rgba(124,92,255,0.35)' }}
       >
         <Download size={16} />
-        Download APK
+        {native ? 'Download & install' : 'Download APK'}
       </ApkDownloadLink>
       <p className="mt-2 text-center text-[11.5px] text-dim">
         Allow install from unknown sources when prompted.

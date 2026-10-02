@@ -4,7 +4,8 @@
  * permissions (microphone for Whisper dictation, notifications for "agent
  * finished / waiting" alerts, vibration for haptics), the foreground
  * service that keeps the connection alive in the background, and the app's own
- * Java sources from mobile/native (MainActivity, file download plugin).
+ * Java sources from mobile/native (MainActivity, file download and app update
+ * plugins).
  * Idempotent.
  */
 import fs from 'node:fs';
@@ -28,6 +29,9 @@ const PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
   'android.permission.WAKE_LOCK',
+  // In-app update: hand the downloaded APK to the package installer
+  // (mobile/native/ApkInstallPlugin.java).
+  'android.permission.REQUEST_INSTALL_PACKAGES',
 ];
 
 // Foreground service of @capawesome-team/capacitor-android-foreground-service.

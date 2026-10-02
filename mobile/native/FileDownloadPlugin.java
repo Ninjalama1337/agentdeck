@@ -85,6 +85,9 @@ public class FileDownloadPlugin extends Plugin {
             request.setTitle(safeName);
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName);
+            // Without it, "open" on the finished download depends on the server's header.
+            String mimeType = call.getString("mimeType");
+            if (mimeType != null && !mimeType.isEmpty()) request.setMimeType(mimeType);
             JSObject headers = call.getObject("headers");
             if (headers != null) {
                 for (Iterator<String> it = headers.keys(); it.hasNext();) {

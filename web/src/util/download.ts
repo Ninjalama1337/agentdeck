@@ -79,12 +79,38 @@ export async function downloadApkNatively(fileName: string, onStarted?: () => vo
   if (!native?.download) return false;
   onStarted?.();
   try {
-    await native.download({ url: api.apkLatestUrl(), fileName });
+    await native.download({ url: api.apkLatestUrl(), fileName, mimeType: 'application/vnd.android.package-archive' });
     return true;
   } catch (err) {
     const { code, message } = (err ?? {}) as { code?: string; message?: string };
     if (code === 'DOWNLOAD_FAILED') throw new Error(message || 'Download failed');
     return false;
+  }
+}
+
+/**
+ * APK only: downloads the server's latest app build and opens Android's
+ * installer on it ("Update this app?"). `onProgress` gets 0..1 while it loads.
+ *
+ * Resolves `false` when this APK cannot do it (built before the ApkInstall
+ * plugin, below Android 7) — the caller falls back to a plain download.
+ * Throws when the download or the installer failed.
+ */
+export async function installApkUpdate(onProgress?: (fraction: number) => void): Promise<boolean> {
+  const native = isNativePlatform() ? window.Capacitor?.Plugins?.ApkInstall : undefined;
+  if (!native?.install) return false;
+  const listener = (await native
+    .addListener?.('progress', (e: unknown) => onProgress?.((e as { fraction?: number }).fraction ?? 0))
+    ?.catch(() => undefined)) as { remove?: () => unknown } | undefined;
+  try {
+    await native.install({ url: api.apkLatestUrl() });
+    return true;
+  } catch (err) {
+    const { code, message } = (err ?? {}) as { code?: string; message?: string };
+    if (code === 'DOWNLOAD_FAILED' || code === 'INSTALL_FAILED') throw new Error(message || 'Update failed');
+    return false;
+  } finally {
+    void listener?.remove?.();
   }
 }
 
