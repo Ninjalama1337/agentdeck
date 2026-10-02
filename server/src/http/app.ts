@@ -37,7 +37,8 @@ import { VoiceService } from '../voice/transcribe.js';
 import { registerRoutes } from '../routes/index.js';
 import { terminalBroadcasts } from '../routes/terminals.js';
 import type { AppDeps } from '../routes/deps.js';
-import { NAME, VERSION } from '../version.js';
+import { NAME, REPO_ROOT, VERSION } from '../version.js';
+import { UpdateManager } from '../update/manager.js';
 
 const FALLBACK_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -230,6 +231,15 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   const apk = new ApkStore(config.dataDir);
   await apk.init();
   const adminJobRunner = new AdminJobRunner({ agents, log, broadcast });
+  const updateManager = new UpdateManager({
+    repoRoot: REPO_ROOT,
+    currentVersion: VERSION,
+    dataDir: config.dataDir,
+    // A wildcard bind is reachable on loopback; a specific address only on itself.
+    localUrl: `http://${config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host}:${config.port}`,
+    log,
+    broadcast,
+  });
   const tunnelManager = new TunnelManager({
     tunnel: config.tunnel,
     dataDir: config.dataDir,
@@ -251,6 +261,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     tunnel: tunnelManager,
     apk,
     adminJobs: adminJobRunner,
+    update: updateManager,
     terminals,
     routines,
     notifications,

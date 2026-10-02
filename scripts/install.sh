@@ -28,8 +28,15 @@ NODE_MAJOR="$(node -p 'parseInt(process.versions.node, 10)')"
 info "Node $(node -v), npm $(npm -v) — passt."
 
 # --- Installieren + Bauen ------------------------------------------------------
-info "Installiere Abhängigkeiten (npm install, Root-Workspace) …"
-npm install --no-audit --no-fund
+# npm ci haelt sich exakt an package-lock.json und laesst die Datei unveraendert
+# — der Checkout bleibt sauber, was scripts/update.sh voraussetzt.
+if [[ -f package-lock.json ]]; then
+  info "Installiere Abhängigkeiten (npm ci, Root-Workspace) …"
+  npm ci --no-audit --no-fund
+else
+  info "Installiere Abhängigkeiten (npm install, Root-Workspace) …"
+  npm install --no-audit --no-fund
+fi
 
 info "Baue @agentdeck/shared …"
 npm run build -w packages/shared

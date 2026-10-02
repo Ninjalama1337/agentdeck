@@ -36,6 +36,7 @@ export const PER_SERVER_KEYS = [
   'agentdeck:inbox',
   'agentdeck:inbox-seen',
   'agentdeck:inbox-cleared',
+  'agentdeck:update-notified',
 ] as const;
 
 export function cleanBase(base: string): string {

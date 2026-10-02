@@ -24,6 +24,9 @@ Environment=NODE_ENV=production
 
 Restart=on-failure
 RestartSec=3
+# Nur den Server selbst beenden: die Terminals laufen in tmux unter diesem
+# Dienst und sollen Neustart und Update ueberleben.
+KillMode=process
 
 # Bewusst ohne NoNewPrivileges/PrivateTmp: die Terminals und Agents laufen als
 # Kinder dieses Dienstes und sollen sich wie eine normale Shell verhalten

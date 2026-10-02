@@ -29,6 +29,7 @@ import { UsageSheet } from './UsageSheet';
 import { AccountSheet } from './AccountSheet';
 import { bytes, relTime } from '../../util/format';
 import { PreferencesSection } from './PreferencesSection';
+import { ServerUpdateSection } from './ServerUpdateSection';
 import { ArrowLeft } from 'lucide-react';
 
 /** Dot + label colors for the tunnel status row. */
@@ -310,6 +311,8 @@ export function SettingsScreen() {
           </button>
         </div>
       </section>
+
+      <ServerUpdateSection />
 
       {/* saved servers: one login each, switch without pairing again */}
       <section className="glass mb-4 p-4" aria-label="Saved servers">

@@ -13,6 +13,7 @@ import { tunnelRoutes } from './tunnel.js';
 import { apkRoutes } from './apk.js';
 import { usageRoutes } from './usage.js';
 import { adminRoutes } from './admin.js';
+import { updateRoutes } from './update.js';
 import { terminalRoutes } from './terminals.js';
 import { routineRoutes } from './routines.js';
 import { accountRoutes } from './accounts.js';
@@ -28,6 +29,7 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await apkRoutes(fastify, deps);
   await usageRoutes(fastify, deps);
   await adminRoutes(fastify, deps);
+  await updateRoutes(fastify, deps);
   await agentRoutes(fastify, deps);
   await deviceRoutes(fastify, deps);
   await projectRoutes(fastify, deps);

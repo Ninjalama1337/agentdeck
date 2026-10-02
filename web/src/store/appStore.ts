@@ -12,6 +12,7 @@ import type {
   AgentInfo,
   AgentUsage,
   ApkInfo,
+  UpdateInfo,
   Attachment,
   ChatMessage,
   CreateAccountRequest,
@@ -135,6 +136,8 @@ const PROJECT_KEY = scopedKey('agentdeck:project');
 const INBOX_KEY = scopedKey('agentdeck:inbox');
 const INBOX_SEEN_KEY = scopedKey('agentdeck:inbox-seen');
 const INBOX_CLEARED_KEY = scopedKey('agentdeck:inbox-cleared');
+/** Release version this device already announced for the active server. */
+const UPDATE_NOTIFIED_KEY = scopedKey('agentdeck:update-notified');
 const INBOX_LIMIT = 80;
 const MODEL_PREFS_KEY = 'agentdeck:model-prefs';
 
@@ -254,6 +257,8 @@ export interface AppStore {
   modelPrefs: Partial<Record<AgentId, string>>;
   /** Metadata of the latest APK on the server (null = unknown / unreachable). */
   apkInfo: ApkInfo | null;
+  /** Server version, latest release and the running update job (null = not fetched / older server). */
+  update: UpdateInfo | null;
   /** Subscription usage per agent (null = not fetched yet). */
   usage: AgentUsage[] | null;
   /** Agent shown in the top-left usage button: follows the agent in use (hooks/useUsageTracking), or a manual pick. */
@@ -306,6 +311,10 @@ export interface AppStore {
   refreshDevices(): Promise<void>;
   /** One-shot fetch of GET /api/apk/info (app start, settings screen). */
   refreshApkInfo(): Promise<void>;
+  /** Fetch GET /api/update; `force` makes the server ask GitHub again. */
+  refreshUpdate(force?: boolean): Promise<void>;
+  /** Update the server to the latest release (progress arrives via WS). */
+  startUpdate(): Promise<void>;
   /** Fetch GET /api/usage. `silent` (background polling) keeps the old numbers and skips the error toast. */
   refreshUsage(opts?: { silent?: boolean }): Promise<void>;
   /** Switch the active agent shown in the top-left usage circle button. */
@@ -585,6 +594,14 @@ export const useAppStore = create<AppStore>()((set, get) => {
       }
     });
 
+    socket.on('update:state', ({ update }) => {
+      const before = get().update?.job?.status;
+      set({ update });
+      if (before === 'running' && update.job?.status === 'error') {
+        get().toast('error', update.job.error?.trim() || 'Server update failed');
+      }
+    });
+
     socket.on('files:changed', ({ projectId, events }) => {
       set((st) => {
         const now = Date.now();
@@ -752,6 +769,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     pendingFiles: [],
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
     apkInfo: null,
+    update: null,
     usage: null,
     currentUsageAgent: 'claude',
     usageSheetOpen: false,
@@ -844,6 +862,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
             })
             .catch(() => undefined),
           get().refreshTerminalPresets(),
+          get().refreshUpdate(),
           get().refreshDevices(),
           get().fetchTeamRuns(),
           get().refreshTerminals(),
@@ -940,6 +959,37 @@ export const useAppStore = create<AppStore>()((set, get) => {
         set({ devices: await api.devices() });
       } catch {
         /* non-fatal */
+      }
+    },
+
+    async refreshUpdate(force = false) {
+      try {
+        const before = get().update;
+        const update = await api.update(force);
+        set({ update });
+        if (before && before.current !== update.current) {
+          // The server came back as another version: an update just finished.
+          get().toast('info', `Server updated to v${update.current}`);
+          void get().refreshApkInfo();
+        } else if (update.updateAvailable && update.latest) {
+          // Announce each release once per server, not on every app start.
+          if (readJson<string>(UPDATE_NOTIFIED_KEY, '') !== update.latest.version) {
+            writeJson(UPDATE_NOTIFIED_KEY, update.latest.version);
+            get().toast('info', `Server update v${update.latest.version} available — see Settings`);
+          }
+        }
+      } catch (err) {
+        // Servers older than this route answer 404 — nothing to show then.
+        if (force) get().toast('error', errorMessage(err));
+      }
+    },
+
+    async startUpdate() {
+      try {
+        set({ update: await api.startUpdate() });
+      } catch (err) {
+        get().toast('error', errorMessage(err));
+        void get().refreshUpdate();
       }
     },
 

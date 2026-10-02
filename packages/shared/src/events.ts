@@ -13,6 +13,7 @@ import type {
   SessionStatus,
   TeamRun,
   TerminalInfo,
+  UpdateInfo,
 } from './api.js';
 
 /**
@@ -50,6 +51,8 @@ export interface ServerToClientEvents {
   'files:changed': (payload: { projectId: string; events: FileChangeEvent[] }) => void;
   /** Live agent admin job progress (update/install/login). */
   'admin:job': (payload: { job: AdminJob }) => void;
+  /** Server self-update progress (scripts/update.sh output, status). */
+  'update:state': (payload: { update: UpdateInfo }) => void;
   /** PTY output chunk (UTF-8) for a terminal. */
   'terminal:data': (payload: { id: string; data: string }) => void;
   /** PTY process ended. */

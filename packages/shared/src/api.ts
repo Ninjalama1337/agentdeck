@@ -279,6 +279,40 @@ export interface StartAdminJobRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Server self-update (GitHub releases)
+// ---------------------------------------------------------------------------
+
+export type UpdateJobStatus = 'running' | 'done' | 'error';
+
+/** One run of scripts/update.sh, streamed via WS `update:state`. */
+export interface UpdateJob {
+  /** Release version being installed, e.g. `1.2.3`. */
+  target: string;
+  status: UpdateJobStatus;
+  /** Rolling console output (capped server-side). */
+  output: string[];
+  startedAt: number;
+  endedAt?: number;
+  error?: string;
+}
+
+export interface UpdateInfo {
+  /** Version this server runs: `1.2.3` (a release) or `1.2.3-4-gabc1234` (commits past one). */
+  current: string;
+  /** Latest GitHub release; absent when the repo has none or the check failed. */
+  latest?: { version: string; tag: string; url?: string; publishedAt?: string; notes?: string };
+  updateAvailable: boolean;
+  /** When GitHub was last asked (ms epoch). */
+  checkedAt?: number;
+  /** Why the release check failed (gh missing / not logged in / offline). */
+  checkError?: string;
+  /** Why this server cannot update itself (e.g. not a git checkout). */
+  blockedReason?: string;
+  /** The running or last update of this server process. */
+  job?: UpdateJob;
+}
+
+// ---------------------------------------------------------------------------
 // Remote access (tunnel) + APK distribution
 // ---------------------------------------------------------------------------
 

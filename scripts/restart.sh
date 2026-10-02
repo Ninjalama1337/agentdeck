@@ -8,15 +8,7 @@ cd "$ROOT"
 
 info() { printf '\033[1m\033[32m==>\033[0m %s\n' "$*"; }
 
-# 1. systemd user unit if active
-if systemctl --user is-active agentdeck.service >/dev/null 2>&1; then
-  info "Restarting AgentDeck via systemd user unit..."
-  systemctl --user restart agentdeck.service
-  info "Done."
-  exit 0
-fi
-
-# 2. Server PID from environment or running process
+# 1. Server PID from environment or running process
 # AGENTDECK_SERVER_PID goes stale in terminals that outlive a restart, so it
 # only counts while it still names a running server.
 is_server_pid() {
@@ -25,6 +17,18 @@ is_server_pid() {
 PID="${AGENTDECK_SERVER_PID:-}"
 if ! is_server_pid "$PID"; then
   PID="$(pgrep -f "node.*server/dist/index.js" | head -n 1 || true)"
+fi
+
+# 2. systemd user unit, when it is the one running this server (a second
+#    instance started by hand next to the unit is restarted by hand below).
+if systemctl --user is-active agentdeck.service >/dev/null 2>&1; then
+  UNIT_PID="$(systemctl --user show -p MainPID --value agentdeck.service 2>/dev/null || true)"
+  if [[ -z "$PID" || "$PID" == "$UNIT_PID" ]]; then
+    info "Restarting AgentDeck via systemd user unit..."
+    systemctl --user restart agentdeck.service
+    info "Done."
+    exit 0
+  fi
 fi
 
 # Inherit env (port, host, dataDir) from previous running process if not set

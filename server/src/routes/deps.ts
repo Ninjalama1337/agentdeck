@@ -16,6 +16,7 @@ import type { RateLimiter } from '../util/rateLimit.js';
 import type { Broadcaster } from '../ws/gateway.js';
 import type { FileWatchers } from '../files/watcher.js';
 import type { AdminJobRunner } from '../admin/runner.js';
+import type { UpdateManager } from '../update/manager.js';
 import type { TerminalManager } from '../term/manager.js';
 import type { RoutineScheduler } from '../routines/scheduler.js';
 import type { NotificationHub } from '../notify/hub.js';
@@ -35,6 +36,8 @@ export interface AppDeps {
   apk: ApkStore;
   /** Runs the fixed agent admin recipes (update/install/login), one at a time. */
   adminJobs: AdminJobRunner;
+  /** Self-update of this server to the latest GitHub release. */
+  update: UpdateManager;
   /** PTY shells for the Code tab. */
   terminals: TerminalManager;
   /** Recurring agent runs ("agents on routines"). */

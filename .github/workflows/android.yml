@@ -24,6 +24,8 @@ jobs:
       # automatisch an den eigenen Server (siehe Kommentar am Publish-Schritt).
       AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
       AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
+      # Fester Signatur-Keystore (base64), siehe Schritt "Signatur-Keystore".
+      ANDROID_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,6 +62,14 @@ jobs:
       - name: Shared-Paket bauen
         run: npm run build -w packages/shared
 
+      # Ein Release (Tag) gibt es nur, wenn Typecheck und Tests durchlaufen —
+      # die Server holen sich genau diesen Stand (scripts/update.sh).
+      - name: Typecheck und Tests (nur Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          npm run typecheck --workspaces --if-present
+          npm test
+
       - name: Web-App bauen
         run: npm run build -w web
 
@@ -92,6 +102,16 @@ jobs:
       - name: Cap-Sync
         working-directory: mobile
         run: npm run sync
+
+      # Ohne festen Keystore erzeugt jeder CI-Lauf einen neuen Debug-Schluessel,
+      # und Android lehnt die APK als Update einer installierten App ab
+      # ("App nicht installiert"). Mit dem Secret tragen alle Builds dieselbe
+      # Signatur. Anlegen:  base64 -w0 ~/.android/debug.keystore | gh secret set ANDROID_DEBUG_KEYSTORE_B64
+      - name: Signatur-Keystore einspielen (optional)
+        if: env.ANDROID_DEBUG_KEYSTORE_B64 != ''
+        run: |
+          mkdir -p "$HOME/.android"
+          printf '%s' "$ANDROID_DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
 
       - name: Debug-APK bauen
         working-directory: mobile/android

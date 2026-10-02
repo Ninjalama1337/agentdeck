@@ -53,6 +53,7 @@ import type {
   TerminalInfo,
   TunnelInfo,
   TunnelStatus,
+  UpdateInfo,
   UpdateRoutineRequest,
 } from '@agentdeck/shared';
 import { getActiveServer, updateActiveServer } from './servers';
@@ -210,6 +211,16 @@ export const api = {
    */
   getApkInfo(): Promise<ApkInfo> {
     return request('GET', '/api/apk/info');
+  },
+
+  /** Server version + latest GitHub release (`refresh` asks GitHub again). */
+  update(refresh = false): Promise<UpdateInfo> {
+    return request('GET', '/api/update', refresh ? { query: { refresh: 1 } } : {});
+  },
+
+  /** Update the server to the latest release (202). 409 when running / nothing to do. */
+  startUpdate(): Promise<UpdateInfo> {
+    return request('POST', '/api/update');
   },
 
   /** Subscription usage per agent (claude plan limits, codex login, ...). */
