@@ -19,6 +19,7 @@ import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
 import { augmentedPath } from './presets.js';
 import { AttentionDetector, type AttentionReason } from './attention.js';
+import { classifyScreen, type Verdict } from '../notify/classify.js';
 import {
   isTmuxAvailable,
   tmuxSocketPath,
@@ -36,7 +37,7 @@ export interface TerminalBroadcasts {
   onExit: (id: string, code: number) => void;
   onList: () => void;
   /** Terminal wants the user (bell / notification / finished work). */
-  onAttention?: (info: TerminalInfo, reason: AttentionReason, text?: string) => void;
+  onAttention?: (info: TerminalInfo, reason: AttentionReason, verdict: Verdict) => void;
 }
 
 export interface SpawnOptions {
@@ -86,6 +87,16 @@ const MAX_CONCURRENT = 10;
 const IDLE_MS = 12 * 60 * 60_000;
 const SCROLLBACK = 5000;
 const REPLAY_SCROLLBACK = 5000;
+
+/** The visible screen as plain text, one line per row. */
+function screenText(screen: ActiveTerminal['screen']): string {
+  const buffer = screen.buffer.active;
+  const rows: string[] = [];
+  for (let y = 0; y < screen.rows; y++) {
+    rows.push(buffer.getLine(buffer.baseY + y)?.translateToString(true) ?? '');
+  }
+  return rows.join('\n');
+}
 
 /** argv that runs `command` in an interactive login shell, then stays in a shell. */
 export function shellArgsFor(shell: string, command: string): string[] {
@@ -329,13 +340,7 @@ export class TerminalManager {
         // "Quiet after work" only makes sense for agent TUIs; a plain shell
         // going quiet after `ls` is not news.
         idleNotify: opts.idleNotify === true,
-        onAttention: (reason, text) => {
-          if (this.active.get(id) !== term) return;
-          const changed = !term.info.attention;
-          term.info.attention = true;
-          broadcast.onAttention?.(term.info, reason, text);
-          if (changed) broadcast.onList();
-        },
+        onAttention: (reason, text) => this.raiseAttention(id, term, broadcast, reason, text),
       }),
     };
     this.active.set(id, term);
@@ -451,13 +456,7 @@ export class TerminalManager {
       idleTimer: this.armIdleTimer(id, broadcast),
       attention: new AttentionDetector({
         idleNotify: info.presetId !== 'shell',
-        onAttention: (reason, text) => {
-          if (this.active.get(id) !== term) return;
-          const changed = !term.info.attention;
-          term.info.attention = true;
-          broadcast.onAttention?.(term.info, reason, text);
-          if (changed) broadcast.onList();
-        },
+        onAttention: (reason, text) => this.raiseAttention(id, term, broadcast, reason, text),
       }),
     };
 
@@ -519,11 +518,35 @@ export class TerminalManager {
     }
   }
 
+  /**
+   * Flags the terminal and reports why. The verdict is read off the screen
+   * once the emulator has parsed everything written so far — the bell usually
+   * arrives in the same chunk as the prompt it rings for.
+   */
+  private raiseAttention(
+    id: string,
+    term: ActiveTerminal,
+    broadcast: TerminalBroadcasts,
+    reason: AttentionReason,
+    text?: string,
+  ): void {
+    term.screen.write('', () => {
+      if (this.active.get(id) !== term) return;
+      const verdict = classifyScreen(screenText(term.screen), text);
+      const changed = !term.info.attention || term.info.attentionState !== verdict.state;
+      term.info.attention = true;
+      term.info.attentionState = verdict.state;
+      broadcast.onAttention?.(term.info, reason, verdict);
+      if (changed) broadcast.onList();
+    });
+  }
+
   /** The user looked at the terminal — clear its attention flag. */
   markSeen(id: string, broadcast: TerminalBroadcasts): void {
     const term = this.active.get(id);
     if (!term || !term.info.attention) return;
     term.info.attention = false;
+    delete term.info.attentionState;
     broadcast.onList();
   }
 

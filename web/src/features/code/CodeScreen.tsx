@@ -248,6 +248,13 @@ export function CodeScreen() {
   );
 }
 
+const ATTENTION_LABEL: Record<NonNullable<TerminalInfo['attentionState']>, string> = {
+  done: 'Done',
+  waiting: 'Waiting for you',
+  limit: 'Usage limit reached',
+  error: 'Failed',
+};
+
 function TerminalTab({
   term,
   preset,
@@ -282,7 +289,10 @@ function TerminalTab({
     >
       <button type="button" onClick={onSelect} className="flex h-full items-center gap-2">
         {term.attention ? (
-          <span className="attention-dot" aria-label="Waiting for you" />
+          <span
+            className={clsx('attention-dot', term.attentionState && `attention-${term.attentionState}`)}
+            aria-label={ATTENTION_LABEL[term.attentionState ?? 'waiting']}
+          />
         ) : (
           <span className="h-2 w-2 rounded-full" style={{ background: accent }} />
         )}

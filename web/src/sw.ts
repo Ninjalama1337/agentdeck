@@ -90,6 +90,14 @@ interface PushedNotification {
   sessionId?: string;
   terminalId?: string;
   runId?: string;
+  state?: 'done' | 'waiting' | 'limit' | 'error';
+}
+
+/** Same patterns as util/notify.ts: one tap = done, two = needs input, long = limit/failure. */
+function vibrationOf(state: PushedNotification['state']): number[] {
+  if (state === 'waiting') return [120, 90, 120];
+  if (state === 'limit' || state === 'error') return [450];
+  return [120];
 }
 
 function openTarget(n: PushedNotification): string | undefined {
@@ -121,6 +129,8 @@ swSelf.addEventListener('push', (event) => {
         badge: '/icons/icon-192.png',
         tag: n.terminalId ?? n.sessionId ?? n.runId ?? n.id,
         renotify: true,
+        vibrate: vibrationOf(n.state),
+        requireInteraction: n.state === 'waiting' || n.state === 'limit',
         data: { open: openTarget(n) },
       } as NotificationOptions);
     })(),

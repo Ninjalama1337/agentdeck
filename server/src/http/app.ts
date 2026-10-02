@@ -14,6 +14,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import staticFiles from '@fastify/static';
 import { ZodError } from 'zod';
+import type { DeckNotificationState } from '@agentdeck/shared';
 import type { Config } from '../config.js';
 import { createLogger, type Logger } from '../logging.js';
 import { Store } from '../state/store.js';
@@ -32,7 +33,8 @@ import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '.
 import { FileWatchers } from '../files/watcher.js';
 import { TerminalManager } from '../term/manager.js';
 import { RoutineScheduler } from '../routines/scheduler.js';
-import { NotificationHub, summarize } from '../notify/hub.js';
+import { NotificationHub, stateTitle, summarize } from '../notify/hub.js';
+import { classifyReply, isLimitError } from '../notify/classify.js';
 import { VoiceService } from '../voice/transcribe.js';
 import { registerRoutes } from '../routes/index.js';
 import { terminalBroadcasts } from '../routes/terminals.js';
@@ -131,17 +133,21 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
       const project = store.getProject(session.projectId);
       const label = agents.infoOf(session.agentId)?.label ?? session.agentId;
       const where = project?.name ?? 'project';
+      let state: DeckNotificationState;
       let body: string;
       if (status === 'error') {
+        state = isLimitError(session.lastError) ? 'limit' : 'error';
         body = summarize(session.lastError) || 'The run failed.';
       } else {
         const messages = await store.getMessages(sessionId);
         const last = [...messages].reverse().find((m) => m.role === 'assistant');
+        state = classifyReply(last?.text).state;
         body = summarize(last?.text) || 'Finished.';
       }
       notifications.notify({
         kind: status === 'error' ? 'session-error' : 'session-done',
-        title: status === 'error' ? `${label} failed · ${where}` : `${label} is done · ${where}`,
+        state,
+        title: stateTitle(state, label, where),
         body,
         projectId: session.projectId,
         sessionId,
@@ -196,9 +202,11 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
           notifiedTeams.add(change.run.id);
           const project = store.getProject(change.run.projectId);
           const steps = change.run.steps.length;
+          const state = change.run.status === 'done' ? 'done' : 'error';
           notifications.notify({
-            kind: change.run.status === 'done' ? 'team-done' : 'team-error',
-            title: `Team run ${change.run.status === 'done' ? 'finished' : 'failed'} · ${project?.name ?? 'project'}`,
+            kind: state === 'done' ? 'team-done' : 'team-error',
+            state,
+            title: stateTitle(state, 'Team run', project?.name ?? 'project'),
             body: `${steps} ${steps === 1 ? 'step' : 'steps'} — tap to review`,
             projectId: change.run.projectId,
             runId: change.run.id,

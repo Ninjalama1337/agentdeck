@@ -14,7 +14,7 @@ import { haptic } from '../../util/haptics';
 const KIND_LABELS: Record<DeckNotificationKind, string> = {
   'session-done': 'Agent finished',
   'session-error': 'Agent failed',
-  'terminal-attention': 'Terminal waiting for input',
+  'terminal-attention': 'Terminal agent done, waiting or out of usage',
   'team-done': 'Team run finished',
   'team-error': 'Team run failed',
   info: 'Other',

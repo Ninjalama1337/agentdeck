@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Bell, CheckCircle2, SquareTerminal, Trash2, Users } from 'lucide-react';
-import type { DeckNotification } from '@agentdeck/shared';
+import { AlertTriangle, Ban, Bell, CheckCircle2, Hand, Trash2 } from 'lucide-react';
+import type { DeckNotificationState } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { relTime } from '../../util/format';
-import { openTargetOf } from '../../util/notify';
+import { openTargetOf, stateOf } from '../../util/notify';
 
-const ICON: Record<DeckNotification['kind'], { icon: typeof Bell; color: string }> = {
-  'session-done': { icon: CheckCircle2, color: '#10B981' },
-  'session-error': { icon: AlertTriangle, color: '#F43F5E' },
-  'terminal-attention': { icon: SquareTerminal, color: '#F59E0B' },
-  'team-done': { icon: Users, color: '#10B981' },
-  'team-error': { icon: Users, color: '#F43F5E' },
-  info: { icon: Bell, color: '#7C5CFF' },
+/** One look per state — the same on every source (chat run, terminal, team). */
+const STATE_ICON: Record<DeckNotificationState, { icon: typeof Bell; color: string; label: string }> = {
+  done: { icon: CheckCircle2, color: '#10B981', label: 'Done' },
+  waiting: { icon: Hand, color: '#F59E0B', label: 'Needs input' },
+  limit: { icon: Ban, color: '#F43F5E', label: 'Usage limit' },
+  error: { icon: AlertTriangle, color: '#F43F5E', label: 'Failed' },
 };
+const INFO_ICON = { icon: Bell, color: '#7C5CFF', label: '' };
 
 /** Bell with unread badge — opens the inbox sheet. */
 export function InboxButton() {
@@ -65,7 +65,8 @@ export function InboxSheet({ open, onClose }: { open: boolean; onClose: () => vo
       ) : (
         <div className="flex flex-col gap-1.5">
           {inbox.map((n) => {
-            const meta = ICON[n.kind];
+            const state = stateOf(n);
+            const meta = state ? STATE_ICON[state] : INFO_ICON;
             const Icon = meta.icon;
             const target = openTargetOf(n);
             return (
@@ -92,7 +93,14 @@ export function InboxSheet({ open, onClose }: { open: boolean; onClose: () => vo
                     {n.ts > seenSnapshot && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" />}
                   </span>
                   <span className="clamp-2 block text-[12.5px] leading-snug text-dim">{n.body}</span>
-                  <span className="mt-0.5 block text-[11px] text-dim/70">{relTime(n.ts)}</span>
+                  <span className="mt-0.5 block text-[11px] text-dim/70">
+                    {meta.label && (
+                      <span className="font-semibold" style={{ color: meta.color }}>
+                        {meta.label} ·{' '}
+                      </span>
+                    )}
+                    {relTime(n.ts)}
+                  </span>
                 </span>
               </button>
             );

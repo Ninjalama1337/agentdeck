@@ -56,7 +56,7 @@ import {
 } from '../api/servers';
 import { usePrefs } from './prefs';
 import { haptic } from '../util/haptics';
-import { currentPushSubscription, showSystemNotification } from '../util/notify';
+import { currentPushSubscription, showSystemNotification, stateOf } from '../util/notify';
 
 /* ------------------------------------------------------------------ router */
 
@@ -622,8 +622,12 @@ export const useAppStore = create<AppStore>()((set, get) => {
       get().toast(level, text);
     });
 
-    socket.on('terminal:attention', ({ id }) => {
-      set((st) => ({ terminals: st.terminals.map((t) => (t.id === id ? { ...t, attention: true } : t)) }));
+    socket.on('terminal:attention', ({ id, state }) => {
+      set((st) => ({
+        terminals: st.terminals.map((t) =>
+          t.id === id ? { ...t, attention: true, ...(state ? { attentionState: state } : {}) } : t,
+        ),
+      }));
     });
 
     socket.on('notification', ({ notification }) => {
@@ -675,8 +679,9 @@ export const useAppStore = create<AppStore>()((set, get) => {
     }
     if (!prefs.notifyKinds[n.kind]) return;
     if (document.visibilityState === 'visible') {
-      haptic(n.kind.endsWith('error') ? 'warning' : 'success');
-      get().toast(n.kind.endsWith('error') ? 'error' : 'info', `${n.title} — ${n.body}`);
+      const state = stateOf(n);
+      haptic(state === 'done' ? 'success' : 'warning');
+      get().toast(state === 'error' ? 'error' : state === 'limit' || state === 'waiting' ? 'warn' : 'info', `${n.title} — ${n.body}`);
       return;
     }
     // Hidden: Web Push (service worker) covers it when subscribed.
@@ -1325,7 +1330,9 @@ export const useAppStore = create<AppStore>()((set, get) => {
     markTerminalSeen(id) {
       const term = get().terminals.find((t) => t.id === id);
       if (!term?.attention) return;
-      set((st) => ({ terminals: st.terminals.map((t) => (t.id === id ? { ...t, attention: false } : t)) }));
+      set((st) => ({
+        terminals: st.terminals.map((t) => (t.id === id ? { ...t, attention: false, attentionState: undefined } : t)),
+      }));
       getSocket()?.emit('terminal:seen', { id });
     },
 

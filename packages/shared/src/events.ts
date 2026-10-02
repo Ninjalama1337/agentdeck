@@ -6,6 +6,7 @@ import type {
   AdminJob,
   ChatMessage,
   DeckNotification,
+  DeckNotificationState,
   FileChangeEvent,
   Project,
   Routine,
@@ -60,7 +61,12 @@ export interface ServerToClientEvents {
   /** Terminal list changed (created/killed). */
   'terminal:list': (payload: { terminals: TerminalInfo[] }) => void;
   /** A terminal rang the bell / sent an OSC notification / went quiet after work. */
-  'terminal:attention': (payload: { id: string; reason: 'bell' | 'notify' | 'idle'; text?: string }) => void;
+  'terminal:attention': (payload: {
+    id: string;
+    reason: 'bell' | 'notify' | 'idle';
+    state?: DeckNotificationState;
+    text?: string;
+  }) => void;
   /** Inbox-worthy event (run finished, terminal waiting, team done). Also sent via Web Push. */
   notification: (payload: { notification: DeckNotification }) => void;
   notify: (payload: { level: 'info' | 'warn' | 'error'; text: string }) => void;

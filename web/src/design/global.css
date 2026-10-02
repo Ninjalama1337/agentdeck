@@ -576,6 +576,17 @@ textarea.field {
   box-shadow: 0 0 10px var(--ad-warn);
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
+/* done = green and calm · limit = red; waiting keeps the amber pulse */
+.attention-dot.attention-done {
+  background: var(--ad-ok);
+  box-shadow: 0 0 10px var(--ad-ok);
+  animation: none;
+}
+.attention-dot.attention-limit,
+.attention-dot.attention-error {
+  background: var(--ad-danger);
+  box-shadow: 0 0 10px var(--ad-danger);
+}
 
 /* Terminal key bar keys. */
 .kbd {

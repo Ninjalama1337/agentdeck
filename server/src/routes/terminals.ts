@@ -9,6 +9,7 @@ import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
 import { listPresets, resolveLaunch } from '../term/presets.js';
 import type { TerminalBroadcasts } from '../term/manager.js';
+import { stateTitle } from '../notify/hub.js';
 
 const CreateSchema = z.object({
   projectId: z.string().min(1),
@@ -20,10 +21,11 @@ const CreateSchema = z.object({
   title: z.string().max(80).optional(),
 });
 
+/** Body when the screen offers nothing more specific. */
 const ATTENTION_TEXT = {
-  bell: 'is waiting for you',
-  notify: 'sent a notification',
-  idle: 'went quiet — probably done or waiting for input',
+  done: 'Finished — tap to see the result.',
+  waiting: 'Stopped to ask you something — tap to answer.',
+  limit: 'No usage left — it continues once the limit resets.',
 } as const;
 
 export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
@@ -31,14 +33,14 @@ export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
     onData: (id: string, data: string) => deps.broadcast('terminal:data', { id, data }),
     onExit: (id: string, code: number) => deps.broadcast('terminal:exit', { id, code }),
     onList: () => deps.broadcast('terminal:list', { terminals: deps.terminals.list() }),
-    onAttention: (info, reason, text) => {
-      deps.broadcast('terminal:attention', { id: info.id, reason, ...(text ? { text } : {}) });
+    onAttention: (info, reason, { state, detail }) => {
+      deps.broadcast('terminal:attention', { id: info.id, reason, state, ...(detail ? { text: detail } : {}) });
       const project = deps.store.getProject(info.projectId);
-      const title = info.title ?? 'Terminal';
       deps.notifications.notify({
         kind: 'terminal-attention',
-        title: `${title} · ${project?.name ?? 'terminal'}`,
-        body: text ?? `${title} ${ATTENTION_TEXT[reason]}`,
+        state,
+        title: stateTitle(state, info.title ?? 'Terminal', project?.name ?? 'terminal'),
+        body: detail ?? ATTENTION_TEXT[state],
         projectId: info.projectId,
         terminalId: info.id,
       });

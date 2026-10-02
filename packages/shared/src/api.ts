@@ -430,6 +430,8 @@ export interface TerminalInfo {
   lastOutputAt?: number;
   /** The terminal rang / went quiet after work and waits for the user. */
   attention?: boolean;
+  /** Why it wants the user — set together with `attention`. */
+  attentionState?: DeckNotificationState;
   /** Whether the terminal session is persistent across server restarts (tmux-backed). */
   persistent?: boolean;
 }
@@ -488,9 +490,18 @@ export type DeckNotificationKind =
   | 'team-error'
   | 'info';
 
+/**
+ * What happened, from the user's point of view:
+ * `done` — the agent finished · `waiting` — it stopped to ask something ·
+ * `limit` — its usage limit / quota is used up · `error` — the run failed.
+ */
+export type DeckNotificationState = 'done' | 'waiting' | 'limit' | 'error';
+
 export interface DeckNotification {
   id: string;
   kind: DeckNotificationKind;
+  /** Absent on servers that predate it and on `info` notifications. */
+  state?: DeckNotificationState;
   title: string;
   body: string;
   ts: number;

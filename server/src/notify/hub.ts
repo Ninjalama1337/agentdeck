@@ -9,7 +9,12 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import webpush from 'web-push';
-import type { DeckNotification, DeckNotificationKind, PushSubscribeRequest } from '@agentdeck/shared';
+import type {
+  DeckNotification,
+  DeckNotificationKind,
+  DeckNotificationState,
+  PushSubscribeRequest,
+} from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newId } from '../util/ids.js';
 
@@ -133,7 +138,10 @@ export class NotificationHub {
         try {
           await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload, {
             TTL: 60 * 60,
-            urgency: n.kind === 'session-error' || n.kind === 'terminal-attention' ? 'high' : 'normal',
+            urgency:
+              n.kind === 'session-error' || n.kind === 'terminal-attention' || n.state === 'waiting' || n.state === 'limit'
+                ? 'high'
+                : 'normal',
             topic: n.terminalId ?? n.sessionId ?? n.runId,
           } as webpush.RequestOptions);
           delivered++;
@@ -156,6 +164,26 @@ export class NotificationHub {
     await fsp.writeFile(tmp, JSON.stringify(this.subs, null, 2), { mode: 0o600 });
     await fsp.rename(tmp, this.subsFile);
   }
+}
+
+/** Leads every title, so the state is readable on a lock screen at a glance. */
+const STATE_MARK: Record<DeckNotificationState, string> = {
+  done: '✅',
+  waiting: '✋',
+  limit: '⛔',
+  error: '⚠️',
+};
+
+const STATE_PHRASE: Record<DeckNotificationState, string> = {
+  done: 'is done',
+  waiting: 'needs your input',
+  limit: 'hit its usage limit',
+  error: 'failed',
+};
+
+/** "✋ Claude Code needs your input · winterlicht" */
+export function stateTitle(state: DeckNotificationState, who: string, where: string): string {
+  return `${STATE_MARK[state]} ${who} ${STATE_PHRASE[state]} · ${where}`;
 }
 
 /** Collapses an assistant reply into a notification body. */

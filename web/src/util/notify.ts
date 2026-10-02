@@ -9,7 +9,7 @@
  *
  * Deep links use `/?open=<target>` so a tap lands on the right screen.
  */
-import type { DeckNotification, DeckNotificationKind } from '@agentdeck/shared';
+import type { DeckNotification, DeckNotificationKind, DeckNotificationState } from '@agentdeck/shared';
 import { api } from '../api/client';
 import { usePrefs } from '../store/prefs';
 import { isNativePlatform } from './platform';
@@ -25,6 +25,15 @@ export function openTargetOf(n: Pick<DeckNotification, 'sessionId' | 'terminalId
   if (n.terminalId) return `terminal:${n.terminalId}`;
   if (n.sessionId) return `session:${n.sessionId}`;
   if (n.runId) return `team:${n.runId}`;
+  return undefined;
+}
+
+/** State of a notification; servers that predate the field only say it via the kind. */
+export function stateOf(n: Pick<DeckNotification, 'kind' | 'state'>): DeckNotificationState | undefined {
+  if (n.state) return n.state;
+  if (n.kind === 'session-done' || n.kind === 'team-done') return 'done';
+  if (n.kind === 'session-error' || n.kind === 'team-error') return 'error';
+  if (n.kind === 'terminal-attention') return 'waiting';
   return undefined;
 }
 
@@ -64,6 +73,15 @@ export async function requestPermission(): Promise<Permission> {
 
 /** Android channel for agent alerts: high importance so they pop up and buzz. */
 const NATIVE_CHANNEL = 'agentdeck-alerts';
+/**
+ * One more channel per state, so Android's notification settings can give
+ * "done", "needs input" and "usage limit" their own sound and vibration.
+ */
+const STATE_CHANNELS: Partial<Record<DeckNotificationState, { id: string; name: string; description: string }>> = {
+  done: { id: 'agentdeck-done', name: 'Agent finished', description: 'An agent or team run is done' },
+  waiting: { id: 'agentdeck-waiting', name: 'Agent needs input', description: 'An agent stopped to ask you something' },
+  limit: { id: 'agentdeck-limit', name: 'Usage limit reached', description: 'An agent ran out of usage or quota' },
+};
 let nativeChannelReady = false;
 
 /**
@@ -83,6 +101,9 @@ export async function prepareNativeNotifications(): Promise<void> {
       visibility: 1,
       vibration: true,
     });
+    for (const channel of Object.values(STATE_CHANNELS)) {
+      await plugin.createChannel?.({ ...channel, importance: 4, visibility: 1, vibration: true });
+    }
     nativeChannelReady = plugin.createChannel !== undefined;
   } catch {
     nativeChannelReady = false;
@@ -96,11 +117,19 @@ export async function prepareNativeNotifications(): Promise<void> {
   }
 }
 
+/** Felt in the pocket: one tap = done, two = needs input, a long buzz = limit or failure. */
+export function vibrationOf(state: DeckNotificationState | undefined): number[] {
+  if (state === 'waiting') return [120, 90, 120];
+  if (state === 'limit' || state === 'error') return [450];
+  return [120];
+}
+
 let nativeSeq = 1;
 
 /** Shows one notification through whatever the platform offers. */
 export async function showSystemNotification(n: DeckNotification): Promise<boolean> {
   const open = openTargetOf(n);
+  const state = stateOf(n);
   const plugin = localPlugin();
   if (isNativePlatform() && plugin?.schedule) {
     try {
@@ -110,7 +139,7 @@ export async function showSystemNotification(n: DeckNotification): Promise<boole
             id: (nativeSeq = (nativeSeq % 100_000) + 1),
             title: n.title,
             body: n.body,
-            ...(nativeChannelReady ? { channelId: NATIVE_CHANNEL } : {}),
+            ...(nativeChannelReady ? { channelId: STATE_CHANNELS[state ?? 'error']?.id ?? NATIVE_CHANNEL } : {}),
             extra: { open },
           },
         ],
@@ -123,12 +152,14 @@ export async function showSystemNotification(n: DeckNotification): Promise<boole
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
   try {
     const reg = await navigator.serviceWorker?.getRegistration();
-    const options: NotificationOptions & { renotify?: boolean } = {
+    const options: NotificationOptions & { renotify?: boolean; vibrate?: number[] } = {
       body: n.body,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       tag: n.terminalId ?? n.sessionId ?? n.runId ?? n.id,
       renotify: true,
+      vibrate: vibrationOf(state),
+      requireInteraction: state === 'waiting' || state === 'limit',
       data: { open },
     };
     if (reg) {
