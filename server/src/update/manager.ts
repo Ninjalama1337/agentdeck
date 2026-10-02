@@ -158,9 +158,10 @@ export class UpdateManager {
     return this.snapshot();
   }
 
-  /** Resolves when no update job is running (tests). */
+  /** Resolves when no update job is running and its log is written (tests). */
   async idle(): Promise<void> {
     await this.running;
+    await this.logWrites;
   }
 
   private running: Promise<void> | undefined;
@@ -245,8 +246,13 @@ export class UpdateManager {
     });
   }
 
+  /** Appends are chained: lines land in order, and idle() can wait for them. */
+  private logWrites: Promise<void> = Promise.resolve();
+
   private appendLog(line: string): void {
-    void fsp.appendFile(this.logFile, `${line}\n`, 'utf8').catch(() => undefined);
+    this.logWrites = this.logWrites
+      .then(() => fsp.appendFile(this.logFile, `${line}\n`, 'utf8'))
+      .catch(() => undefined);
   }
 
   /** Leading + trailing edge throttle, like the admin job runner (~4/s). */
