@@ -110,14 +110,42 @@ jobs:
       - name: Signatur-Keystore einspielen (optional)
         if: env.ANDROID_DEBUG_KEYSTORE_B64 != ''
         run: |
-          mkdir -p "$HOME/.android"
-          printf '%s' "$ANDROID_DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          KEYSTORE="$RUNNER_TEMP/agentdeck-debug.keystore"
+          printf '%s' "$ANDROID_DEBUG_KEYSTORE_B64" | base64 -d > "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass android | grep -i 'SHA-256'
+          echo "SIGNING_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
 
+      # Der Keystore wird Gradle ausdruecklich uebergeben — auf den Standardort
+      # ~/.android/debug.keystore ist auf den Runnern kein Verlass.
       - name: Debug-APK bauen
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          SIGNING=()
+          if [[ -n "${SIGNING_KEYSTORE:-}" ]]; then
+            SIGNING=(
+              "-Pandroid.injected.signing.store.file=$SIGNING_KEYSTORE"
+              -Pandroid.injected.signing.store.password=android
+              -Pandroid.injected.signing.key.alias=androiddebugkey
+              -Pandroid.injected.signing.key.password=android
+            )
+          fi
+          ./gradlew assembleDebug --no-daemon "${SIGNING[@]}"
+
+      # Eine APK mit fremder Signatur darf kein Release werden: sie liesse sich
+      # nicht ueber die installierte App installieren.
+      - name: Signatur der APK pruefen
+        if: env.SIGNING_KEYSTORE != ''
+        run: |
+          WANT="$(keytool -list -keystore "$SIGNING_KEYSTORE" -storepass android | grep -i 'SHA-256' | sed 's/.*: //' | tr -d ':' | tr 'A-F' 'a-f')"
+          APKSIGNER="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          GOT="$("$APKSIGNER" verify --print-certs mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep -i 'certificate SHA-256' | head -n 1 | sed 's/.*: //')"
+          echo "Keystore: $WANT"
+          echo "APK:      $GOT"
+          if [[ "$WANT" != "$GOT" ]]; then
+            echo "::error::Die APK ist nicht mit dem hinterlegten Keystore signiert."
+            exit 1
+          fi
 
       - name: APK als Artifact hochladen
         uses: actions/upload-artifact@v4
