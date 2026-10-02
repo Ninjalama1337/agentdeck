@@ -170,19 +170,21 @@ Storage layout under `dataDir`:
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |
 | POST | `/api/admin/jobs/:id/stop` | `204` — cancels the ACTIVE job (status → `stopped`); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` |
+| POST | `/api/admin/jobs/:id/input` | `AdminJobInputRequest` `{text}` → `204` — types one line plus Enter into the ACTIVE interactive job (`AdminJob.interactive`, e.g. the sign-in code); 404 unknown, 409 `ADMIN_JOB_NOT_ACTIVE` when it is not running or takes no input |
 
 ### Admin recipes (fixed, server-side — never free-form commands)
 
 | Agent | update | install | login |
 |---|---|---|---|
-| claude | `claude update` | `npm install -g @anthropic-ai/claude-code` | `claude setup-token` (official headless subscription OAuth; URL streams to the app) |
+| claude | `claude update` | `npm install -g @anthropic-ai/claude-code` | `claude auth login` in a pseudo-terminal (interactive: the app shows the sign-in URL as a button and sends the pasted code via `/input`) |
 | zcode | `scripts/update-zcode.sh` (builds from zai-org/ZCode → `~/.zcode/runtime`) | same script (clone-if-missing) | `zcode login zai` (browser on the machine / fallback URL in the console) |
 | antigravity | `flatpak update -y com.google.Antigravity` | `flatpak install -y flathub com.google.Antigravity` | opens the IDE window for Google sign-in (job finishes immediately) |
 | codex | `npm install -g @openai/codex@latest` | same | `codex login` (browser on the machine) |
 
 Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
 500-line output ring buffer; the active job can be cancelled from the app
-(status `stopped`). `AgentInfo.admin` lists the per-agent actions.
+(status `stopped`). Interactive jobs run in a pseudo-terminal; their output is
+reduced to plain text lines. `AgentInfo.admin` lists the per-agent actions.
 | GET | `/api/apk/info` | `ApkInfo` (no auth) |
 | GET | `/api/apk/latest` | APK binary stream, `Content-Type: application/vnd.android.package-archive`, `Content-Disposition: attachment; filename="agentdeck-<version>.apk"` (no auth, rate-limited) |
 | POST | `/api/apk/upload` | multipart `apk` + fields `version`, `channel` → `ApkUploadResponse` (device JWT or `x-bridge-token`) |

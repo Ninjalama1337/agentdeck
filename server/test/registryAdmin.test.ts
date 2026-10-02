@@ -40,7 +40,7 @@ describe('AgentService admin integration', () => {
     expect(agents.infoOf('claude')!.admin!.find((c) => c.kind === 'login')?.unavailableReason)
       .toBeUndefined();
     expect(agents.infoOf('claude')!.admin!.find((c) => c.kind === 'login')?.label)
-      .toContain('setup-token');
+      .toContain('claude auth login');
     expect(agents.infoOf('zcode')!.admin!.find((c) => c.kind === 'update')?.label)
       .toBe('scripts/update-zcode.sh');
   });

@@ -392,6 +392,11 @@ export const api = {
     return request('POST', `/api/admin/jobs/${encodeURIComponent(id)}/stop`);
   },
 
+  /** Types one line (the sign-in code) into the running interactive job. */
+  sendAdminJobInput(id: string, text: string): Promise<void> {
+    return request('POST', `/api/admin/jobs/${encodeURIComponent(id)}/input`, { json: { text } });
+  },
+
   /** Single admin job with its current output ring buffer. */
   adminJob(id: string): Promise<AdminJob> {
     return request('GET', `/api/admin/jobs/${encodeURIComponent(id)}`);

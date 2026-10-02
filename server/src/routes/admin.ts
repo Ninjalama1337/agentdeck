@@ -55,6 +55,17 @@ export async function adminRoutes(fastify: FastifyInstance, deps: AppDeps): Prom
     reply.code(204).send();
   });
 
+  fastify.post('/admin/jobs/:id/input', async (req, reply) => {
+    const id = (req.params as { id?: string }).id ?? '';
+    const body = z.object({ text: z.string().trim().min(1).max(2000) }).safeParse(req.body);
+    if (!body.success) throw httpError(400, 'BAD_REQUEST', 'text: 1–2000 characters');
+    if (!deps.adminJobs.get(id)) throw notFound('Admin job not found');
+    if (!deps.adminJobs.input(id, body.data.text)) {
+      throw httpError(409, 'ADMIN_JOB_NOT_ACTIVE', 'Job is not running or takes no input.');
+    }
+    reply.code(204).send();
+  });
+
   fastify.post('/admin/server/restart', async (_req, reply) => {
     deps.log.info('admin requested server restart');
     reply.code(200).send({ ok: true, message: 'Server restarting' });

@@ -297,6 +297,86 @@ describe('AdminJobRunner update/install aftermath', () => {
   });
 });
 
+describe('AdminJobRunner interactive jobs', () => {
+  const INTERACTIVE_RECIPE = recipeFor('claude', 'login');
+
+  it('reduces terminal output to plain lines and keeps the sign-in URL whole', async () => {
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+
+    const job = runner.start('claude', 'login', INTERACTIVE_RECIPE);
+    expect(job.interactive).toBe(true);
+    const handle = spawn.handles[0]!;
+    handle.write('\x1b[?25l\x1b[38;5;208m✻\x1b[39m\x1b[1COpening\x1b[1Cbrowser\r\n');
+    handle.write('\x1b[2K\x1b[1G✶\x1b[1COpening\x1b[1Cbrowser\r\n────────\r\n');
+    handle.write('visit:\x1b[1C\x1b[1mhttps://example.test/oauth?code=true&state=a_b-c\x1b[22m\r\n');
+    handle.end({ exitCode: 0 });
+    await runner.idle();
+
+    expect(runner.get(job.id)!.output).toEqual([
+      '✻ Opening browser',
+      '✶ Opening browser',
+      'visit: https://example.test/oauth?code=true&state=a_b-c',
+    ]);
+  });
+
+  it('types input into the active job only, followed by Enter', async () => {
+    vi.useFakeTimers();
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+
+    const job = runner.start('claude', 'login', INTERACTIVE_RECIPE);
+    await vi.advanceTimersByTimeAsync(0);
+    const handle = spawn.handles[0]!;
+    const typed: string[] = [];
+    handle.child.write = (data) => typed.push(data);
+
+    expect(runner.input('j_other', 'code')).toBe(false);
+    expect(runner.input(job.id, 'abc#def')).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(typed).toEqual(['abc#def', '\r']);
+
+    handle.end({ exitCode: 0 });
+    await vi.runAllTimersAsync();
+    await runner.idle();
+    expect(runner.input(job.id, 'late')).toBe(false);
+  });
+
+  it('refuses input for jobs that run without a terminal', async () => {
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+
+    const job = runner.start('claude', 'update', UPDATE_RECIPE);
+    await drainMicrotasks();
+    expect(job.interactive).toBeUndefined();
+    expect(runner.input(job.id, 'code')).toBe(false);
+    spawn.handles[0]!.end({ exitCode: 0 });
+    await runner.idle();
+  });
+
+  it('runs a real command in a pseudo-terminal: prompt shown, typed code read', async () => {
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn });
+    const script = 'test -t 0 && echo "visit: https://example.test/login" && printf "Paste code > " && read code && echo "got $code"';
+    const job = runner.start('claude', 'login', {
+      kind: 'login',
+      label: 'fake login',
+      command: 'sh',
+      args: ['-c', script],
+      cwd: process.cwd(),
+      interactive: true,
+    });
+
+    await vi.waitFor(() => expect(runner.get(job.id)!.output).toContain('Paste code >'), { timeout: 5000 });
+    expect(runner.input(job.id, 'abc#123')).toBe(true);
+    await runner.idle();
+
+    const finished = runner.get(job.id)!;
+    expect(finished.status).toBe('done');
+    expect(finished.output).toContain('visit: https://example.test/login');
+    expect(finished.output).toContain('got abc#123');
+  });
+});
+
 describe('AdminJobRunner timeout + stop', () => {
   it('kills the job (SIGTERM → SIGKILL) on timeout and marks it errored', async () => {
     vi.useFakeTimers();

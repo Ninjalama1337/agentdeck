@@ -32,10 +32,11 @@ describe('adminCapabilities', () => {
     }
   });
 
-  it('claude login uses the headless setup-token flow', () => {
+  it('claude login signs in via `claude auth login` in a terminal that takes input', () => {
     const recipe = recipeFor('claude', 'login');
+    expect(recipe.interactive).toBe(true);
     expect(recipe.command).toBe('claude');
-    expect(recipe.args).toEqual(['setup-token']);
+    expect(recipe.args).toEqual(['auth', 'login']);
   });
 
   it('antigravity login launches the IDE detached (sh fire & forget)', () => {

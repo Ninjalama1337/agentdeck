@@ -64,6 +64,7 @@ beforeAll(async () => {
           ? { ...FAKE_JOB, id, status: 'running' }
           : undefined),
     stopJob: vi.fn(() => true),
+    input: vi.fn(() => true),
   } as unknown as AdminJobRunner;
   deps.adminJobs = stub;
 });
@@ -79,6 +80,10 @@ function startMock(): ReturnType<typeof vi.fn> {
 
 function stopMock(): ReturnType<typeof vi.fn> {
   return (deps.adminJobs as unknown as { stopJob: ReturnType<typeof vi.fn> }).stopJob;
+}
+
+function inputMock(): ReturnType<typeof vi.fn> {
+  return (deps.adminJobs as unknown as { input: ReturnType<typeof vi.fn> }).input;
 }
 
 describe('GET /api/admin/jobs', () => {
@@ -126,7 +131,7 @@ describe('POST /api/admin/jobs', () => {
     expect(badAgent.statusCode).toBe(400);
   });
 
-  it('accepts a claude login job (setup-token is available now)', async () => {
+  it('accepts a claude login job', async () => {
     const res = await post({ agentId: 'claude', kind: 'login' });
     expect(res.statusCode).toBe(202);
   });
@@ -153,6 +158,25 @@ describe('POST /api/admin/jobs', () => {
       headers: { authorization: `Bearer ${jwt}` },
     });
     expect(ok.statusCode).toBe(204);
+  });
+
+  it('input endpoint: 404 unknown, 400 empty, 409 when the job takes no input, 204 otherwise', async () => {
+    const input = (id: string, payload: unknown) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/admin/jobs/${id}/input`,
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: payload as Record<string, unknown>,
+      });
+    expect((await input('j_none', { text: 'abc' })).statusCode).toBe(404);
+    expect((await input('j_x', { text: '  ' })).statusCode).toBe(400);
+    inputMock().mockReturnValueOnce(false);
+    const conflict = await input('j_x', { text: 'abc' });
+    expect(conflict.statusCode).toBe(409);
+    expect((conflict.json() as { error: { code?: string } }).error.code).toBe('ADMIN_JOB_NOT_ACTIVE');
+    inputMock().mockReturnValueOnce(true);
+    expect((await input('j_x', { text: ' abc#def ' })).statusCode).toBe(204);
+    expect(inputMock()).toHaveBeenLastCalledWith('j_x', 'abc#def');
   });
 
   it('maps the runner conflict to 409 ADMIN_JOB_ACTIVE', async () => {

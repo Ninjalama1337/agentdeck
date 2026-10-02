@@ -271,11 +271,18 @@ export interface AdminJob {
   endedAt?: number;
   exitCode?: number;
   error?: string;
+  /** Runs in a pseudo-terminal and takes input (sign-in code) via `/input`. */
+  interactive?: boolean;
 }
 
 export interface StartAdminJobRequest {
   agentId: AgentId;
   kind: AdminJobKind;
+}
+
+/** One line typed into an interactive admin job (the pasted sign-in code). */
+export interface AdminJobInputRequest {
+  text: string;
 }
 
 // ---------------------------------------------------------------------------

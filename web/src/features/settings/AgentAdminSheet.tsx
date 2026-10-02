@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   Info,
   KeyRound,
   RefreshCw,
@@ -96,6 +97,80 @@ function StopJobButton({ jobId }: { jobId: string }) {
   );
 }
 
+/** Sign-in link in the output of an interactive login job (newest wins). */
+function signInUrl(output: string[]): string | undefined {
+  for (let i = output.length - 1; i >= 0; i--) {
+    const match = /https:\/\/[^\s"'<>]+/.exec(output[i] ?? '');
+    if (match) return match[0];
+  }
+  return undefined;
+}
+
+/**
+ * Sign-in from the phone: open the link the login command printed, then send
+ * the code the page shows back to the command (POST /api/admin/jobs/:id/input).
+ */
+function SignInPanel({ job }: { job: AdminJob }) {
+  const toast = useAppStore((s) => s.toast);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const url = signInUrl(job.output);
+
+  const send = async () => {
+    setBusy(true);
+    try {
+      await api.sendAdminJobInput(job.id, code.trim());
+      setCode('');
+    } catch (err) {
+      toast('warn', err instanceof Error ? err.message : 'Sending the code failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-line bg-bg-raise p-3">
+      <p className="text-[11.5px] leading-relaxed text-dim">
+        {url
+          ? 'Open the sign-in page, sign in, then paste the code it shows here. If a browser opened on the computer and you signed in there, no code is needed.'
+          : 'Waiting for the sign-in link…'}
+      </p>
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="press tap flex items-center justify-center gap-2 rounded-2xl py-2.5 text-[14px] font-semibold text-white btn-primary"
+        >
+          <ExternalLink size={15} />
+          Open sign-in page
+        </a>
+      )}
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.trim() && !busy) void send();
+        }}
+      >
+        <input
+          className="field min-w-0 flex-1 font-mono text-[13px]"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Paste code"
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <Button type="submit" variant="primary" size="sm" className="h-11 px-4" disabled={!code.trim() || busy}>
+          Send
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 /** Live console: mono pre on a dark surface, auto-scrolls only while the user
  *  sits at the bottom, capped client-side to the newest 500 lines. */
 function JobConsole({ job }: { job: AdminJob }) {
@@ -128,7 +203,8 @@ function JobConsole({ job }: { job: AdminJob }) {
         {lines.length > 0 ? lines.join('\n') : 'Waiting for output…'}
       </pre>
 
-      {job.kind === 'login' && active && (
+      {job.interactive && active && <SignInPanel job={job} />}
+      {job.kind === 'login' && active && !job.interactive && (
         <p className="mt-1.5 flex items-start gap-1.5 px-1 text-[11.5px] leading-relaxed text-dim">
           <Info size={12} className="mt-0.5 shrink-0" />
           Browser opens on the computer — this can take a moment; watch the output here.

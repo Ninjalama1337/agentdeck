@@ -25,6 +25,11 @@ export interface AdminRecipe {
   args: string[];
   cwd: string;
   envAdd?: Record<string, string>;
+  /**
+   * Run in a pseudo-terminal and accept input from the app. Needed for
+   * sign-ins that print a URL and then wait for a pasted code.
+   */
+  interactive?: boolean;
 }
 
 const home = (): string => os.homedir();
@@ -70,7 +75,7 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
       return [
         { kind: 'update', label: 'claude update' },
         { kind: 'install', label: 'npm install -g @anthropic-ai/claude-code' },
-        { kind: 'login', label: 'claude setup-token (browser sign-in)' },
+        { kind: 'login', label: 'claude auth login (browser sign-in)' },
       ];
     case 'zcode': {
       const label = 'scripts/update-zcode.sh';
@@ -121,15 +126,17 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
         return { kind, label: capability.label, command: 'claude', args: ['update'], cwd: home() };
       }
       if (kind === 'login') {
-        // setup-token is Claude Code's official headless subscription sign-in:
-        // it prints an OAuth URL (streamed to the app) and waits for the
-        // browser callback, then stores the long-lived token.
+        // `auth login` saves the sign-in (setup-token only prints a token). It
+        // prints an OAuth URL and waits for the browser callback or, when the
+        // browser runs on another device, for the code pasted from the app —
+        // so it needs a terminal and input.
         return {
           kind,
           label: capability.label,
           command: 'claude',
-          args: ['setup-token'],
+          args: ['auth', 'login'],
           cwd: home(),
+          interactive: true,
         };
       }
       return {
