@@ -13,6 +13,7 @@ import { AGENT_IDS } from '../config.js';
 import { httpError } from '../http/errors.js';
 import { zcodeProviderEnv } from '../agents/zcode.js';
 import { expandHome } from '../util/paths.js';
+import { markClaudeOnboarded } from './claudeOnboarding.js';
 
 export const ADMIN_JOB_KINDS = ['update', 'install', 'login'] as const;
 
@@ -30,6 +31,8 @@ export interface AdminRecipe {
    * sign-ins that print a URL and then wait for a pasted code.
    */
   interactive?: boolean;
+  /** Follow-up after the command exited successfully. */
+  onSuccess?: () => void;
 }
 
 const home = (): string => os.homedir();
@@ -137,6 +140,8 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
           args: ['auth', 'login'],
           cwd: home(),
           interactive: true,
+          // Without this the next `claude` terminal asks to sign in again.
+          onSuccess: () => void markClaudeOnboarded(),
         };
       }
       return {

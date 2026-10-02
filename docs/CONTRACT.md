@@ -184,7 +184,11 @@ Storage layout under `dataDir`:
 Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
 500-line output ring buffer; the active job can be cancelled from the app
 (status `stopped`). Interactive jobs run in a pseudo-terminal; their output is
-reduced to plain text lines. `AgentInfo.admin` lists the per-agent actions.
+reduced to plain text lines. After a successful Claude login — and on server
+start when a sign-in is already stored — the server sets
+`hasCompletedOnboarding` in Claude Code's config (`~/.claude.json`), otherwise
+a new `claude` terminal would run the first-start setup and ask to sign in
+again. `AgentInfo.admin` lists the per-agent actions.
 | GET | `/api/apk/info` | `ApkInfo` (no auth) |
 | GET | `/api/apk/latest` | APK binary stream, `Content-Type: application/vnd.android.package-archive`, `Content-Disposition: attachment; filename="agentdeck-<version>.apk"` (no auth, rate-limited) |
 | POST | `/api/apk/upload` | multipart `apk` + fields `version`, `channel` → `ApkUploadResponse` (device JWT or `x-bridge-token`) |

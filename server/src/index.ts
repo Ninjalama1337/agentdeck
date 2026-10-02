@@ -1,6 +1,7 @@
 /**
  * AgentDeck server entry point: config → app → listen → banner → shutdown.
  */
+import { markClaudeOnboarded } from './admin/claudeOnboarding.js';
 import { lanAddresses } from './util/net.js';
 import { loadConfig } from './config.js';
 import { findWebDist, buildApp } from './http/app.js';
@@ -18,6 +19,14 @@ async function main(): Promise<void> {
   // Listen immediately; agent detection is capped at 5s per adapter and may
   // still be running (it broadcasts agent:update when done).
   void agents.detectAll().catch((err) => logger.error({ err }, 'agent detection crashed'));
+
+  // A Claude sign-in stored before this server marked the setup complete
+  // would still make every new `claude` terminal ask to sign in again.
+  try {
+    if (markClaudeOnboarded()) logger.info('marked Claude Code first-start setup as complete');
+  } catch (err) {
+    logger.warn({ err }, 'could not mark Claude Code setup as complete');
+  }
 
   await app.listen({ port: config.port, host: config.host });
 

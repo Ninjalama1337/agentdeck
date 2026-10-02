@@ -298,7 +298,8 @@ describe('AdminJobRunner update/install aftermath', () => {
 });
 
 describe('AdminJobRunner interactive jobs', () => {
-  const INTERACTIVE_RECIPE = recipeFor('claude', 'login');
+  // Without the follow-up: it would edit the real Claude Code config.
+  const INTERACTIVE_RECIPE = { ...recipeFor('claude', 'login'), onSuccess: undefined };
 
   it('reduces terminal output to plain lines and keeps the sign-in URL whole', async () => {
     const spawn = fakeSpawnFactory();
@@ -340,6 +341,25 @@ describe('AdminJobRunner interactive jobs', () => {
     await vi.runAllTimersAsync();
     await runner.idle();
     expect(runner.input(job.id, 'late')).toBe(false);
+  });
+
+  it('runs the recipe follow-up after a successful exit only', async () => {
+    const spawn = fakeSpawnFactory();
+    const runner = new AdminJobRunner({ agents: fakeAgents(), log: silentLogger(), broadcast: bus().fn, spawn });
+    const onSuccess = vi.fn();
+
+    runner.start('claude', 'login', { ...INTERACTIVE_RECIPE, onSuccess });
+    await drainMicrotasks();
+    spawn.handles[0]!.end({ exitCode: 1, failed: true });
+    await runner.idle();
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    const job = runner.start('claude', 'login', { ...INTERACTIVE_RECIPE, onSuccess });
+    await drainMicrotasks();
+    spawn.handles[1]!.end({ exitCode: 0 });
+    await runner.idle();
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(runner.get(job.id)!.status).toBe('done');
   });
 
   it('refuses input for jobs that run without a terminal', async () => {

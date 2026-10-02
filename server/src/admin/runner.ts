@@ -314,6 +314,11 @@ export class AdminJobRunner {
       );
       return;
     }
+    try {
+      recipe.onSuccess?.();
+    } catch (err) {
+      this.opts.log.warn({ err, job: job.id }, 'admin job follow-up failed');
+    }
     this.finish(job, result);
   }
 
