@@ -99,9 +99,17 @@ export async function downloadApkNatively(fileName: string, onStarted?: () => vo
 export async function installApkUpdate(onProgress?: (fraction: number) => void): Promise<boolean> {
   const native = isNativePlatform() ? window.Capacitor?.Plugins?.ApkInstall : undefined;
   if (!native?.install) return false;
-  const listener = (await native
-    .addListener?.('progress', (e: unknown) => onProgress?.((e as { fraction?: number }).fraction ?? 0))
-    ?.catch(() => undefined)) as { remove?: () => unknown } | undefined;
+  // The bridge hands back a listener handle — directly or as a promise,
+  // depending on how the plugin is reached; `await` takes either.
+  let listener: { remove?: () => unknown } | undefined;
+  try {
+    listener = (await (native.addListener as ((...args: unknown[]) => unknown) | undefined)?.(
+      'progress',
+      (e: unknown) => onProgress?.((e as { fraction?: number }).fraction ?? 0),
+    )) as typeof listener;
+  } catch {
+    /* no progress events — the update itself still works */
+  }
   try {
     await native.install({ url: api.apkLatestUrl() });
     return true;
@@ -110,7 +118,11 @@ export async function installApkUpdate(onProgress?: (fraction: number) => void):
     if (code === 'DOWNLOAD_FAILED' || code === 'INSTALL_FAILED') throw new Error(message || 'Update failed');
     return false;
   } finally {
-    void listener?.remove?.();
+    try {
+      void listener?.remove?.();
+    } catch {
+      /* already gone */
+    }
   }
 }
 
