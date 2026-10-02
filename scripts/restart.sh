@@ -17,8 +17,13 @@ if systemctl --user is-active agentdeck.service >/dev/null 2>&1; then
 fi
 
 # 2. Server PID from environment or running process
+# AGENTDECK_SERVER_PID goes stale in terminals that outlive a restart, so it
+# only counts while it still names a running server.
+is_server_pid() {
+  [[ -n "$1" ]] && [[ "$(ps -o args= -p "$1" 2>/dev/null)" == *server/dist/index.js* ]]
+}
 PID="${AGENTDECK_SERVER_PID:-}"
-if [[ -z "$PID" ]]; then
+if ! is_server_pid "$PID"; then
   PID="$(pgrep -f "node.*server/dist/index.js" | head -n 1 || true)"
 fi
 
@@ -46,17 +51,19 @@ fi
 info "Starting AgentDeck server..."
 LOG_FILE="${AGENTDECK_LOG_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/agentdeck/server.log}"
 mkdir -p "$(dirname "$LOG_FILE")"
-if [[ -f "$ROOT/server/dist/index.js" ]]; then
-  setsid nohup node server/dist/index.js >> "$LOG_FILE" 2>&1 < /dev/null &
-  sleep 2
-  info "AgentDeck started."
-else
+if [[ ! -f "$ROOT/server/dist/index.js" ]]; then
   info "server/dist/index.js not found. Running npm run build first..."
   npm run build -w server
-  setsid nohup node server/dist/index.js >> "$LOG_FILE" 2>&1 < /dev/null &
-  sleep 2
-  info "AgentDeck started."
 fi
+setsid nohup node server/dist/index.js >> "$LOG_FILE" 2>&1 < /dev/null &
+NEW_PID=$!
+sleep 2
+if ! kill -0 "$NEW_PID" 2>/dev/null; then
+  printf '\033[31mERROR:\033[0m AgentDeck did not stay up. Last log lines (%s):\n' "$LOG_FILE" >&2
+  tail -n 15 "$LOG_FILE" >&2 || true
+  exit 1
+fi
+info "AgentDeck started (PID $NEW_PID)."
 
 # Verify health
 PORT="${AGENTDECK_PORT:-8787}"
