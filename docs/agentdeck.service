@@ -1,12 +1,10 @@
 # AgentDeck — systemd user service
 #
-# Installation:
-#   mkdir -p ~/.config/systemd/user
-#   cp docs/agentdeck.service ~/.config/systemd/user/agentdeck.service
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now agentdeck
+# Installation: siehe docs/CONFIG.md ("systemd — User-Service"). Der Befehl
+# dort traegt Checkout- und node-Pfad automatisch ein.
 #
-# WICHTIG: ExecStart unten auf deinen Checkout-Pfad anpassen.
+# Unveraendert kopiert erwartet die Unit den Checkout unter ~/agentdeck und
+# node auf dem PATH des systemd-User-Managers (bei nvm/Homebrew oft nicht so).
 # Logs: journalctl --user -u agentdeck -f
 
 [Unit]
@@ -16,8 +14,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-# Anpassen: absoluter Pfad zu server/dist/index.js in deinem Checkout.
-ExecStart=%h/.zcode/workspace/default/agentdeck/server/dist/index.js
+WorkingDirectory=%h/agentdeck
+ExecStart=/usr/bin/env node %h/agentdeck/server/dist/index.js
 Environment=AGENTDECK_PORT=8787
 Environment=NODE_ENV=production
 # Optional: Log-Level und Bind-Adresse ueberschreiben (env > config.json)

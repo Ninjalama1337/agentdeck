@@ -44,7 +44,8 @@ if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
 fi
 
 info "Starting AgentDeck server..."
-LOG_FILE="${AGENTDECK_LOG_FILE:-/tmp/agentdeck-demo.log}"
+LOG_FILE="${AGENTDECK_LOG_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/agentdeck/server.log}"
+mkdir -p "$(dirname "$LOG_FILE")"
 if [[ -f "$ROOT/server/dist/index.js" ]]; then
   setsid nohup node server/dist/index.js >> "$LOG_FILE" 2>&1 < /dev/null &
   sleep 2

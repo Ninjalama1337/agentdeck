@@ -83,6 +83,12 @@ Voraussetzungen: **Node ≥ 20** und npm. Die Agent-CLIs (`claude`, `codex`, …
 und `gh` sind optional — nicht installierte Agents werden sauber als
 *unavailable* angezeigt statt zu crashen.
 
+Unter Linux kompiliert `npm install` das Terminal-Modul `node-pty` (das Paket
+bringt kein fertiges Linux-Binary mit). Dafür müssen `python3`, `make` und ein
+C++-Compiler installiert sein — z. B. `sudo apt install build-essential python3`
+oder `sudo dnf install gcc-c++ make python3`. Empfohlen ist außerdem `tmux`:
+damit überleben Terminals einen Server-Neustart, ohne tmux enden sie mit ihm.
+
 ```bash
 npm install        # Workspaces installieren
 npm run build      # shared + server + web bauen
@@ -210,6 +216,7 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `scripts/dev.sh` | Server (Hot Reload) + Vite-Dev-Server parallel, mit `[server]`/`[web]`-Präfixen |
 | `scripts/build-android.sh` | Android-APK bauen (prüft SDK und `android/`-Ordner) |
 | `scripts/upload-apk.sh` | gebaute APK an den Server hochladen (`POST /api/apk/upload`) |
+| `scripts/restart.sh` | laufenden Server neu starten (Terminals in tmux bleiben); Log: `~/.local/state/agentdeck/server.log` oder `AGENTDECK_LOG_FILE` |
 | `npm start` | gebauten Server starten (`server/dist/index.js`) |
 | `npm test` | Server-Tests |
 | `npm run typecheck` | Typecheck über alle Workspaces |

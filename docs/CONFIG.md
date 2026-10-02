@@ -161,10 +161,11 @@ Beispiel-Unit: [`agentdeck.service`](agentdeck.service). Installation:
 # 1. Einmalig bauen (oder scripts/install.sh)
 npm run build
 
-# 2. Unit installieren (Pfad im Copy-Schritt anpassen!)
+# 2. Unit installieren — im Checkout ausführen; trägt den Checkout-Pfad und
+#    den absoluten node-Pfad ein (systemd kennt nvm/Homebrew-Pfade nicht).
 mkdir -p ~/.config/systemd/user
-cp docs/agentdeck.service ~/.config/systemd/user/agentdeck.service
-$EDITOR ~/.config/systemd/user/agentdeck.service   # ExecStart-Pfad prüfen
+sed -e "s|/usr/bin/env node|$(command -v node)|" -e "s|%h/agentdeck|$PWD|g" \
+  docs/agentdeck.service > ~/.config/systemd/user/agentdeck.service
 
 # 3. Aktivieren + starten
 systemctl --user daemon-reload
