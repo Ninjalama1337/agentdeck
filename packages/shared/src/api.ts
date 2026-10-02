@@ -113,9 +113,16 @@ export interface PairRequest {
   deviceName: string;
 }
 
+/** Identity of a server as shown on paired devices (`GET /api/server`, pairing response). */
+export interface ServerInfo {
+  name: string;
+  version: string;
+  host: string;
+}
+
 export interface PairResponse {
   token: string;
-  server: { name: string; version: string; host: string };
+  server: ServerInfo;
 }
 
 export interface DeviceInfo {

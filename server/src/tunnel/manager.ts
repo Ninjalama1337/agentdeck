@@ -314,12 +314,13 @@ export class TunnelManager {
     try {
       const qrcode = await import('qrcode-terminal');
       // The QR opens the app AND re-points it to this tunnel via ?server=
-      // (no manual URL typing after a quick-tunnel URL rotation).
+      // (no manual URL typing after a quick-tunnel URL rotation). Pairing is
+      // LAN-only, so this is for devices that are already paired.
       const connectUrl = `${url}/?server=${encodeURIComponent(url)}`;
       qrcode.default.generate(connectUrl, { small: true }, (qr: string) => {
         // eslint-disable-next no-console
         console.log(
-          `\n  Tunnel: ${url}\n  Scan to open the app already pointed at this tunnel\n  (or open manually): ${connectUrl}\n${qr
+          `\n  Tunnel: ${url}\n  Paired devices: scan to point the app at this tunnel (pairing itself is LAN-only)\n  (or open manually): ${connectUrl}\n${qr
             .split('\n')
             .map((l) => `  ${l}`)
             .join('\n')}\n`,

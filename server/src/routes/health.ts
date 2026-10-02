@@ -2,10 +2,18 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { NAME, VERSION } from '../version.js';
 import { httpError } from '../http/errors.js';
-import { isLocalAddress } from '../util/net.js';
-import { clientIp } from '../util/ip.js';
+import { clientIp, isLanRequest } from '../util/ip.js';
 import { signDeviceToken } from '../auth/jwt.js';
 import type { AppDeps } from './deps.js';
+
+/** Name/version/bind address — what a paired device shows for this server. */
+function serverInfo(deps: AppDeps): { name: string; version: string; host: string } {
+  return {
+    name: deps.config.serverName,
+    version: VERSION,
+    host: `${deps.config.host}:${deps.config.port}`,
+  };
+}
 
 export async function healthRoutes(fastify: FastifyInstance, deps: AppDeps): Promise<void> {
   fastify.get('/health', async () => {
@@ -20,6 +28,9 @@ export async function healthRoutes(fastify: FastifyInstance, deps: AppDeps): Pro
       ...(tunnel ? { tunnel } : {}),
     };
   });
+
+  // Authed (unlike /health): the server name is the machine's hostname by default.
+  fastify.get('/server', async () => serverInfo(deps));
 }
 
 const PairSchema = z.object({
@@ -32,11 +43,15 @@ export async function pairRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
     const body = PairSchema.parse(req.body);
     // Behind a tunnel the socket peer is cloudflared (127.0.0.1) and the real
     // client IP is in x-forwarded-for — clientIp resolves both cases so each
-    // remote client gets its own attempt bucket. LAN/localhost peers (direct
-    // or tunneled) may pair; the limiter below still applies.
+    // remote client gets its own attempt bucket. Pairing itself is LAN-only:
+    // a request that reached us through the tunnel is refused.
     const ip = clientIp(req);
-    if (!isLocalAddress(req.socket.remoteAddress)) {
-      throw httpError(403, 'FORBIDDEN', 'Pairing is only possible from the LAN or localhost.');
+    if (!isLanRequest(req)) {
+      throw httpError(
+        403,
+        'FORBIDDEN',
+        'Pairing only works from the local network. Join the same network as the server and use its LAN address (http://<lan-ip>:<port>) — once paired, the remote address works too.',
+      );
     }
     if (deps.limiter.isBlocked(ip)) {
       throw httpError(
@@ -60,11 +75,7 @@ export async function pairRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
     (deps as { pairingCode: string }).pairingCode = nextCode;
     reply.send({
       token,
-      server: {
-        name: deps.config.serverName,
-        version: VERSION,
-        host: `${deps.config.host}:${deps.config.port}`,
-      },
+      server: serverInfo(deps),
     });
   });
 }

@@ -13,7 +13,7 @@ gebaut, verteilt und aktualisiert wird.
 |---|---|---|---|
 | Prinzip | Gerät-zu-Gerät-VPN, der Server bleibt im LAN | Outbound-Tunnel zu Cloudflare, öffentliche HTTPS-URL ohne Portfreigabe | Eigene Domain zeigt auf deinen Server (Portfreigabe oder Tunnel nötig) |
 | Aufwand | niedrig (App installieren, anmelden, fertig) | niedrig bis mittel (Quick-Tunnel: 1 Zeile Config; Named Tunnel: cloudflared-Konto) | mittel bis hoch (DNS, Zertifikate, ggf. DynDNS, Portfreigabe) |
-| Exposition | **kein öffentlicher Endpoint** — nur VPN-Mitglieder erreichen AgentDeck | ein öffentlicher HTTPS-Endpoint (nur die zwei öffentlichen APK-Routen + Pairing sind ohne JWT erreichbar) | öffentlicher Endpoint, komplett in deiner Hand |
+| Exposition | **kein öffentlicher Endpoint** — nur VPN-Mitglieder erreichen AgentDeck | ein öffentlicher HTTPS-Endpoint (ohne JWT erreichbar sind nur die zwei öffentlichen APK-Routen und `/api/health`; Pairing wird über den Tunnel abgelehnt) | öffentlicher Endpoint, komplett in deiner Hand |
 | Eignung | **empfohlen**, wenn nur deine Geräte zugreifen sollen | ideal für unterwegs ohne VPN-Client und zum APK-Download aus fremden Netzen | wenn du ohnehin eine Domain mit TLS betreibtst (Caddy/Nginx-Beispiel: [SECURITY.md](SECURITY.md)) |
 
 Alle drei Varianten enden am selben Server — die App verbindet sich einfach
@@ -52,8 +52,9 @@ Beim Start verbindet sich AgentDeck und druckt die öffentliche URL
 suchst du nicht per Hand zusammen. **Wichtig:** Die Quick-Tunnel-URL ist bei
 jedem Start **zufällig** — nach einem Server-Neustart scannst du einfach den
 **QR-Code in der Server-Konsole** (er öffnet die App gleich richtig
-verdrahtet: `?server=…` setzt die Adresse automatisch, du gibst nur noch den
-Pairing-Code ein). Dauerhaft Ruhe gibt Variante b).
+verdrahtet: `?server=…` setzt die Adresse automatisch). Das gilt für bereits
+gepaarte Geräte — **gepairt wird nur im LAN** (`http://<lan-ip>:8787`), über
+den Tunnel lehnt der Server Pairing ab. Dauerhaft Ruhe gibt Variante b).
 
 ### b) Feste URL — Named Tunnel (einmalig, danach nie wieder ändern)
 

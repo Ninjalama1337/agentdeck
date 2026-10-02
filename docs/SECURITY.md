@@ -50,8 +50,9 @@ Eigenschaften:
 
 - `/api/health` ist die einzige Route ohne Auth (für Liveness-Checks).
 - Pairing nur aus dem LAN bzw. localhost — ein Angreifer aus dem Internet kann
-  selbst mit abgefangenem Code nichts paaren, solange der Server nicht nach
-  außen exponiert ist.
+  selbst mit abgefangenem Code nichts paaren. Das gilt auch mit Tunnel oder
+  Reverse Proxy: Anfragen, die ein lokaler Proxy für eine öffentliche Adresse
+  weiterreicht (`X-Forwarded-For`, `CF-Connecting-IP` …), werden abgelehnt.
 - Der Code **rotiert nach jeder erfolgreichen Paarung**; ein Code ist also
   maximal einmal brauchbar.
 - Geräte-Liste in der App: einzelnes Gerät abmelden (`DELETE /api/devices/:id`).

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clientIp, firstForwardedFor, isLoopbackAddress, normalizeIp } from '../src/util/ip.js';
+import {
+  clientIp,
+  firstForwardedFor,
+  forwardedAddresses,
+  isLanRequest,
+  isLoopbackAddress,
+  normalizeIp,
+} from '../src/util/ip.js';
 
 function req(socketIp: string | undefined, xff?: string | string[]) {
   return {
@@ -57,5 +64,56 @@ describe('clientIp', () => {
     expect(clientIp(req('127.0.0.1'))).toBe('127.0.0.1');
     expect(clientIp(req('127.0.0.1', ''))).toBe('127.0.0.1');
     expect(clientIp(req(undefined))).toBe('unknown');
+  });
+});
+
+describe('forwardedAddresses', () => {
+  it('is empty without forwarding headers', () => {
+    expect(forwardedAddresses({})).toEqual([]);
+    expect(forwardedAddresses(undefined)).toEqual([]);
+  });
+
+  it('collects every hop from all forwarding headers', () => {
+    expect(
+      forwardedAddresses({
+        'x-forwarded-for': '192.168.1.5, 203.0.113.9',
+        'cf-connecting-ip': '203.0.113.9',
+        forwarded: 'for=198.51.100.7;proto=https, for="[2001:db8::1]:4711"',
+        'x-real-ip': '10.0.0.4:5123',
+      }),
+    ).toEqual(['192.168.1.5', '203.0.113.9', '198.51.100.7', '2001:db8::1', '203.0.113.9', '10.0.0.4']);
+  });
+});
+
+describe('isLanRequest', () => {
+  const lanReq = (socketIp: string | undefined, headers: Record<string, string> = {}) =>
+    ({ socket: { remoteAddress: socketIp }, headers }) as Parameters<typeof isLanRequest>[0];
+
+  it('accepts direct LAN and localhost peers', () => {
+    expect(isLanRequest(lanReq('127.0.0.1'))).toBe(true);
+    expect(isLanRequest(lanReq('::ffff:192.168.1.7'))).toBe(true);
+    expect(isLanRequest(lanReq('10.0.1.163'))).toBe(true);
+  });
+
+  it('refuses public peers', () => {
+    expect(isLanRequest(lanReq('203.0.113.9'))).toBe(false);
+    expect(isLanRequest(lanReq(undefined))).toBe(false);
+  });
+
+  it('refuses requests a local tunnel/proxy forwards for a public client', () => {
+    expect(isLanRequest(lanReq('127.0.0.1', { 'x-forwarded-for': '203.0.113.9' }))).toBe(false);
+    expect(isLanRequest(lanReq('::1', { 'cf-connecting-ip': '2606:4700::1111' }))).toBe(false);
+    expect(isLanRequest(lanReq('127.0.0.1', { forwarded: 'for=203.0.113.9' }))).toBe(false);
+  });
+
+  it('is not fooled by a LAN address the client put in front of the chain', () => {
+    // Cloudflare appends the real client to whatever x-forwarded-for it received.
+    expect(isLanRequest(lanReq('127.0.0.1', { 'x-forwarded-for': '192.168.1.5, 203.0.113.9' }))).toBe(false);
+    expect(isLanRequest(lanReq('127.0.0.1', { 'x-forwarded-for': 'unknown' }))).toBe(false);
+  });
+
+  it('accepts a local reverse proxy forwarding a LAN client', () => {
+    expect(isLanRequest(lanReq('127.0.0.1', { 'x-forwarded-for': '192.168.1.5' }))).toBe(true);
+    expect(isLanRequest(lanReq('127.0.0.1', { 'x-forwarded-for': '10.0.1.20', 'x-real-ip': '10.0.1.20' }))).toBe(true);
   });
 });

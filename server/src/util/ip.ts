@@ -8,6 +8,7 @@
  * limiting and pairing buckets cannot be poisoned.
  */
 import type { IncomingHttpHeaders } from 'node:http';
+import { isLocalAddress } from './net.js';
 
 export interface ClientIpRequestLike {
   socket: { remoteAddress?: string };
@@ -45,4 +46,52 @@ export function clientIp(req: ClientIpRequestLike): string {
     if (forwarded) return forwarded;
   }
   return normalizeIp(peer) || 'unknown';
+}
+
+/** Headers a proxy uses to name the client it forwards for (one address each). */
+const SINGLE_CLIENT_HEADERS = ['cf-connecting-ip', 'cf-connecting-ipv6', 'true-client-ip', 'x-real-ip'] as const;
+
+/** `1.2.3.4:5678` → `1.2.3.4`, `[::1]:80` → `::1`; anything else unchanged. */
+function stripPort(addr: string): string {
+  const bracketed = addr.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) return bracketed[1] as string;
+  const v4 = addr.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  return v4 ? (v4[1] as string) : addr;
+}
+
+/**
+ * Every client address a proxy claims in the request headers
+ * (x-forwarded-for chain, Forwarded `for=`, Cloudflare/nginx single-IP headers).
+ * Empty when the request carries no forwarding headers at all.
+ */
+export function forwardedAddresses(headers: IncomingHttpHeaders | undefined): string[] {
+  if (!headers) return [];
+  const out: string[] = [];
+  const values = (name: string): string[] => {
+    const raw = headers[name];
+    return raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+  };
+  for (const line of values('x-forwarded-for')) {
+    for (const part of line.split(',')) out.push(part.trim());
+  }
+  for (const line of values('forwarded')) {
+    for (const m of line.matchAll(/for=\s*"?([^;,"\s]+)/gi)) out.push(m[1] as string);
+  }
+  for (const name of SINGLE_CLIENT_HEADERS) {
+    for (const line of values(name)) out.push(line.trim());
+  }
+  return out.map((addr) => normalizeIp(stripPort(addr)));
+}
+
+/**
+ * True only when the request demonstrably comes from the LAN or localhost:
+ * the socket peer is local AND every address named in forwarding headers is
+ * local too. A tunnel or reverse proxy on this machine (cloudflared, Caddy)
+ * connects from 127.0.0.1 but names the real client in those headers — a
+ * client on the internet cannot remove what the proxy appends, so one public
+ * (or unparseable) entry is enough to refuse.
+ */
+export function isLanRequest(req: ClientIpRequestLike): boolean {
+  if (!isLocalAddress(req.socket?.remoteAddress)) return false;
+  return forwardedAddresses(req.headers).every((addr) => isLocalAddress(addr));
 }

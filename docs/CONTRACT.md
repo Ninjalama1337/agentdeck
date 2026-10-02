@@ -133,7 +133,8 @@ Storage layout under `dataDir`:
 2. `POST /api/pair {code, deviceName}` → on success issues a **JWT (HS256,
    30d)** with `deviceId`, rotates the code, registers the device. Max 5
    failed attempts per IP / 10 min (429). Pairing is only possible while the
-   request originates from the LAN or localhost.
+   request originates from the LAN or localhost; requests forwarded by a
+   tunnel or proxy for a public client are refused (403).
 3. Every `/api/*` route except `/api/health`, `/api/apk/info` and
    `/api/apk/latest` requires `Authorization: Bearer`. socket.io handshake
    requires `auth.token`. When a tunnel is enabled, pairing remains the only
@@ -161,6 +162,7 @@ Storage layout under `dataDir`:
 | GET | `/api/health` | `{ok,name,version,agents:[{id,available}],tunnel?:{status,publicUrl?}}` (no auth) |
 | POST | `/api/pair` | `PairRequest → PairResponse` |
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
+| GET | `/api/server` | `ServerInfo` `{name,version,host}` (authed) — same object as `server` in the pairing response |
 | GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached 30 s; the app polls every minute while an agent is in use). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
