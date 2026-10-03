@@ -25,6 +25,11 @@ export interface FcmMessage {
   /** Replaces an earlier notification with the same tag. */
   tag?: string;
   high: boolean;
+  /**
+   * No `notification` block: the app builds the notification itself (needed
+   * for action buttons, which the system cannot draw for a closed app).
+   */
+  dataOnly?: boolean;
   /** FCM data values are strings only. */
   data: Record<string, string>;
 }
@@ -93,12 +98,12 @@ export class FcmClient {
         body: JSON.stringify({
           message: {
             token: deviceToken,
-            notification: { title: m.title, body: m.body },
-            data: m.data,
+            ...(m.dataOnly ? {} : { notification: { title: m.title, body: m.body } }),
+            data: m.dataOnly ? { ...m.data, title: m.title, body: m.body, channel: m.channelId, ...(m.tag ? { tag: m.tag } : {}) } : m.data,
             android: {
               priority: m.high ? 'HIGH' : 'NORMAL',
               ttl: '3600s',
-              notification: { channel_id: m.channelId, ...(m.tag ? { tag: m.tag } : {}) },
+              ...(m.dataOnly ? {} : { notification: { channel_id: m.channelId, ...(m.tag ? { tag: m.tag } : {}) } }),
             },
           },
         }),

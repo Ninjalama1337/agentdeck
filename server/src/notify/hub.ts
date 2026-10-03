@@ -228,7 +228,15 @@ export class NotificationHub {
       body: n.body,
       channelId: fcmChannel(n),
       high: n.kind === 'session-error' || n.kind === 'terminal-attention' || state === 'waiting' || state === 'limit',
-      data: { open, notificationId: n.id, kind: n.kind, ...(n.state ? { state: n.state } : {}) },
+      data: {
+        open,
+        notificationId: n.id,
+        kind: n.kind,
+        ...(n.state ? { state: n.state } : {}),
+        ...(n.terminalId && n.prompt ? { terminalId: n.terminalId, prompt: n.prompt } : {}),
+      },
+      // Yes/No buttons need a notification the app draws itself.
+      ...(n.terminalId && n.prompt ? { dataOnly: true } : {}),
       ...(n.terminalId ?? n.sessionId ?? n.runId ? { tag: (n.terminalId ?? n.sessionId ?? n.runId) as string } : {}),
     };
     const dead: string[] = [];

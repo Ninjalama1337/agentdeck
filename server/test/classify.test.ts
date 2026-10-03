@@ -98,3 +98,30 @@ describe('notification titles', () => {
     expect(isLimitError('ENOENT: no such file')).toBe(false);
   });
 });
+
+describe('answerable prompts', () => {
+  it('knows a Claude-style permission menu', () => {
+    const screen = [
+      'Do you want to proceed?',
+      '❯ 1. Yes',
+      "  2. Yes, and don't ask again",
+      '  3. No, and tell Claude what to do differently',
+      'Esc to cancel',
+    ].join('\n');
+    expect(classifyScreen(screen)).toMatchObject({ state: 'waiting', prompt: 'menu' });
+  });
+
+  it('knows a (y/n) question', () => {
+    expect(classifyScreen('Overwrite config.json? (y/n)')).toMatchObject({ state: 'waiting', prompt: 'yesno' });
+  });
+
+  it('offers no answer for an open question', () => {
+    const verdict = classifyScreen('Which file should I change?\nPress enter to continue');
+    expect(verdict.state).toBe('waiting');
+    expect(verdict.prompt).toBeUndefined();
+  });
+
+  it('never marks a finished screen as answerable', () => {
+    expect(classifyScreen('All done.').prompt).toBeUndefined();
+  });
+});

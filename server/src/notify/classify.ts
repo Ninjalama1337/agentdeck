@@ -8,8 +8,17 @@
  */
 import type { DeckNotificationState } from '@agentdeck/shared';
 
+/**
+ * How a waiting terminal can be answered from outside: `menu` — a TUI choice
+ * whose first entry is the safe default (Enter = yes, Esc = no); `yesno` — a
+ * (y/n) question typed with Enter. Anything else needs a real keyboard.
+ */
+export type PromptKind = 'menu' | 'yesno';
+
 export interface Verdict {
   state: Exclude<DeckNotificationState, 'error'>;
+  /** Only on `waiting`, and only when the question has a known yes/no answer. */
+  prompt?: PromptKind;
   /** The line that says so ("5-hour limit reached ∙ resets 9pm"). */
   detail?: string;
 }
@@ -41,6 +50,13 @@ const MENU_RE = [
   /\benter to (?:select|confirm|submit)\b/i,
   /\besc to (?:cancel|reject|deny)\b/i,
 ];
+
+const YESNO_RE = /[([]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[)\]]/i;
+
+/** First entry of a TUI choice is an affirmative — "1. Yes", "❯ 1. Allow once". */
+const MENU_YES_RE = /^(?:[❯›>▶→]\s*)?1\.\s*(?:yes|allow|approve|accept)\b/i;
+/** Hints that Esc backs out of the choice. */
+const MENU_ESC_RE = /\besc to (?:cancel|reject|deny|exit|go back)\b/i;
 
 /** The bottom of the screen is the present; further up is history. */
 const SCREEN_LINES = 14;
@@ -83,12 +99,18 @@ export function classifyScreen(screen: string, text?: string): Verdict {
   const limit = all.find((l) => matches(LIMIT_RE, l));
   if (limit) return { state: 'limit', detail: clip(note || limit) };
 
+  const prompt: PromptKind | undefined =
+    lines.some((l) => MENU_YES_RE.test(l)) && lines.some((l) => MENU_ESC_RE.test(l))
+      ? 'menu'
+      : lines.some((l) => YESNO_RE.test(l))
+        ? 'yesno'
+        : undefined;
   const question = all.find((l) => matches(QUESTION_RE, l));
-  if (question) return { state: 'waiting', detail: clip(note || question) };
+  if (question) return { state: 'waiting', ...(prompt ? { prompt } : {}), detail: clip(note || question) };
   if (lines.some((l) => matches(MENU_RE, l))) {
     const asked = lines.find((l) => l.endsWith('?'));
     const detail = note || asked;
-    return { state: 'waiting', ...(detail ? { detail: clip(detail) } : {}) };
+    return { state: 'waiting', ...(prompt ? { prompt } : {}), ...(detail ? { detail: clip(detail) } : {}) };
   }
   return { state: 'done', ...(note ? { detail: clip(note) } : {}) };
 }

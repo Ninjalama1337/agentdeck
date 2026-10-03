@@ -57,6 +57,21 @@ const FCM_META = `
         <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="agentdeck-alerts" />
 `;
 
+// Our own FCM service replaces the Capacitor plugin's, so data-only messages for
+// a terminal's yes/no question can be drawn with action buttons
+// (mobile/native/AgentDeckMessagingService.java); everything else is passed on.
+const MESSAGING_COMPONENTS = `
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+        <service android:name="com.ninjalama.agentdeck.AgentDeckMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <receiver android:name="com.ninjalama.agentdeck.AnswerReceiver" android:exported="false" />
+`;
+
 // Small icon of the service's permanent notification. Without a valid icon the
 // service cannot enter the foreground and Android kills the app.
 const STAT_ICON = `<?xml version="1.0" encoding="utf-8"?>
@@ -96,6 +111,17 @@ if (xml.includes('default_notification_icon')) {
   xml = xml.replace(/(\n\s*<\/application>)/, `\n${FCM_META.trimEnd()}$1`);
   fs.writeFileSync(manifest, xml);
   console.log('patch-android: added FCM notification defaults');
+}
+
+if (xml.includes('AgentDeckMessagingService')) {
+  console.log('patch-android: messaging service already present');
+} else {
+  if (!xml.includes('xmlns:tools=')) {
+    xml = xml.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ');
+  }
+  xml = xml.replace(/(\n\s*<\/application>)/, `\n${MESSAGING_COMPONENTS.trimEnd()}$1`);
+  fs.writeFileSync(manifest, xml);
+  console.log('patch-android: added messaging service + answer receiver');
 }
 
 const statIcon = path.resolve(here, '../android/app/src/main/res/drawable/ic_stat_agentdeck.xml');

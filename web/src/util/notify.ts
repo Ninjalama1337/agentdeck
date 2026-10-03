@@ -236,6 +236,28 @@ export async function disableFcm(): Promise<void> {
   await api.fcmUnregister(token ?? undefined).catch(() => undefined);
 }
 
+/* ------------------------------------------- Yes/No buttons (APK, closed app) */
+
+function actionsPlugin() {
+  return window.Capacitor?.Plugins?.NotifyActions as unknown as
+    | {
+        setCredentials?: (o: { base: string; token: string }) => Promise<void>;
+        addListener?: (ev: string, cb: (e: { open?: string }) => void) => unknown;
+      }
+    | undefined;
+}
+
+/**
+ * APK only: gives the native notification buttons what they need to reach
+ * this server while the app is closed. Empty values clear it (signed out).
+ */
+export function syncActionCredentials(base: string, token: string | null): void {
+  if (!isNativePlatform()) return;
+  void actionsPlugin()
+    ?.setCredentials?.({ base: token ? base : '', token: token ?? '' })
+    ?.catch?.(() => undefined);
+}
+
 /** Native taps → the same `agentdeck:open` event the service worker uses. */
 export function listenForNativeTaps(): void {
   const plugin = localPlugin() as unknown as
@@ -244,6 +266,10 @@ export function listenForNativeTaps(): void {
   plugin?.addListener?.('localNotificationActionPerformed', (e) => {
     const open = e.notification?.extra?.open;
     if (open) window.dispatchEvent(new CustomEvent('agentdeck:open', { detail: open }));
+  });
+  // Tap on a notification the app drew itself (the ones with Yes/No buttons).
+  actionsPlugin()?.addListener?.('open', (e) => {
+    if (e.open) window.dispatchEvent(new CustomEvent('agentdeck:open', { detail: e.open }));
   });
   // Tap on a notification the system showed for an FCM message.
   fcmPlugin()?.addListener?.('pushNotificationActionPerformed', ((e: { notification?: { data?: { open?: string } } }) => {

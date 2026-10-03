@@ -16,8 +16,9 @@ import { TeamScreen } from './features/chat/TeamScreen';
 import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
+import { getApiBase } from './api/client';
 import { installExternalLinkHandler } from './util/openExternal';
-import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications } from './util/notify';
+import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications, syncActionCredentials } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
@@ -80,6 +81,14 @@ export default function App() {
   useEffect(() => {
     if (token) void prepareNativeNotifications();
   }, [token]);
+
+  // APK: the notification buttons call the server on their own — hand them its
+  // address and this device's login (cleared on sign-out).
+  const servers = useAppStore((s) => s.servers);
+  const activeServerId = useAppStore((s) => s.activeServerId);
+  useEffect(() => {
+    syncActionCredentials(getApiBase(), token ?? null);
+  }, [servers, activeServerId, token]);
 
   // APK: FCM token while "Notify me" is on — Google's push channel reaches
   // the app even when Android froze it. Removed again when switched off.

@@ -513,6 +513,8 @@ export interface DeckNotification {
   sessionId?: string;
   terminalId?: string;
   runId?: string;
+  /** Terminal waiting on a yes/no question the notification can answer. */
+  prompt?: 'menu' | 'yesno';
 }
 
 export interface PushStatus {

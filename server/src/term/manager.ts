@@ -541,6 +541,14 @@ export class TerminalManager {
     });
   }
 
+  /** What the terminal's screen asks right now (a fresh read, not the last alert). */
+  async currentVerdict(id: string): Promise<Verdict | undefined> {
+    const term = this.active.get(id);
+    if (!term) return undefined;
+    await new Promise<void>((resolve) => term.screen.write('', resolve));
+    return classifyScreen(screenText(term.screen));
+  }
+
   /** The user looked at the terminal — clear its attention flag. */
   markSeen(id: string, broadcast: TerminalBroadcasts): void {
     const term = this.active.get(id);

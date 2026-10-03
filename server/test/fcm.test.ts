@@ -53,6 +53,19 @@ describe('FcmClient', () => {
     expect(body.message.android.notification.channel_id).toBe('agentdeck-done');
   });
 
+  it('sends a data-only message when the app draws the notification', async () => {
+    const f = fetchMock(200);
+    const client = await FcmClient.load(path.join(await dataDir(true), 'fcm-service-account.json'), f);
+    await client!.send('t', { ...message, dataOnly: true, tag: 'term1', data: { terminalId: 'term1' } });
+    const sent = vi.mocked(f).mock.calls.find(([u]) => String(u).includes('messages:send'))!;
+    const body = JSON.parse(String((sent[1] as RequestInit).body)) as {
+      message: { notification?: unknown; data: Record<string, string>; android: { notification?: unknown } };
+    };
+    expect(body.message.notification).toBeUndefined();
+    expect(body.message.android.notification).toBeUndefined();
+    expect(body.message.data).toMatchObject({ terminalId: 'term1', title: 't', body: 'b', channel: 'agentdeck-done', tag: 'term1' });
+  });
+
   it('reports unregistered tokens as dead', async () => {
     const client = await FcmClient.load(path.join(await dataDir(true), 'fcm-service-account.json'), fetchMock(404));
     expect(await client!.send('gone', message)).toBe('dead');

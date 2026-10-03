@@ -33,7 +33,7 @@ export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
     onData: (id: string, data: string) => deps.broadcast('terminal:data', { id, data }),
     onExit: (id: string, code: number) => deps.broadcast('terminal:exit', { id, code }),
     onList: () => deps.broadcast('terminal:list', { terminals: deps.terminals.list() }),
-    onAttention: (info, reason, { state, detail }) => {
+    onAttention: (info, reason, { state, detail, prompt }) => {
       deps.broadcast('terminal:attention', { id: info.id, reason, state, ...(detail ? { text: detail } : {}) });
       const project = deps.store.getProject(info.projectId);
       deps.notifications.notify({
@@ -43,6 +43,7 @@ export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
         body: detail ?? ATTENTION_TEXT[state],
         projectId: info.projectId,
         terminalId: info.id,
+        ...(prompt ? { prompt } : {}),
       });
     },
   };
@@ -104,6 +105,22 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const id = (req.params as { id: string }).id;
     deps.terminals.kill(id, terminalBroadcasts(deps));
     reply.code(204).send();
+  });
+
+  // Yes/no from a notification button. Never blind: the screen is read again
+  // and the key is only sent while it still shows the very prompt the button
+  // was made for.
+  fastify.post('/terminals/:id/answer', async (req) => {
+    const id = (req.params as { id: string }).id;
+    const body = z.object({ answer: z.enum(['yes', 'no']), prompt: z.enum(['menu', 'yesno']) }).parse(req.body);
+    const verdict = await deps.terminals.currentVerdict(id);
+    if (!verdict) throw httpError(409, 'TERMINAL_GONE', 'Terminal has exited.');
+    if (verdict.state !== 'waiting' || verdict.prompt !== body.prompt) {
+      throw httpError(409, 'PROMPT_GONE', 'The terminal is no longer asking that question.');
+    }
+    const keys = body.prompt === 'menu' ? (body.answer === 'yes' ? '\r' : '\x1b') : body.answer === 'yes' ? 'y\r' : 'n\r';
+    if (!deps.terminals.write(id, keys)) throw httpError(409, 'TERMINAL_GONE', 'Terminal has exited.');
+    return { ok: true };
   });
 
   // Input/resize go over the WS gateway; a REST fallback exists for the MCP
