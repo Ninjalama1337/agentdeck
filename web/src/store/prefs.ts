@@ -13,6 +13,8 @@ export interface Prefs {
   notifyKinds: Record<DeckNotificationKind, boolean>;
   /** APK: keep the connection alive in the background while agents are active. */
   backgroundService: boolean;
+  /** No push between `from` and `to` ("HH:MM", local time); the inbox still fills. */
+  quietHours: { enabled: boolean; from: string; to: string };
   /** Short vibration on key taps and events. */
   haptics: boolean;
   termFontSize: number;
@@ -38,6 +40,7 @@ export const DEFAULT_PREFS: Prefs = {
     info: true,
   },
   backgroundService: true,
+  quietHours: { enabled: false, from: '22:00', to: '07:00' },
   haptics: true,
   termFontSize: 12,
   termCompose: true,
@@ -55,6 +58,7 @@ function load(): Prefs {
       ...DEFAULT_PREFS,
       ...parsed,
       notifyKinds: { ...DEFAULT_PREFS.notifyKinds, ...(parsed.notifyKinds ?? {}) },
+      quietHours: { ...DEFAULT_PREFS.quietHours, ...(parsed.quietHours ?? {}) },
     };
   } catch {
     return DEFAULT_PREFS;

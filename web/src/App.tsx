@@ -104,7 +104,9 @@ export default function App() {
       const busy =
         st.terminals.length > 0 ||
         Object.values(st.sessionsByProject).some((list) => list.some((s) => s.status === 'running' || s.status === 'queued'));
-      syncBackgroundService(Boolean(st.token) && prefs.notifications && prefs.backgroundService && busy);
+      // With an FCM token Google's push channel delivers; the service (and its
+      // permanent notification) is only the fallback.
+      syncBackgroundService(Boolean(st.token) && prefs.notifications && prefs.backgroundService && busy && !st.pushActive);
     };
     evaluate();
     const unsubStore = useAppStore.subscribe(evaluate);

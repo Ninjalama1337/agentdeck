@@ -527,8 +527,16 @@ export interface PushStatus {
   fcmTokens?: number;
 }
 
+/** No push in this window; `from`/`to` are minutes since local midnight, `tzOffset` minutes east of UTC. */
+export interface QuietHours {
+  from: number;
+  to: number;
+  tzOffset: number;
+}
+
 export interface FcmRegisterRequest {
   token: string;
+  quiet?: QuietHours;
   /** Which notification kinds this device wants pushed (default: all). */
   kinds?: DeckNotificationKind[];
 }
@@ -538,6 +546,7 @@ export interface PushSubscribeRequest {
   keys: { p256dh: string; auth: string };
   /** Which notification kinds this device wants pushed (default: all). */
   kinds?: DeckNotificationKind[];
+  quiet?: QuietHours;
 }
 
 // ---------------------------------------------------------------------------

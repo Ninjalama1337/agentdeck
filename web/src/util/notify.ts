@@ -9,7 +9,7 @@
  *
  * Deep links use `/?open=<target>` so a tap lands on the right screen.
  */
-import type { DeckNotification, DeckNotificationKind, DeckNotificationState } from '@agentdeck/shared';
+import type { DeckNotification, DeckNotificationKind, DeckNotificationState, QuietHours } from '@agentdeck/shared';
 import { api } from '../api/client';
 import { usePrefs } from '../store/prefs';
 import { isNativePlatform } from './platform';
@@ -218,7 +218,7 @@ export async function enableFcm(): Promise<boolean> {
       fcmListening = true;
       plugin.addListener?.('registration', ((e: { value: string }) => {
         fcmToken = e.value;
-        void api.fcmRegister({ token: e.value, kinds: enabledKinds() }).catch(() => undefined);
+        void api.fcmRegister({ token: e.value, kinds: enabledKinds(), quiet: quietHours() }).catch(() => undefined);
       }) as never);
     }
     await plugin.register();
@@ -288,15 +288,26 @@ function enabledKinds(): DeckNotificationKind[] {
   return (Object.keys(kinds) as DeckNotificationKind[]).filter((k) => kinds[k]);
 }
 
+/** Quiet window for the server to honour, or undefined when switched off. */
+function quietHours(): QuietHours | undefined {
+  const q = usePrefs.getState().quietHours;
+  if (!q.enabled) return undefined;
+  const minutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+  return { from: minutes(q.from), to: minutes(q.to), tzOffset: -new Date().getTimezoneOffset() };
+}
+
 function subscribeRequest(sub: PushSubscription) {
   const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
   if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) return null;
-  return { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, kinds: enabledKinds() };
+  return { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, kinds: enabledKinds(), quiet: quietHours() };
 }
 
 /** Re-registers the existing subscription so the server honours changed kind toggles. */
 export async function syncPushKinds(): Promise<void> {
-  if (fcmToken) await api.fcmRegister({ token: fcmToken, kinds: enabledKinds() }).catch(() => undefined);
+  if (fcmToken) await api.fcmRegister({ token: fcmToken, kinds: enabledKinds(), quiet: quietHours() }).catch(() => undefined);
   const sub = await currentPushSubscription();
   const req = sub && subscribeRequest(sub);
   if (req) await api.pushSubscribe(req).catch(() => undefined);

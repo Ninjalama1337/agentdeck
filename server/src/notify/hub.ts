@@ -14,6 +14,7 @@ import type {
   DeckNotificationKind,
   DeckNotificationState,
   PushSubscribeRequest,
+  QuietHours,
 } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newId } from '../util/ids.js';
@@ -24,6 +25,7 @@ interface StoredSubscription {
   endpoint: string;
   keys: { p256dh: string; auth: string };
   kinds?: DeckNotificationKind[];
+  quiet?: QuietHours;
   createdAt: number;
 }
 
@@ -31,6 +33,7 @@ interface StoredFcmToken {
   deviceId: string;
   token: string;
   kinds?: DeckNotificationKind[];
+  quiet?: QuietHours;
   createdAt: number;
 }
 
@@ -48,6 +51,14 @@ export interface NotificationHubOptions {
 }
 
 const HISTORY_LIMIT = 100;
+
+/** True while the device's local clock is inside its quiet window (may wrap midnight). */
+export function inQuietHours(q: QuietHours | undefined, now = Date.now()): boolean {
+  if (!q || q.from === q.to) return false;
+  const local = new Date(now + q.tzOffset * 60_000);
+  const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+  return q.from < q.to ? minute >= q.from && minute < q.to : minute >= q.from || minute < q.to;
+}
 
 export class NotificationHub {
   private vapid: VapidKeys | undefined;
@@ -92,9 +103,9 @@ export class NotificationHub {
     return this.fcm !== undefined;
   }
 
-  async registerFcm(deviceId: string, token: string, kinds?: DeckNotificationKind[]): Promise<void> {
+  async registerFcm(deviceId: string, token: string, kinds?: DeckNotificationKind[], quiet?: QuietHours): Promise<void> {
     this.fcmTokens = this.fcmTokens.filter((t) => t.token !== token);
-    this.fcmTokens.push({ deviceId, token, ...(kinds ? { kinds } : {}), createdAt: Date.now() });
+    this.fcmTokens.push({ deviceId, token, ...(kinds ? { kinds } : {}), ...(quiet ? { quiet } : {}), createdAt: Date.now() });
     await this.persistFcm();
   }
 
@@ -126,6 +137,7 @@ export class NotificationHub {
       endpoint: req.endpoint,
       keys: req.keys,
       ...(req.kinds ? { kinds: req.kinds } : {}),
+      ...(req.quiet ? { quiet: req.quiet } : {}),
       createdAt: Date.now(),
     });
     await this.persist();
@@ -169,7 +181,9 @@ export class NotificationHub {
 
   private async push(n: DeckNotification, only?: (s: StoredSubscription) => boolean): Promise<number> {
     if (!this.vapid) return 0;
-    const targets = this.subs.filter((s) => (only ? only(s) : !s.kinds || s.kinds.includes(n.kind)));
+    const targets = this.subs.filter((s) =>
+      only ? only(s) : (!s.kinds || s.kinds.includes(n.kind)) && !inQuietHours(s.quiet),
+    );
     if (targets.length === 0) return 0;
     const payload = JSON.stringify(n);
     const dead: string[] = [];
@@ -203,7 +217,9 @@ export class NotificationHub {
   private async pushFcm(n: DeckNotification, only?: (t: StoredFcmToken) => boolean): Promise<number> {
     const fcm = this.fcm;
     if (!fcm) return 0;
-    const targets = this.fcmTokens.filter((t) => (only ? only(t) : !t.kinds || t.kinds.includes(n.kind)));
+    const targets = this.fcmTokens.filter((t) =>
+      only ? only(t) : (!t.kinds || t.kinds.includes(n.kind)) && !inQuietHours(t.quiet),
+    );
     if (targets.length === 0) return 0;
     const state = n.state ?? (n.kind === 'terminal-attention' ? 'waiting' : undefined);
     const open = n.terminalId ? `terminal:${n.terminalId}` : n.sessionId ? `session:${n.sessionId}` : n.runId ? `team:${n.runId}` : '';

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { FcmClient } from '../src/notify/fcm.js';
-import { NotificationHub } from '../src/notify/hub.js';
+import { NotificationHub, inQuietHours } from '../src/notify/hub.js';
 
 const { privateKey } = crypto.generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -75,5 +75,23 @@ describe('NotificationHub FCM tokens', () => {
     await hub.forgetDevice('d1');
     expect(hub.fcmCount('d1')).toBe(0);
     expect(hub.fcmCount('d2')).toBe(1);
+  });
+});
+
+describe('inQuietHours', () => {
+  const at = (h: number, m = 0) => Date.UTC(2026, 0, 1, h, m);
+
+  it('is never quiet without a window', () => {
+    expect(inQuietHours(undefined, at(3))).toBe(false);
+    expect(inQuietHours({ from: 600, to: 600, tzOffset: 0 }, at(10))).toBe(false);
+  });
+
+  it('wraps past midnight in the device time zone', () => {
+    // 22:00–07:00 at UTC+2 → 20:00–05:00 UTC
+    const q = { from: 22 * 60, to: 7 * 60, tzOffset: 120 };
+    expect(inQuietHours(q, at(21))).toBe(true);
+    expect(inQuietHours(q, at(4, 59))).toBe(true);
+    expect(inQuietHours(q, at(5))).toBe(false);
+    expect(inQuietHours(q, at(19, 59))).toBe(false);
   });
 });

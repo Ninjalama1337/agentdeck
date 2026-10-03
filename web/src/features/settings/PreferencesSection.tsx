@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Bell, BellRing, Mic, SquareTerminal, Vibrate } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { DeckNotificationKind, VoiceStatus } from '@agentdeck/shared';
+import type { DeckNotificationKind, PushStatus, VoiceStatus } from '@agentdeck/shared';
 import { api } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import { usePrefs, type DictationEngine } from '../../store/prefs';
-import { disablePush, enablePush, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
+import { disablePush, enablePush, fcmRegistered, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
 import { speechCtor } from '../../hooks/useDictation';
 import { backgroundServiceSupported } from '../../util/backgroundService';
 import { isNativePlatform } from '../../util/platform';
@@ -85,9 +85,12 @@ export function PreferencesSection() {
   const [perm, setPerm] = useState<Permission>('default');
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
+  const [status, setStatus] = useState<PushStatus | null>(null);
+  const connection = useAppStore((s) => s.connection);
 
   useEffect(() => {
     void permissionState().then(setPerm);
+    void api.pushStatus().then(setStatus).catch(() => setStatus(null));
     void api.voiceStatus().then(setVoice).catch(() => setVoice(null));
   }, []);
 
@@ -144,7 +147,9 @@ export function PreferencesSection() {
           title="Notify me"
           hint={
             pushActive
-              ? 'Web Push active — works with the app closed'
+              ? native
+                ? 'Push via Google active — works with the app closed'
+                : 'Web Push active — works with the app closed'
               : perm === 'granted'
                 ? native
                   ? 'Shown while the app is open or connected in the background'
@@ -181,6 +186,58 @@ export function PreferencesSection() {
               />
             </Row>
           ))}
+        </div>
+        <Row title="Quiet hours" hint="No push in this window — alerts still land in the inbox">
+          <Toggle
+            label="Quiet hours"
+            checked={prefs.quietHours.enabled}
+            onChange={(v) => {
+              prefs.set('quietHours', { ...prefs.quietHours, enabled: v });
+              void syncPushKinds();
+            }}
+          />
+        </Row>
+        {prefs.quietHours.enabled && (
+          <div className="flex items-center gap-2 pb-2 text-[13px] text-dim">
+            {(['from', 'to'] as const).map((edge) => (
+              <label key={edge} className="flex flex-1 items-center gap-2">
+                {edge === 'from' ? 'From' : 'To'}
+                <input
+                  type="time"
+                  value={prefs.quietHours[edge]}
+                  onChange={(e) => prefs.set('quietHours', { ...prefs.quietHours, [edge]: e.target.value || prefs.quietHours[edge] })}
+                  onBlur={() => void syncPushKinds()}
+                  className="field !w-auto !py-2 text-[13.5px]"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="mt-1 border-t border-line pt-2 text-[12px] leading-snug text-dim" aria-label="Notification diagnostics">
+          <p className="mb-1 font-semibold text-ink">Why no alert?</p>
+          <ul className="space-y-0.5">
+            <li>{perm === 'granted' ? '✓' : '✗'} System permission {perm === 'granted' ? 'granted' : perm}</li>
+            <li>{prefs.notifications ? '✓' : '✗'} "Notify me" {prefs.notifications ? 'on' : 'off'}</li>
+            <li>{connection === 'online' ? '✓' : '✗'} Connection to the server {connection}</li>
+            {native && (
+              <li>
+                {status?.fcm ? (fcmRegistered() ? '✓' : '✗') : '✗'}{' '}
+                {status === null
+                  ? 'Server unreachable'
+                  : !status.fcm
+                    ? 'Server has no Firebase key (fcm-service-account.json) — alerts only while the app is connected'
+                    : fcmRegistered()
+                      ? 'This phone is registered for Google push'
+                      : 'This phone is not registered for push yet — toggle "Notify me" off and on'}
+              </li>
+            )}
+            {!native && (
+              <li>
+                {pushActive ? '✓' : '✗'} Web Push {pushActive ? 'subscribed' : canPush ? 'not subscribed — toggle "Notify me"' : 'unavailable (needs HTTPS)'}
+              </li>
+            )}
+            {prefs.quietHours.enabled && <li>ℹ Quiet hours {prefs.quietHours.from}–{prefs.quietHours.to} suppress push</li>}
+          </ul>
         </div>
         {pushActive && (
           <button type="button" onClick={() => void test()} className="press tap mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-line bg-surface-2 text-[13.5px] font-semibold">
