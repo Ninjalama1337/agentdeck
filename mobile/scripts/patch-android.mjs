@@ -159,3 +159,15 @@ if (m && fs.existsSync(gradle)) {
   fs.writeFileSync(gradle, g);
   console.log(`patch-android: versionName ${version}, versionCode ${next}`);
 }
+
+// AgentDeckMessagingService extends the push plugin's FirebaseMessagingService,
+// but the plugin keeps firebase-messaging to itself (implementation, not api):
+// the app module needs it on its own compile classpath. Same version as the plugin.
+if (fs.existsSync(gradle)) {
+  let g = fs.readFileSync(gradle, 'utf8');
+  if (!g.includes('com.google.firebase:firebase-messaging')) {
+    g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "com.google.firebase:firebase-messaging:24.1.0"');
+    fs.writeFileSync(gradle, g);
+    console.log('patch-android: added firebase-messaging dependency');
+  }
+}
