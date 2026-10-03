@@ -16,7 +16,7 @@ import { TeamScreen } from './features/chat/TeamScreen';
 import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
-import { listenForNativeTaps, prepareNativeNotifications } from './util/notify';
+import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
@@ -78,6 +78,18 @@ export default function App() {
   useEffect(() => {
     if (token) void prepareNativeNotifications();
   }, [token]);
+
+  // APK: FCM token while "Notify me" is on — Google's push channel reaches
+  // the app even when Android froze it. Removed again when switched off.
+  const notificationsOn = usePrefs((p) => p.notifications);
+  useEffect(() => {
+    if (!token) return;
+    void (async () => {
+      if (notificationsOn) await enableFcm();
+      else await disableFcm();
+      await useAppStore.getState().refreshPushActive();
+    })();
+  }, [token, notificationsOn]);
 
   // APK: stay connected in the background while there is something to wait
   // for — a live terminal or a running session. Re-checked when the app

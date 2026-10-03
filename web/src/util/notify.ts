@@ -177,6 +177,65 @@ export async function showSystemNotification(n: DeckNotification): Promise<boole
   }
 }
 
+/* --------------------------------------------------- FCM (APK, survives Doze) */
+
+function fcmPlugin() {
+  return window.Capacitor?.Plugins?.PushNotifications as unknown as
+    | {
+        checkPermissions?: () => Promise<{ receive?: string }>;
+        requestPermissions?: () => Promise<{ receive?: string }>;
+        register?: () => Promise<void>;
+        unregister?: () => Promise<void>;
+        addListener?: (ev: string, cb: (e: never) => void) => unknown;
+      }
+    | undefined;
+}
+
+let fcmToken: string | null = null;
+let fcmListening = false;
+
+/** This APK holds an FCM token the server knows (system pushes wake the app). */
+export function fcmRegistered(): boolean {
+  return fcmToken !== null;
+}
+
+/**
+ * APK only: gets the device's FCM token and registers it on the server, so
+ * notifications arrive through Google's push channel even when Android froze
+ * the app. Resolves false when unavailable (old APK, server without FCM key,
+ * permission denied) — the WebSocket path still works then.
+ */
+export async function enableFcm(): Promise<boolean> {
+  const plugin = fcmPlugin();
+  if (!isNativePlatform() || !plugin?.register) return false;
+  try {
+    const status = await api.pushStatus();
+    if (!status.fcm) return false;
+    let perm = (await plugin.checkPermissions?.())?.receive;
+    if (perm?.startsWith('prompt')) perm = (await plugin.requestPermissions?.())?.receive;
+    if (perm !== 'granted') return false;
+    if (!fcmListening) {
+      fcmListening = true;
+      plugin.addListener?.('registration', ((e: { value: string }) => {
+        fcmToken = e.value;
+        void api.fcmRegister({ token: e.value, kinds: enabledKinds() }).catch(() => undefined);
+      }) as never);
+    }
+    await plugin.register();
+    // The 'registration' event is async; wait briefly for the token.
+    for (let i = 0; i < 20 && fcmToken === null; i++) await new Promise((r) => setTimeout(r, 250));
+    return fcmToken !== null;
+  } catch {
+    return false;
+  }
+}
+
+export async function disableFcm(): Promise<void> {
+  const token = fcmToken;
+  fcmToken = null;
+  await api.fcmUnregister(token ?? undefined).catch(() => undefined);
+}
+
 /** Native taps → the same `agentdeck:open` event the service worker uses. */
 export function listenForNativeTaps(): void {
   const plugin = localPlugin() as unknown as
@@ -186,6 +245,11 @@ export function listenForNativeTaps(): void {
     const open = e.notification?.extra?.open;
     if (open) window.dispatchEvent(new CustomEvent('agentdeck:open', { detail: open }));
   });
+  // Tap on a notification the system showed for an FCM message.
+  fcmPlugin()?.addListener?.('pushNotificationActionPerformed', ((e: { notification?: { data?: { open?: string } } }) => {
+    const open = e.notification?.data?.open;
+    if (open) window.dispatchEvent(new CustomEvent('agentdeck:open', { detail: open }));
+  }) as never);
 }
 
 /* ---------------------------------------------------------------- Web Push */
@@ -232,6 +296,7 @@ function subscribeRequest(sub: PushSubscription) {
 
 /** Re-registers the existing subscription so the server honours changed kind toggles. */
 export async function syncPushKinds(): Promise<void> {
+  if (fcmToken) await api.fcmRegister({ token: fcmToken, kinds: enabledKinds() }).catch(() => undefined);
   const sub = await currentPushSubscription();
   const req = sub && subscribeRequest(sub);
   if (req) await api.pushSubscribe(req).catch(() => undefined);

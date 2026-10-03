@@ -50,6 +50,13 @@ const FGS_COMPONENTS = `
         </service>
 `;
 
+// FCM notifications are drawn by the system: give them the status-bar icon
+// and a fallback channel (a message without a known channel_id).
+const FCM_META = `
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_agentdeck" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="agentdeck-alerts" />
+`;
+
 // Small icon of the service's permanent notification. Without a valid icon the
 // service cannot enter the foreground and Android kills the app.
 const STAT_ICON = `<?xml version="1.0" encoding="utf-8"?>
@@ -81,6 +88,14 @@ if (xml.includes(`${FGS_PACKAGE}.AndroidForegroundService`)) {
   xml = xml.replace(/(\n\s*<\/application>)/, `\n${FGS_COMPONENTS.trimEnd()}$1`);
   fs.writeFileSync(manifest, xml);
   console.log('patch-android: added foreground service');
+}
+
+if (xml.includes('default_notification_icon')) {
+  console.log('patch-android: FCM defaults already present');
+} else {
+  xml = xml.replace(/(\n\s*<\/application>)/, `\n${FCM_META.trimEnd()}$1`);
+  fs.writeFileSync(manifest, xml);
+  console.log('patch-android: added FCM notification defaults');
 }
 
 const statIcon = path.resolve(here, '../android/app/src/main/res/drawable/ic_stat_agentdeck.xml');

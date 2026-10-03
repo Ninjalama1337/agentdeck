@@ -24,6 +24,7 @@ jobs:
       # automatisch an den eigenen Server (siehe Kommentar am Publish-Schritt).
       AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
       AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
       # Fester Signatur-Keystore (base64), siehe Schritt "Signatur-Keystore".
       ANDROID_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
     steps:
@@ -98,6 +99,13 @@ jobs:
       - name: Android-Projekt generieren (wird nicht committed)
         working-directory: mobile
         run: npx cap add android && npm run patch:android
+
+      # FCM: google-services.json (Firebase-Konsole) als Secret hinterlegen:
+      #   gh secret set GOOGLE_SERVICES_JSON < google-services.json
+      # Ohne das Secret baut die APK normal, nur ohne FCM-Push.
+      - name: Firebase-Konfiguration einspielen (optional)
+        if: env.GOOGLE_SERVICES_JSON != ''
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > mobile/android/app/google-services.json
 
       - name: Cap-Sync
         working-directory: mobile

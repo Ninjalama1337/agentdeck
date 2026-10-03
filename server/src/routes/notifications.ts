@@ -31,6 +31,8 @@ export async function notificationRoutes(fastify: FastifyInstance, deps: AppDeps
       enabled: publicKey !== undefined,
       ...(publicKey ? { publicKey } : {}),
       subscriptions: deps.notifications.subscriptionCount(deviceOf(req)),
+      fcm: deps.notifications.fcmEnabled,
+      fcmTokens: deps.notifications.fcmCount(deviceOf(req)),
     };
   });
 
@@ -43,6 +45,18 @@ export async function notificationRoutes(fastify: FastifyInstance, deps: AppDeps
   fastify.post('/push/unsubscribe', async (req, reply) => {
     const body = z.object({ endpoint: z.string().optional() }).parse(req.body ?? {});
     await deps.notifications.unsubscribe(deviceOf(req), body.endpoint);
+    reply.code(204).send();
+  });
+
+  fastify.post('/push/fcm', async (req, reply) => {
+    const body = z.object({ token: z.string().min(20).max(4096), kinds: z.array(z.enum(KINDS)).optional() }).parse(req.body);
+    await deps.notifications.registerFcm(deviceOf(req), body.token, body.kinds);
+    reply.code(204).send();
+  });
+
+  fastify.post('/push/fcm/unregister', async (req, reply) => {
+    const body = z.object({ token: z.string().optional() }).parse(req.body ?? {});
+    await deps.notifications.unregisterFcm(deviceOf(req), body.token);
     reply.code(204).send();
   });
 

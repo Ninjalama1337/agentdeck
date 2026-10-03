@@ -521,6 +521,16 @@ export interface PushStatus {
   publicKey?: string;
   /** Number of subscriptions registered for the calling device. */
   subscriptions: number;
+  /** Server can send FCM (APK push that survives Doze); absent on older servers. */
+  fcm?: boolean;
+  /** FCM tokens registered for the calling device. */
+  fcmTokens?: number;
+}
+
+export interface FcmRegisterRequest {
+  token: string;
+  /** Which notification kinds this device wants pushed (default: all). */
+  kinds?: DeckNotificationKind[];
 }
 
 export interface PushSubscribeRequest {

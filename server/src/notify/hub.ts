@@ -17,11 +17,19 @@ import type {
 } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newId } from '../util/ids.js';
+import { FcmClient } from './fcm.js';
 
 interface StoredSubscription {
   deviceId: string;
   endpoint: string;
   keys: { p256dh: string; auth: string };
+  kinds?: DeckNotificationKind[];
+  createdAt: number;
+}
+
+interface StoredFcmToken {
+  deviceId: string;
+  token: string;
   kinds?: DeckNotificationKind[];
   createdAt: number;
 }
@@ -45,12 +53,16 @@ export class NotificationHub {
   private vapid: VapidKeys | undefined;
   private subs: StoredSubscription[] = [];
   private readonly history: DeckNotification[] = [];
+  private fcm: FcmClient | undefined;
+  private fcmTokens: StoredFcmToken[] = [];
   private readonly subsFile: string;
   private readonly vapidFile: string;
+  private readonly fcmTokensFile: string;
 
   constructor(private readonly opts: NotificationHubOptions) {
     this.subsFile = path.join(opts.dataDir, 'push-subscriptions.json');
     this.vapidFile = path.join(opts.dataDir, 'vapid.json');
+    this.fcmTokensFile = path.join(opts.dataDir, 'fcm-tokens.json');
   }
 
   async init(): Promise<void> {
@@ -67,6 +79,32 @@ export class NotificationHub {
     } catch {
       this.subs = [];
     }
+    this.fcm = await FcmClient.load(path.join(this.opts.dataDir, 'fcm-service-account.json'));
+    try {
+      this.fcmTokens = JSON.parse(await fsp.readFile(this.fcmTokensFile, 'utf8')) as StoredFcmToken[];
+    } catch {
+      this.fcmTokens = [];
+    }
+  }
+
+  /** Server can send FCM (service-account key present). */
+  get fcmEnabled(): boolean {
+    return this.fcm !== undefined;
+  }
+
+  async registerFcm(deviceId: string, token: string, kinds?: DeckNotificationKind[]): Promise<void> {
+    this.fcmTokens = this.fcmTokens.filter((t) => t.token !== token);
+    this.fcmTokens.push({ deviceId, token, ...(kinds ? { kinds } : {}), createdAt: Date.now() });
+    await this.persistFcm();
+  }
+
+  async unregisterFcm(deviceId: string, token?: string): Promise<void> {
+    this.fcmTokens = this.fcmTokens.filter((t) => !(t.deviceId === deviceId && (!token || t.token === token)));
+    await this.persistFcm();
+  }
+
+  fcmCount(deviceId: string): number {
+    return this.fcmTokens.filter((t) => t.deviceId === deviceId).length;
   }
 
   get publicKey(): string | undefined {
@@ -101,6 +139,7 @@ export class NotificationHub {
   /** Drop every subscription of a revoked device. */
   async forgetDevice(deviceId: string): Promise<void> {
     await this.unsubscribe(deviceId);
+    await this.unregisterFcm(deviceId);
   }
 
   /** Build + broadcast + push. Returns the notification. */
@@ -110,6 +149,7 @@ export class NotificationHub {
     if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
     this.opts.broadcast(notification);
     void this.push(notification);
+    void this.pushFcm(notification);
     return notification;
   }
 
@@ -123,7 +163,8 @@ export class NotificationHub {
       ts: Date.now(),
     };
     // An explicit test ignores the per-kind filter — it checks delivery.
-    return this.push(n, (s) => s.deviceId === deviceId);
+    const web = await this.push(n, (s) => s.deviceId === deviceId);
+    return web + (await this.pushFcm(n, (t) => t.deviceId === deviceId));
   }
 
   private async push(n: DeckNotification, only?: (s: StoredSubscription) => boolean): Promise<number> {
@@ -159,11 +200,58 @@ export class NotificationHub {
     return delivered;
   }
 
+  private async pushFcm(n: DeckNotification, only?: (t: StoredFcmToken) => boolean): Promise<number> {
+    const fcm = this.fcm;
+    if (!fcm) return 0;
+    const targets = this.fcmTokens.filter((t) => (only ? only(t) : !t.kinds || t.kinds.includes(n.kind)));
+    if (targets.length === 0) return 0;
+    const state = n.state ?? (n.kind === 'terminal-attention' ? 'waiting' : undefined);
+    const open = n.terminalId ? `terminal:${n.terminalId}` : n.sessionId ? `session:${n.sessionId}` : n.runId ? `team:${n.runId}` : '';
+    const message = {
+      title: n.title,
+      body: n.body,
+      channelId: fcmChannel(n),
+      high: n.kind === 'session-error' || n.kind === 'terminal-attention' || state === 'waiting' || state === 'limit',
+      data: { open, notificationId: n.id, kind: n.kind, ...(n.state ? { state: n.state } : {}) },
+      ...(n.terminalId ?? n.sessionId ?? n.runId ? { tag: (n.terminalId ?? n.sessionId ?? n.runId) as string } : {}),
+    };
+    const dead: string[] = [];
+    let delivered = 0;
+    await Promise.all(
+      targets.map(async (t) => {
+        const res = await fcm.send(t.token, message);
+        if (res === 'ok') delivered++;
+        else if (res === 'dead') dead.push(t.token);
+        else this.opts.log.warn('fcm push failed');
+      }),
+    );
+    if (dead.length) {
+      this.fcmTokens = this.fcmTokens.filter((t) => !dead.includes(t.token));
+      await this.persistFcm();
+    }
+    return delivered;
+  }
+
+  private async persistFcm(): Promise<void> {
+    const tmp = `${this.fcmTokensFile}.tmp`;
+    await fsp.writeFile(tmp, JSON.stringify(this.fcmTokens, null, 2), { mode: 0o600 });
+    await fsp.rename(tmp, this.fcmTokensFile);
+  }
+
   private async persist(): Promise<void> {
     const tmp = `${this.subsFile}.tmp`;
     await fsp.writeFile(tmp, JSON.stringify(this.subs, null, 2), { mode: 0o600 });
     await fsp.rename(tmp, this.subsFile);
   }
+}
+
+/** Android channel (created by the app) per state — mirrors web/src/util/notify.ts. */
+function fcmChannel(n: Pick<DeckNotification, 'kind' | 'state'>): string {
+  const state = n.state ?? (n.kind === 'terminal-attention' ? 'waiting' : undefined);
+  if (state === 'done') return 'agentdeck-done';
+  if (state === 'waiting') return 'agentdeck-waiting';
+  if (state === 'limit') return 'agentdeck-limit';
+  return 'agentdeck-alerts';
 }
 
 /** Leads every title, so the state is readable on a lock screen at a glance. */

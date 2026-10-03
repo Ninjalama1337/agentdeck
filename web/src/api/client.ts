@@ -25,6 +25,7 @@ import type {
   GitCommitInfo,
   GitDiffResponse,
   GitOpResult,
+  FcmRegisterRequest,
   PushStatus,
   PushSubscribeRequest,
   TerminalPreset,
@@ -487,6 +488,14 @@ export const api = {
 
   pushUnsubscribe(endpoint?: string): Promise<void> {
     return request('POST', '/api/push/unsubscribe', { json: { endpoint } });
+  },
+
+  fcmRegister(body: FcmRegisterRequest): Promise<void> {
+    return request('POST', '/api/push/fcm', { json: body });
+  },
+
+  fcmUnregister(token?: string): Promise<void> {
+    return request('POST', '/api/push/fcm/unregister', { json: { token } });
   },
 
   pushTest(): Promise<{ delivered: number }> {

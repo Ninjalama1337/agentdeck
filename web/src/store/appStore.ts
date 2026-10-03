@@ -56,7 +56,7 @@ import {
 } from '../api/servers';
 import { usePrefs } from './prefs';
 import { haptic } from '../util/haptics';
-import { currentPushSubscription, showSystemNotification, stateOf } from '../util/notify';
+import { currentPushSubscription, fcmRegistered, showSystemNotification, stateOf } from '../util/notify';
 
 /* ------------------------------------------------------------------ router */
 
@@ -1369,7 +1369,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     async refreshPushActive() {
       const sub = await currentPushSubscription();
-      set({ pushActive: sub !== null });
+      set({ pushActive: sub !== null || fcmRegistered() });
     },
 
     async refreshTerminals() {
