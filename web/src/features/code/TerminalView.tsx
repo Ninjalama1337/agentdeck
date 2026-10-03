@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, ChevronsDown, RotateCcw, X } from 'lucide-react
 import { clsx } from 'clsx';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
@@ -10,6 +11,7 @@ import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
 import { installMobileIme } from './termIme';
 import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode } from './termScroll';
+import { openExternal } from '../../util/openExternal';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -85,6 +87,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon((_event, uri) => openExternal(uri)));
     term.open(host);
     // Soft keyboards edit the textarea instead of sending keys (see termIme.ts).
     const disposeIme = installMobileIme(term, (data) => term.input(data, true));

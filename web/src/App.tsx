@@ -16,6 +16,7 @@ import { TeamScreen } from './features/chat/TeamScreen';
 import { CodeScreen } from './features/code/CodeScreen';
 import { FilesScreen } from './features/files/FilesScreen';
 import { GitScreen } from './features/git/GitScreen';
+import { installExternalLinkHandler } from './util/openExternal';
 import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { SettingsScreen } from './features/settings/SettingsScreen';
@@ -69,6 +70,7 @@ export default function App() {
   useEffect(() => {
     useAppStore.getState().init();
     listenForNativeTaps();
+    return installExternalLinkHandler();
   }, []);
 
   // Usage button: follow the agent in use, refresh every minute.
