@@ -25,6 +25,13 @@ export interface MessageUsage {
   costUsd?: number;
 }
 
+/** One tool call of an assistant turn, kept with the message after the run. */
+export interface ToolRecord {
+  tool: string;
+  ok: boolean;
+  summary?: string;
+}
+
 export interface ChatMessage {
   id: string;
   sessionId: string;
@@ -34,6 +41,8 @@ export interface ChatMessage {
   text: string;
   /** Model reasoning ("thinking"), kept strictly separate from the answer. */
   thinking?: string;
+  /** Tool calls made during this turn, in order. */
+  tools?: ToolRecord[];
   attachments: Attachment[];
   ts: number;
   usage?: MessageUsage;

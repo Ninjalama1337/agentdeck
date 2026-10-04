@@ -10,7 +10,17 @@
  */
 import fsp from 'node:fs/promises';
 import { execa } from 'execa';
-import type { AgentEvent, ChatMessage, MessageUsage, Project, Session, SessionStatus } from '@agentdeck/shared';
+import { ThinkTagSplitter } from '@agentdeck/shared';
+import type {
+  AgentEvent,
+  ChatMessage,
+  MessageUsage,
+  Project,
+  Session,
+  SessionStatus,
+  ThinkPart,
+  ToolRecord,
+} from '@agentdeck/shared';
 import type { Config } from '../config.js';
 import type { Logger } from '../logging.js';
 import type { Store } from '../state/store.js';
@@ -58,6 +68,13 @@ interface ActiveRun {
   textBuf: string;
   /** Model reasoning, accumulated separately from the answer text. */
   thinkingBuf: string;
+  /** Splits inline <think> tags out of the text stream. */
+  splitter: ThinkTagSplitter;
+  tools: ToolRecord[];
+  /** Tool calls still waiting for their result. */
+  openTools: Set<ToolRecord>;
+  /** A tool ran since the last text — next text starts a new paragraph. */
+  needSep: boolean;
   usage?: MessageUsage;
   modelUsed?: string;
   errorDetail?: string;
@@ -188,6 +205,10 @@ export class AgentManager {
       interrupted: false,
       textBuf: '',
       thinkingBuf: '',
+      splitter: new ThinkTagSplitter(),
+      tools: [],
+      openTools: new Set(),
+      needSep: false,
       stderrTail: '',
       stdoutBuf: '',
     };
@@ -324,11 +345,30 @@ export class AgentManager {
   private onAgentEvent(run: ActiveRun, event: AgentEvent): void {
     switch (event.type) {
       case 'text-delta':
-        run.textBuf += event.text;
-        break;
+        this.onText(run, run.splitter.push(event.text));
+        return;
       case 'thinking-delta':
         run.thinkingBuf += event.text;
         break;
+      case 'tool-use':
+        {
+          const rec: ToolRecord = { tool: event.tool, ok: true, ...(event.summary ? { summary: event.summary } : {}) };
+          run.tools.push(rec);
+          run.openTools.add(rec);
+        }
+        run.needSep = true;
+        break;
+      case 'tool-result': {
+        const open = [...run.openTools].find((t) => t.tool === event.tool);
+        if (open) {
+          open.ok = event.ok;
+          if (event.summary) open.summary = event.summary;
+          run.openTools.delete(open);
+        } else {
+          run.tools.push({ tool: event.tool, ok: event.ok, ...(event.summary ? { summary: event.summary } : {}) });
+        }
+        break;
+      }
       case 'usage': {
         run.usage = {
           inputTokens: event.inputTokens ?? run.usage?.inputTokens,
@@ -349,11 +389,30 @@ export class AgentManager {
     this.emit(run.sessionId, event);
   }
 
+  /** Routes split text/thinking parts into the buffers and broadcasts them. */
+  private onText(run: ActiveRun, parts: ThinkPart[]): void {
+    for (const part of parts) {
+      if (part.kind === 'thinking') {
+        run.thinkingBuf += part.text;
+        this.emit(run.sessionId, { type: 'thinking-delta', text: part.text });
+        continue;
+      }
+      let text = part.text;
+      if (run.needSep && run.textBuf.trim() && !/\n\s*$/.test(run.textBuf) && text.trim()) text = '\n\n' + text;
+      if (text.trim()) run.needSep = false;
+      run.textBuf += text;
+      this.emit(run.sessionId, { type: 'text-delta', text });
+    }
+  }
+
   /** Persists buffered text+thinking as one assistant ChatMessage and clears the buffers. */
   private async flush(run: ActiveRun): Promise<string> {
+    this.onText(run, run.splitter.end());
     const text = run.textBuf;
     const thinking = run.thinkingBuf;
-    if (!text.trim() && !thinking.trim()) {
+    const tools = run.tools;
+    run.tools = [];
+    if (!text.trim() && !thinking.trim() && tools.length === 0) {
       run.textBuf = '';
       run.thinkingBuf = '';
       run.usage = undefined;
@@ -367,6 +426,7 @@ export class AgentManager {
       ...(run.modelUsed ? { model: run.modelUsed } : run.session.model ? { model: run.session.model } : {}),
       text,
       ...(thinking.trim() ? { thinking } : {}),
+      ...(tools.length ? { tools } : {}),
       attachments: [],
       ts: Date.now(),
       ...(run.usage ? { usage: run.usage } : {}),

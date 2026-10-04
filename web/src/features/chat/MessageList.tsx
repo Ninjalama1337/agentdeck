@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { AlertTriangle, Brain, ChevronDown, ChevronRight, Download, FileText, Wrench } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { AgentInfo, Attachment, ChatMessage } from '@agentdeck/shared';
+import { splitThinkTags } from '@agentdeck/shared';
+import type { AgentInfo, Attachment, ChatMessage, ToolRecord } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import type { StreamDraft, ToolCard } from '../../store/appStore';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
@@ -108,7 +109,10 @@ function MessageBubble({ msg, agent, accent }: { msg: ChatMessage; agent?: Agent
     );
   }
 
-  // assistant
+  // assistant — older messages may still carry inline <think> tags in the text
+  const split = splitThinkTags(msg.text);
+  const answer = split.text.trim();
+  const thinking = [msg.thinking?.trim(), split.thinking.trim()].filter(Boolean).join('\n\n');
   return (
     <div className="msg-in flex flex-col items-start">
       {msg.attachments.length > 0 && (
@@ -128,11 +132,11 @@ function MessageBubble({ msg, agent, accent }: { msg: ChatMessage; agent?: Agent
           </span>
           {msg.model && <span className="font-mono text-[10.5px] text-dim/75">{msg.model}</span>}
           <span className="ml-auto">{clock(msg.ts)}</span>
+          {answer && <CopyButton text={answer} />}
         </div>
-        {msg.thinking && msg.thinking.trim() && (
-          <ThinkingBlock thinking={msg.thinking} accent={accent} />
-        )}
-        <MarkdownView text={msg.text} />
+        {msg.tools && msg.tools.length > 0 && <ToolGroup tools={msg.tools} />}
+        {thinking && <ThinkingBlock thinking={thinking} accent={accent} />}
+        {answer && <MarkdownView text={answer} />}
         {msg.usage && <UsageLine usage={msg.usage} />}
       </div>
     </div>
@@ -184,6 +188,57 @@ function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?:
 }
 
 /* -------------------------------------------------------------- fragments */
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      aria-label="Copy answer"
+      className="press -my-1 -mr-1 flex h-6 w-6 items-center justify-center rounded-md text-dim/70"
+    >
+      {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+    </button>
+  );
+}
+
+/** Tool calls of a finished turn — one collapsed line, expandable to the individual calls. */
+function ToolGroup({ tools }: { tools: ToolRecord[] }) {
+  const [open, setOpen] = useState(false);
+  const failed = tools.filter((t) => !t.ok).length;
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="press tap flex items-center gap-1.5 rounded-lg px-1 py-1 text-[11.5px] text-dim"
+      >
+        <Wrench size={12} aria-hidden />
+        {tools.length} tool call{tools.length === 1 ? '' : 's'}
+        {failed > 0 && <span className="text-danger">· {failed} failed</span>}
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-1">
+          {tools.map((t, i) => (
+            <ToolRow key={i} card={{ id: i, tool: t.tool, state: t.ok ? 'done' : 'error', summary: t.summary }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Collapsible reasoning ("thinking") — kept strictly separate from the answer. */
 function ThinkingBlock({ thinking, accent, streaming }: { thinking: string; accent: string; streaming?: boolean }) {
