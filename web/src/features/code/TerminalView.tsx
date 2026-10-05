@@ -126,20 +126,32 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
 
     const store = useAppStore.getState();
     let live = false;
+    let disposed = false;
     const pending: string[] = [];
 
-    // Initial repaint from the server's serialized screen; chunks that race
-    // the fetch are queued and replayed after it.
-    void api
-      .terminal(id)
-      .then(({ replay }) => {
-        if (replay) term.write(replay);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        live = true;
-        for (const chunk of pending.splice(0)) term.write(chunk);
-      });
+    // Repaint from the server's serialized screen; chunks that race the fetch
+    // are queued and replayed after it. Done at mount and after every socket
+    // reconnect — output sent while the connection was down never arrived.
+    const repaint = (reset: boolean) => {
+      live = false;
+      void api
+        .terminal(id)
+        .then(({ replay }) => {
+          if (disposed) return;
+          if (reset) term.reset();
+          if (replay) term.write(replay);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (disposed) return;
+          live = true;
+          for (const chunk of pending.splice(0)) term.write(chunk);
+        });
+    };
+    repaint(false);
+    const unsubscribeReconnect = useAppStore.subscribe((st, prev) => {
+      if (st.socketEpoch !== prev.socketEpoch) repaint(true);
+    });
 
     const unsubscribe = store.subscribeTerminal(
       id,
@@ -187,6 +199,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       observer.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
       input.dispose();
+      disposed = true;
+      unsubscribeReconnect();
       unsubscribe();
       disposeTouchScroll();
       mouse.dispose();

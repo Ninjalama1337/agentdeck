@@ -294,7 +294,9 @@ textarea.field {
   }
 }
 
-.caret {
+.caret,
+.md-live > .md > p:last-child::after,
+.md-live > .md > :is(ul, ol):last-child > li:last-child::after {
   display: inline-block;
   width: 9px;
   height: 1.05em;
@@ -303,6 +305,17 @@ textarea.field {
   background: var(--ad-agent, var(--ad-accent));
   border-radius: 2px;
   animation: blink 1.05s steps(1) infinite;
+}
+
+/* Answer being written: the caret sits at the end of the text, where the next
+   word appears — the separate one is only needed after a block that cannot
+   carry it (code, table, heading). */
+.md-live > .md > p:last-child::after,
+.md-live > .md > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+}
+.md-live:has(> .md > p:last-child, > .md > :is(ul, ol):last-child) > .caret {
+  display: none;
 }
 
 @keyframes blink {
@@ -673,6 +686,8 @@ textarea.field {
   .modal-card,
   .modal-backdrop,
   .caret,
+  .md-live > .md > p:last-child::after,
+  .md-live > .md > :is(ul, ol):last-child > li:last-child::after,
   .pulse-dot,
   .mic-ring,
   .attention-dot,

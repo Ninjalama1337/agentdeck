@@ -52,7 +52,10 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   oder verwerfen, KI-Commit-Message aus dem Diff, Commit & Push, Pull/Fetch,
   Branches wechseln/anlegen, Historie mit Commit-Diffs, GitHub-Clone.
 - **Chat-Steuerung aller Agents** — Turns senden, Live-Streaming der Antwort
-  (Text, Tool-Nutzung, Token-/Kosten-Verbrauch), Unterbrechen per Tap.
+  (Text, Tool-Nutzung, Token-/Kosten-Verbrauch), Unterbrechen per Tap. Wer
+  die App mitten in einer Antwort wieder öffnet, sieht den bisherigen Stand
+  und liest live weiter; ungesendeter Text und Anhänge bleiben pro Session
+  erhalten.
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit
   Presets pro Agent.
 - **Projekte & GitHub** — Projekte registrieren, aus GitHub klonen (`gh`),

@@ -252,7 +252,7 @@ function SignInPanel({ job }: { job: AdminJob }) {
 /** Live console: mono pre on a dark surface, auto-scrolls only while the user
  *  sits at the bottom, capped client-side to the newest 500 lines. */
 function JobConsole({ job }: { job: AdminJob }) {
-  const preRef = useStickyScroll<HTMLPreElement>();
+  const { ref: preRef } = useStickyScroll<HTMLPreElement>();
   const active = isActive(job);
   const lines = job.output.length > 500 ? job.output.slice(-500) : job.output;
 

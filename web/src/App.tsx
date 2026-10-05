@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAppStore } from './store/appStore';
 import { usePrefs } from './store/prefs';
@@ -13,16 +13,44 @@ import { PairScreen } from './features/pairing/PairScreen';
 import { HomeScreen } from './features/home/HomeScreen';
 import { ChatScreen } from './features/chat/ChatScreen';
 import { TeamScreen } from './features/chat/TeamScreen';
-import { CodeScreen } from './features/code/CodeScreen';
-import { FilesScreen } from './features/files/FilesScreen';
-import { GitScreen } from './features/git/GitScreen';
 import { getApiBase } from './api/client';
 import { installExternalLinkHandler } from './util/openExternal';
 import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications, syncActionCredentials } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
-import { SettingsScreen } from './features/settings/SettingsScreen';
 import { UsageSheet } from './features/settings/UsageSheet';
 import { useUsageTracking } from './hooks/useUsageTracking';
+import { Spinner } from './components/ui/Spinner';
+
+// Home and chat are in the first download; the heavier tabs (terminal
+// emulator, git, files, settings) come as their own chunks, so the app is on
+// screen sooner. They are fetched right after start, before anyone taps them.
+const screenChunks = {
+  code: () => import('./features/code/CodeScreen'),
+  files: () => import('./features/files/FilesScreen'),
+  git: () => import('./features/git/GitScreen'),
+  settings: () => import('./features/settings/SettingsScreen'),
+};
+
+/** A chunk can only be missing when the server was updated under an open tab: load the current build once. */
+function loadScreen<T>(load: () => Promise<T>): Promise<T> {
+  return load().catch((err: unknown) => {
+    const KEY = 'agentdeck:chunk-reload';
+    try {
+      if (Date.now() - Number(sessionStorage.getItem(KEY) ?? 0) > 60_000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+      }
+    } catch {
+      /* no session storage — fall through to the error */
+    }
+    throw err;
+  });
+}
+
+const CodeScreen = lazy(() => loadScreen(screenChunks.code).then((m) => ({ default: m.CodeScreen })));
+const FilesScreen = lazy(() => loadScreen(screenChunks.files).then((m) => ({ default: m.FilesScreen })));
+const GitScreen = lazy(() => loadScreen(screenChunks.git).then((m) => ({ default: m.GitScreen })));
+const SettingsScreen = lazy(() => loadScreen(screenChunks.settings).then((m) => ({ default: m.SettingsScreen })));
 
 /** Consume an image handed over by the PWA share_target (stashed in Cache API by sw.ts). */
 async function consumeSharedImage(): Promise<File | null> {
@@ -76,6 +104,15 @@ export default function App() {
 
   // Usage button: follow the agent in use, refresh every minute.
   useUsageTracking();
+
+  // Warm the other tabs once the first screen is up.
+  useEffect(() => {
+    if (!booted) return;
+    const timer = window.setTimeout(() => {
+      for (const load of Object.values(screenChunks)) void load().catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [booted]);
 
   // APK: alert channel + permission prompt, once this device is paired.
   useEffect(() => {
@@ -253,13 +290,21 @@ export default function App() {
             route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
           ].join(' ')}
         >
-          {route.name === 'home' && <HomeScreen />}
-          {route.name === 'chat' && <ChatScreen />}
-          {route.name === 'code' && <CodeScreen />}
-          {route.name === 'files' && <FilesScreen />}
-          {route.name === 'git' && <GitScreen />}
-          {route.name === 'settings' && <SettingsScreen />}
-          {route.name === 'team' && <TeamScreen runId={route.runId} />}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-dim">
+                <Spinner />
+              </div>
+            }
+          >
+            {route.name === 'home' && <HomeScreen />}
+            {route.name === 'chat' && <ChatScreen />}
+            {route.name === 'code' && <CodeScreen />}
+            {route.name === 'files' && <FilesScreen />}
+            {route.name === 'git' && <GitScreen />}
+            {route.name === 'settings' && <SettingsScreen />}
+            {route.name === 'team' && <TeamScreen runId={route.runId} />}
+          </Suspense>
         </main>
       </div>
       <TabBar />

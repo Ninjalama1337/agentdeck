@@ -1,76 +1,112 @@
-import { useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Pencil, RotateCcw, Wrench } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, ArrowDown, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, ImageOff, Pencil, RotateCcw, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { splitThinkTags } from '@agentdeck/shared';
 import type { AgentInfo, Attachment, ChatMessage, ToolRecord } from '@agentdeck/shared';
-import { useAppStore } from '../../store/appStore';
+import { errorMessage, useAppStore } from '../../store/appStore';
 import type { StreamDraft, ToolCard } from '../../store/appStore';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
+import { useAttachmentUrl } from '../../hooks/useAttachmentUrl';
 import { MarkdownView } from '../../components/ui/Markdown';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { useChatActions } from '../../store/chatActions';
 import { Spinner } from '../../components/ui/Spinner';
 import { clock, cost, tokens } from '../../util/format';
+import { parseAttachmentUrl } from '../../util/attachments';
+import { downloadFile, isShareCancel } from '../../util/download';
+
+const EMPTY_DRAFT: StreamDraft = { text: '', tools: [] };
+
+function draftHasContent(draft: StreamDraft | undefined): boolean {
+  return draft !== undefined && (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '');
+}
 
 export function MessageList({
+  sessionId,
   messages,
-  draft,
   agent,
   loading,
   running,
 }: {
+  sessionId: string;
   messages: ChatMessage[] | undefined;
-  draft: StreamDraft | undefined;
   agent: AgentInfo | undefined;
   loading: boolean;
   running: boolean;
 }) {
-  const scrollRef = useStickyScroll<HTMLDivElement>();
+  const { ref: scrollRef, contentRef, atBottom, unseen, scrollToBottom } = useStickyScroll<HTMLDivElement>();
   const accent = agent?.accentColor ?? '#7C5CFF';
-
-  const hasDraft =
-    draft !== undefined && (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '');
+  // Only whether there is a live answer — its text is read by LiveAnswer, so
+  // the history does not re-render with every streamed word.
+  const hasDraft = useAppStore((s) => draftHasContent(s.drafts[sessionId]));
   // While a run is active the bubble is always there — even before the first token arrives.
   const showBubble = hasDraft || running;
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
-      {loading && (
-        <div className="flex justify-center py-8">
-          <Spinner />
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} data-chat-scroll className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
+        <div ref={contentRef}>
+          {loading && (
+            <div className="flex justify-center py-8">
+              <Spinner />
+            </div>
+          )}
+
+          {!loading && (!messages || messages.length === 0) && !showBubble && (
+            <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
+              <AgentAvatar agent={agent} agentId={agent?.id ?? 'claude'} size="lg" glow={false} />
+              <p className="mt-4 text-[15px] font-semibold">Ready when you are</p>
+              <p className="mt-1.5 max-w-[30ch] text-[13px] leading-relaxed text-dim">
+                Send a message, attach a screenshot, or start a team run from the header.
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3">
+            {(messages ?? []).map((msg, i, all) => {
+              // Regenerate = resend the prompt of the final exchange; only offered on the last answer.
+              const lastUser = i === all.length - 1 && msg.role === 'assistant' && !running
+                ? [...all].reverse().find((m) => m.role === 'user')
+                : undefined;
+              return <MessageBubble key={msg.id} msg={msg} agent={agent} accent={accent} regenerateFrom={lastUser} />;
+            })}
+
+            {showBubble && <LiveAnswer sessionId={sessionId} agent={agent} accent={accent} />}
+          </div>
         </div>
-      )}
-
-      {!loading && (!messages || messages.length === 0) && !showBubble && (
-        <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
-          <AgentAvatar agent={agent} agentId={agent?.id ?? 'claude'} size="lg" glow={false} />
-          <p className="mt-4 text-[15px] font-semibold">Ready when you are</p>
-          <p className="mt-1.5 max-w-[30ch] text-[13px] leading-relaxed text-dim">
-            Send a message, attach a screenshot, or start a team run from the header.
-          </p>
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3">
-        {(messages ?? []).map((msg, i, all) => {
-          // Regenerate = resend the prompt of the final exchange; only offered on the last answer.
-          const lastUser = i === all.length - 1 && msg.role === 'assistant' && !running
-            ? [...all].reverse().find((m) => m.role === 'user')
-            : undefined;
-          return <MessageBubble key={msg.id} msg={msg} agent={agent} accent={accent} regenerateFrom={lastUser} />;
-        })}
-
-        {showBubble && (
-          <StreamingBubble draft={draft ?? { text: '', tools: [] }} agent={agent} accent={accent} />
-        )}
       </div>
+
+      {!atBottom && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label={unseen ? 'New messages — jump to latest' : 'Jump to latest'}
+          className="press absolute bottom-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-line bg-[#1a1f2c] text-ink shadow-lg"
+        >
+          <ArrowDown size={18} />
+          {unseen && (
+            <span
+              aria-hidden
+              className="pulse-dot absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full"
+              style={{ background: accent }}
+            />
+          )}
+        </button>
+      )}
     </div>
   );
 }
 
 /* ---------------------------------------------------------------- bubbles */
 
-function MessageBubble({
+/** The answer being written — subscribes to its own draft. */
+function LiveAnswer({ sessionId, agent, accent }: { sessionId: string; agent?: AgentInfo; accent: string }) {
+  const draft = useAppStore((s) => s.drafts[sessionId]);
+  return <StreamingBubble draft={draft ?? EMPTY_DRAFT} agent={agent} accent={accent} />;
+}
+
+/** Memoized: a finished message only re-renders when the message itself changes. */
+const MessageBubble = memo(function MessageBubble({
   msg,
   agent,
   accent,
@@ -81,7 +117,6 @@ function MessageBubble({
   accent: string;
   regenerateFrom?: ChatMessage;
 }) {
-  const setLightbox = useAppStore((s) => s.setLightbox);
   const sendTurn = useAppStore((s) => s.sendTurn);
 
   if (msg.role === 'system') {
@@ -110,7 +145,7 @@ function MessageBubble({
         {msg.attachments.length > 0 && (
           <div className="mb-1.5 flex max-w-[85%] flex-wrap justify-end gap-1.5">
             {msg.attachments.map((att) => (
-              <AttachmentThumb key={att.id} att={att} onOpen={() => setLightbox({ url: att.url, name: att.name })} />
+              <AttachmentThumb key={att.id} att={att} />
             ))}
           </div>
         )}
@@ -151,7 +186,7 @@ function MessageBubble({
       {msg.attachments.length > 0 && (
         <div className="mb-1.5 flex max-w-[85%] flex-wrap gap-1.5">
           {msg.attachments.map((att) => (
-            <AttachmentThumb key={att.id} att={att} onOpen={() => setLightbox({ url: att.url, name: att.name })} />
+            <AttachmentThumb key={att.id} att={att} />
           ))}
         </div>
       )}
@@ -183,9 +218,35 @@ function MessageBubble({
       </div>
     </div>
   );
+});
+
+/**
+ * Text as it should be rendered right now. Parsing Markdown costs more the
+ * longer the answer gets, so a long one is re-rendered at a slower beat
+ * instead of with every bundle of tokens.
+ */
+function usePacedText(text: string): string {
+  const interval = text.length < 4_000 ? 0 : text.length < 20_000 ? 120 : 300;
+  const [shown, setShown] = useState(text);
+  const shownAt = useRef(0);
+  // Short answers follow directly; `shown` tags along so the switch to the slower beat starts from the current text.
+  if (interval === 0 && shown !== text) setShown(text);
+  useEffect(() => {
+    if (interval === 0) return;
+    const timer = window.setTimeout(
+      () => {
+        shownAt.current = performance.now();
+        setShown(text);
+      },
+      Math.max(0, shownAt.current + interval - performance.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [text, interval]);
+  return interval === 0 ? text : shown;
 }
 
 function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?: AgentInfo; accent: string }) {
+  const text = usePacedText(draft.text);
   const phase = draft.text
     ? 'writing…'
     : draft.tools.some((t) => t.state === 'running')
@@ -197,7 +258,7 @@ function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?:
     <div className="msg-in flex flex-col items-start">
       <div
         className="glass max-w-[92%] overflow-hidden py-2.5 pl-3.5 pr-3"
-        style={{ borderLeft: `3px solid ${accent}` }}
+        style={{ borderLeft: `3px solid ${accent}`, '--ad-agent': accent } as React.CSSProperties}
       >
         <div className="mb-1 flex items-center gap-2 text-[11px] text-dim">
           <span className="font-medium" style={{ color: accent }}>
@@ -221,9 +282,9 @@ function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?:
           <ThinkingBlock thinking={draft.thinking ?? ''} accent={accent} streaming />
         )}
 
-        {draft.text ? (
-          <div className="min-w-0">
-            <MarkdownView text={draft.text} />
+        {text ? (
+          <div className="md-live min-w-0">
+            <MarkdownView text={text} />
             <span className="caret" aria-hidden />
           </div>
         ) : (
@@ -353,24 +414,68 @@ function ToolRow({ card }: { card: ToolCard }) {
   );
 }
 
-function AttachmentThumb({ att, onOpen }: { att: Attachment; onOpen: () => void }) {
-  if (att.kind === 'image') {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`View ${att.name}`}
-        className="relative h-14 w-14 overflow-hidden rounded-xl border border-line active:opacity-80"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={att.url} alt={att.name} className="h-full w-full object-cover" loading="lazy" />
-      </button>
+function AttachmentThumb({ att }: { att: Attachment }) {
+  return att.kind === 'image' ? <ImageThumb att={att} /> : <FileChip att={att} />;
+}
+
+/** Image attachment: loaded with the device login once it scrolls near the screen. */
+function ImageThumb({ att }: { att: Attachment }) {
+  const setLightbox = useAppStore((s) => s.setLightbox);
+  const box = useRef<HTMLButtonElement | null>(null);
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const el = box.current;
+    if (near || !el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setNear(true);
+      },
+      // Measured against the chat list, so the margin reaches into what is scrolled out of view.
+      { root: el.closest('[data-chat-scroll]'), rootMargin: '400px' },
     );
-  }
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near]);
+  const { url, failed } = useAttachmentUrl(near ? att : undefined);
+
+  return (
+    <button
+      ref={box}
+      type="button"
+      disabled={!url}
+      onClick={() => url && setLightbox({ url, name: att.name })}
+      aria-label={`View ${att.name}`}
+      className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-line bg-white/[0.05] active:opacity-80"
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={att.name} className="h-full w-full object-cover" />
+      ) : failed ? (
+        <ImageOff size={16} className="text-dim" aria-label="Image unavailable" />
+      ) : (
+        <Spinner size={14} className="text-dim" />
+      )}
+    </button>
+  );
+}
+
+/** Any other attachment: a tap saves it to the device. */
+function FileChip({ att }: { att: Attachment }) {
+  const toast = useAppStore((s) => s.toast);
+  const save = async () => {
+    const target = parseAttachmentUrl(att.url);
+    if (!target) return;
+    try {
+      const via = await downloadFile(target.projectId, target.path, att.name, () => toast('info', `Downloading ${att.name}…`));
+      if (via === 'saved') toast('info', `Saved ${att.name} to Downloads`);
+    } catch (err) {
+      if (!isShareCancel(err)) toast('error', errorMessage(err));
+    }
+  };
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={() => void save()}
       className="tap flex max-w-[220px] items-center gap-2 rounded-xl border border-line bg-white/[0.05] px-3 py-2 text-left"
     >
       <FileText size={15} className="shrink-0 text-accent-blue" />

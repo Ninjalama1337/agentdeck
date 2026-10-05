@@ -10,6 +10,10 @@ import { DictationHint, MicButton } from '../../components/MicButton';
 import { useDictation } from '../../hooks/useDictation';
 import { usePrefs } from '../../store/prefs';
 import { useChatActions } from '../../store/chatActions';
+import { loadComposerDraft, saveComposerDraft, type ComposerDraft } from '../../store/composerDrafts';
+import { useAttachmentUrl } from '../../hooks/useAttachmentUrl';
+import { rememberAttachmentUrl } from '../../util/attachments';
+import { prepareImage } from '../../util/imagePrep';
 import { haptic } from '../../util/haptics';
 
 interface PendingAttachment {
@@ -17,6 +21,8 @@ interface PendingAttachment {
   name: string;
   size: number;
   progress: number;
+  /** Blob URL of the picked image — shown at once, before the upload is through. */
+  preview?: string;
   att?: Attachment;
   error?: string;
 }
@@ -30,8 +36,12 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   const takePendingFiles = useAppStore((s) => s.takePendingFiles);
   const projects = useAppStore((s) => s.projects);
 
-  const [text, setText] = useState('');
-  const [atts, setAtts] = useState<PendingAttachment[]>([]);
+  // Unsent input of this session, kept across leaving the chat and app restarts.
+  const [restored] = useState(() => loadComposerDraft(session.id));
+  const [text, setText] = useState(restored.text);
+  const [atts, setAtts] = useState<PendingAttachment[]>(() =>
+    restored.attachments.map((att) => ({ localId: `att-${att.id}`, name: att.name, size: att.size, progress: 1, att })),
+  );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const enterToSend = usePrefs((st) => st.enterToSend);
@@ -50,11 +60,19 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   const canSend = (text.trim().length > 0 || atts.some((a) => a.att)) && !atts.some((a) => !a.att && !a.error);
   const headless = agent?.capabilities.headless === true;
 
+  const draft = useRef<ComposerDraft>(restored);
+  draft.current = { text, attachments: atts.flatMap((a) => (a.att ? [a.att] : [])) };
+  useEffect(() => {
+    const timer = window.setTimeout(() => saveComposerDraft(session.id, draft.current), 300);
+    return () => window.clearTimeout(timer);
+  }, [text, atts, session.id]);
+  useEffect(() => () => saveComposerDraft(session.id, draft.current), [session.id]);
+
   /* PWA share_target handover → pending files queued by App.tsx */
   useEffect(() => {
     if (!agent?.capabilities.headless) return;
     const files = takePendingFiles();
-    if (files.length) void addFiles(files);
+    if (files.length) void addFiles(files, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, agent?.capabilities.headless]);
 
@@ -74,22 +92,38 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   }, [text]);
 
-  async function addFiles(files: File[]) {
-    for (const file of files) {
-      const localId = `att-${Date.now()}-${++localSeq}`;
-      setAtts((prev) => [...prev, { localId, name: file.name, size: file.size, progress: 0 }]);
-      try {
-        const att = await uploadFile(projectId, file, 'uploads', (p) =>
-          setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, progress: p } : a))),
-          session.id,
-        );
-        setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, att, progress: 1 } : a)));
-      } catch (err) {
-        setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, error: errorMessage(err) } : a)));
-        toast('error', `Upload failed: ${file.name}`);
-      }
-    }
+  /** Uploads side by side. `shrink`: photos are scaled down first — files picked as files go up untouched. */
+  async function addFiles(files: File[], shrink: boolean) {
+    await Promise.all(
+      files.map(async (picked) => {
+        const localId = `att-${Date.now()}-${++localSeq}`;
+        const preview = picked.type.startsWith('image/') ? URL.createObjectURL(picked) : undefined;
+        setAtts((prev) => [...prev, { localId, name: picked.name, size: picked.size, progress: 0, preview }]);
+        try {
+          const file = shrink ? await prepareImage(picked) : picked;
+          const att = await uploadFile(
+            projectId,
+            file,
+            'uploads',
+            (p) => setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, progress: p } : a))),
+            session.id,
+          );
+          // The sent message shows this same picture — no need to download our own upload.
+          if (preview) rememberAttachmentUrl(att.id, preview);
+          setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, att, progress: 1 } : a)));
+        } catch (err) {
+          setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, error: errorMessage(err) } : a)));
+          toast('error', `Upload failed: ${picked.name}`);
+        }
+      }),
+    );
   }
+
+  const removeAttachment = (item: PendingAttachment) => {
+    // Once uploaded, the preview belongs to the attachment cache.
+    if (item.preview && !item.att) URL.revokeObjectURL(item.preview);
+    setAtts((prev) => prev.filter((x) => x.localId !== item.localId));
+  };
 
   /* BridgeMind "Enhance prompt": transient agent run that rewrites the draft
    * into a crisp instruction — nothing lands in the session history. */
@@ -119,14 +153,18 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
     if (dictation.state !== 'idle') dictation.stop();
     haptic('light');
     const payloadText = text;
+    const payloadAtts = atts;
     const uploaded = atts.filter((a) => a.att).map((a) => a.att as Attachment);
     setText('');
     setAtts([]);
+    // At once, not with the next save: a restart must not bring the sent message back into the input.
+    saveComposerDraft(session.id, { text: '', attachments: [] });
     try {
       await sendTurn(session.id, payloadText.trim(), uploaded, session.model, session.thinkingEffort);
     } catch {
-      // restore so the user can retry
-      setText(payloadText);
+      // restore so the user can retry — unless something new was typed meanwhile
+      setText((current) => current || payloadText);
+      setAtts((current) => (current.length ? current : payloadAtts));
     }
   };
 
@@ -160,19 +198,10 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
       <DictationHint dictation={dictation} />
       {/* attachment strip */}
       {atts.length > 0 && (
-        <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto px-0.5">
+        <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto px-0.5 pr-2 pt-2">
           {atts.map((a) => (
             <div key={a.localId} className="relative shrink-0">
-              {a.att && a.att.kind === 'image' ? (
-                <div className="h-14 w-14 overflow-hidden rounded-xl border border-line">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={a.att.url} alt={a.att.name} className="h-full w-full object-cover" />
-                </div>
-              ) : (
-                <div className="flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-line bg-white/[0.05] px-3">
-                  <span className="truncate text-[11.5px]">{a.name}</span>
-                </div>
-              )}
+              <PendingThumb item={a} />
               {!a.att && !a.error && (
                 <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/55 text-[11px] font-medium">
                   {Math.round(a.progress * 100)}%
@@ -186,7 +215,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
               <button
                 type="button"
                 aria-label={`Remove ${a.name}`}
-                onClick={() => setAtts((prev) => prev.filter((x) => x.localId !== a.localId))}
+                onClick={() => removeAttachment(a)}
                 className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-[#1a1f2c] text-dim active:text-ink"
               >
                 <X size={12} />
@@ -220,7 +249,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
           placeholder={running ? 'Agent is working…' : `Message ${agent?.label ?? 'agent'} in ${projectName}…`}
           aria-label="Message"
           enterKeyHint={enterToSend ? 'send' : 'enter'}
-          className="max-h-[132px] min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15.5px] leading-snug outline-none placeholder:text-dim/70"
+          className="max-h-[132px] min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15.5px] leading-snug outline-none placeholder:truncate placeholder:text-dim/70"
         />
         {headless && text.trim().length > 0 && (
           <button
@@ -311,7 +340,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (files.length) void addFiles(files);
+          if (files.length) void addFiles(files, true);
         }}
       />
       <input
@@ -323,7 +352,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (files.length) void addFiles(files);
+          if (files.length) void addFiles(files, true);
         }}
       />
       <input
@@ -334,9 +363,29 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (files.length) void addFiles(files);
+          if (files.length) void addFiles(files, false);
         }}
       />
+    </div>
+  );
+}
+
+/** Thumbnail in the attachment strip: the local preview, or — for a restored draft — the uploaded image. */
+function PendingThumb({ item }: { item: PendingAttachment }) {
+  const isImage = item.preview !== undefined || item.att?.kind === 'image';
+  const fetched = useAttachmentUrl(isImage && !item.preview ? item.att : undefined);
+  const src = item.preview ?? fetched.url;
+  if (!isImage) {
+    return (
+      <div className="flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-line bg-white/[0.05] px-3">
+        <span className="truncate text-[11.5px]">{item.name}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="h-14 w-14 overflow-hidden rounded-xl border border-line bg-white/[0.05]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {src && <img src={src} alt={item.name} className="h-full w-full object-cover" />}
     </div>
   );
 }
