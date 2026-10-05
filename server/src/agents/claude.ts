@@ -1,7 +1,8 @@
 /**
  * Claude Code adapter — fully headless via stream-json (facts verified in
  * CONTRACT.md): `claude -p --input-format stream-json --output-format
- * stream-json --verbose`, `--model`, `--permission-mode`, `--resume`.
+ * stream-json --verbose --include-partial-messages`, `--model`,
+ * `--permission-mode`, `--resume`.
  */
 import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset } from '@agentdeck/shared';
 import { execa } from 'execa';
@@ -39,9 +40,18 @@ interface ClaudeStreamLine {
     output_tokens?: number;
     total_cost_usd?: number;
   };
+  /** Set on everything a sub-agent (Task tool) produced. */
+  parent_tool_use_id?: string | null;
   message?: {
+    id?: string;
     role?: string;
     content?: unknown;
+  };
+  /** `stream_event` lines (--include-partial-messages): one raw API stream event. */
+  event?: {
+    type?: string;
+    message?: { id?: string };
+    delta?: { type?: string; text?: string; thinking?: string };
   };
 }
 
@@ -100,6 +110,8 @@ export class ClaudeAdapter implements AgentAdapter {
     }
 
     args.push('-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose');
+    // Text arrives as it is written instead of one block per finished message.
+    args.push('--include-partial-messages');
     if (model) args.push('--model', model);
     args.push('--permission-mode', PERMISSION_MODE_MAP[ctx.permissionMode] ?? 'default');
     const effort = effortArg(ctx.thinkingEffort);
@@ -134,6 +146,11 @@ export class ClaudeAdapter implements AgentAdapter {
 export function createClaudeStreamParser() {
   const toolNames = new Map<string, string>();
   let sawTextDelta = false;
+  /** Message whose blocks are arriving as partial chunks right now. */
+  let streamingId: string | undefined;
+  /** Messages whose text / thinking already went out as chunks — skipped when the finished block follows. */
+  const streamedText = new Set<string>();
+  const streamedThinking = new Set<string>();
 
   function parse(line: string, emit: (event: AgentEvent) => void): void {
     const parsed = safeJson(line) as ClaudeStreamLine | undefined;
@@ -149,14 +166,38 @@ export function createClaudeStreamParser() {
         }
         return;
       }
+      case 'stream_event': {
+        // Sub-agents running in parallel interleave their chunks — their text
+        // comes whole with the 'assistant' line instead.
+        if (parsed.parent_tool_use_id) return;
+        const ev = parsed.event;
+        if (ev?.type === 'message_start') {
+          streamingId = ev.message?.id;
+        } else if (ev?.type === 'content_block_delta' && streamingId) {
+          if (ev.delta?.type === 'text_delta' && ev.delta.text) {
+            sawTextDelta = true;
+            streamedText.add(streamingId);
+            emit({ type: 'text-delta', text: ev.delta.text });
+          } else if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
+            streamedThinking.add(streamingId);
+            emit({ type: 'thinking-delta', text: ev.delta.thinking });
+          }
+        }
+        return;
+      }
       case 'assistant': {
         const content = parsed.message?.content;
         if (!Array.isArray(content)) return;
+        const msgId = parsed.message?.id;
+        const textSent = msgId !== undefined && streamedText.has(msgId);
+        const thinkingSent = msgId !== undefined && streamedThinking.has(msgId);
         for (const block of content as Record<string, unknown>[]) {
           if (block.type === 'text' && typeof block.text === 'string' && block.text) {
+            if (textSent) continue;
             sawTextDelta = true;
             emit({ type: 'text-delta', text: block.text });
           } else if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+            if (thinkingSent) continue;
             // Reasoning stays strictly separate from the answer text.
             emit({ type: 'thinking-delta', text: block.thinking });
           } else if (block.type === 'tool_use') {

@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import type { Attachment, ChatMessage, Project, Session, ThinkingEffort } from '@agentdeck/shared';
+import type { Attachment, ChatMessage, Project, Session, SessionDetailResponse, ThinkingEffort } from '@agentdeck/shared';
 import { z } from 'zod';
 import { execa } from 'execa';
 import { httpError, notFound } from '../http/errors.js';
@@ -111,8 +111,17 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
 
   fastify.get('/sessions/:id', async (req) => {
     const session = getSessionOr404(deps, (req.params as { id: string }).id);
-    const messages = await deps.store.getMessages(session.id);
-    return { session, messages };
+    const { after } = z.object({ after: z.string().optional() }).parse(req.query ?? {});
+    const all = await deps.store.getMessages(session.id);
+    // `after`: a client that already holds the history asks only for what is new.
+    const known = after ? all.findIndex((m) => m.id === after) : -1;
+    const draft = deps.manager.draftOf(session.id) ?? null;
+    return {
+      session,
+      messages: known >= 0 ? all.slice(known + 1) : all,
+      draft,
+      ...(known >= 0 ? { partial: true } : {}),
+    } satisfies SessionDetailResponse;
   });
 
   fastify.patch('/sessions/:id', async (req) => {

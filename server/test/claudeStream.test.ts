@@ -119,6 +119,74 @@ describe('Claude Code stream-json parsing', () => {
     });
   });
 
+  it('streams partial chunks and does not repeat the finished block', () => {
+    // Order as recorded from `claude --include-partial-messages` (2.1.x).
+    const chunk = (event: unknown, parent: string | null = null) =>
+      JSON.stringify({ type: 'stream_event', event, session_id: 'c123', parent_tool_use_id: parent });
+    const lines = [
+      chunk({ type: 'message_start', message: { id: 'msg_1' } }),
+      chunk({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+      chunk({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '' } }),
+      chunk({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Check the file.' } }),
+      chunk({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } }),
+      JSON.stringify({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'thinking', thinking: 'Check the file.' }] } }),
+      chunk({ type: 'content_block_stop', index: 0 }),
+      chunk({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: {} } }),
+      chunk({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"command": "echo hi"}' } }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { id: 'msg_1', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } }] },
+      }),
+      chunk({ type: 'content_block_stop', index: 1 }),
+      chunk({ type: 'message_delta', delta: { stop_reason: 'tool_use' } }),
+      chunk({ type: 'message_stop' }),
+      JSON.stringify({ type: 'rate_limit_event' }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'hi' }] } }),
+      chunk({ type: 'message_start', message: { id: 'msg_2' } }),
+      chunk({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+      chunk({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'It' } }),
+      chunk({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' printed "hi".' } }),
+      JSON.stringify({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: 'It printed "hi".' }] } }),
+      chunk({ type: 'content_block_stop', index: 0 }),
+      chunk({ type: 'message_stop' }),
+      JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'It printed "hi".' }),
+    ];
+    const plan = new ClaudeAdapter(cfg).buildRun({ session, project, text: 'x', attachments: [], permissionMode: 'default' });
+    expect(plan.args).toContain('--include-partial-messages');
+    const events: AgentEvent[] = [];
+    for (const line of lines) plan.parse(line, (e) => events.push(e));
+
+    expect(events.filter((e) => e.type === 'text-delta')).toEqual([
+      { type: 'text-delta', text: 'It' },
+      { type: 'text-delta', text: ' printed "hi".' },
+    ]);
+    expect(events.filter((e) => e.type === 'thinking-delta')).toEqual([{ type: 'thinking-delta', text: 'Check the file.' }]);
+    expect(events.filter((e) => e.type === 'tool-use')).toHaveLength(1);
+    expect(events.find((e) => e.type === 'tool-result')).toMatchObject({ tool: 'Bash', ok: true });
+    // Chunks without text (block starts/stops, tool input, signatures) are not passed on as noise.
+    expect(events.filter((e) => e.type === 'raw')).toHaveLength(1); // rate_limit_event
+  });
+
+  it('takes sub-agent text whole — their chunks would interleave', () => {
+    const plan = new ClaudeAdapter(cfg).buildRun({ session, project, text: 'x', attachments: [], permissionMode: 'default' });
+    const events: AgentEvent[] = [];
+    const lines = [
+      JSON.stringify({ type: 'stream_event', parent_tool_use_id: 'toolu_task', event: { type: 'message_start', message: { id: 'msg_sub' } } }),
+      JSON.stringify({
+        type: 'stream_event',
+        parent_tool_use_id: 'toolu_task',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Sub' } },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_task',
+        message: { id: 'msg_sub', content: [{ type: 'text', text: 'Sub-agent report.' }] },
+      }),
+    ];
+    for (const line of lines) plan.parse(line, (e) => events.push(e));
+    expect(events).toEqual([{ type: 'text-delta', text: 'Sub-agent report.' }]);
+  });
+
   it('captures the external session id for resume', () => {
     const { externalId } = feed(new ClaudeAdapter(cfg));
     expect(externalId).toBe('c123');

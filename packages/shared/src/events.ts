@@ -39,8 +39,11 @@ export type AgentEvent =
   | { type: 'raw'; line: string };
 
 export interface ServerToClientEvents {
-  /** Live normalized stream for a session. */
-  'session:event': (payload: { sessionId: string; ts: number; event: AgentEvent }) => void;
+  /**
+   * Live normalized stream for a session. Events of a run carry its id and a
+   * counter, matching `SessionDraft.run`/`seq` of GET /api/sessions/:id.
+   */
+  'session:event': (payload: { sessionId: string; ts: number; event: AgentEvent; run?: string; seq?: number }) => void;
   /** Session metadata changed (status, title, model, ...). */
   'session:update': (payload: { session: Session }) => void;
   'project:update': (payload: { project: Project }) => void;

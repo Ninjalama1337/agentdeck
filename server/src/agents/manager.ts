@@ -4,8 +4,9 @@
  * - guards (single active run per session, headless capability)
  * - spawns adapter-built plans via execa (cwd = project path)
  * - splits stdout into lines → adapter parser → normalized AgentEvents
- * - broadcasts live events, accumulates text deltas into one assistant
- *   ChatMessage flushed at the end (tool events are ephemeral)
+ * - broadcasts live events (numbered per run, text deltas bundled), accumulates
+ *   text deltas into one assistant ChatMessage flushed at the end
+ * - hands out the answer so far (draftOf) to clients that join mid-run
  * - kills runs on interrupt / maxRunMs (SIGINT → 3s → SIGKILL, process group)
  */
 import fsp from 'node:fs/promises';
@@ -17,6 +18,7 @@ import type {
   MessageUsage,
   Project,
   Session,
+  SessionDraft,
   SessionStatus,
   ThinkPart,
   ToolRecord,
@@ -25,7 +27,7 @@ import type { Config } from '../config.js';
 import type { Logger } from '../logging.js';
 import type { Store } from '../state/store.js';
 import type { AgentService } from './registry.js';
-import { newMessageId } from '../util/ids.js';
+import { newId, newMessageId } from '../util/ids.js';
 import { ensureDir } from '../util/paths.js';
 import { truncate } from './types.js';
 import type { AgentAdapter, RunAttachment, RunPlan } from './types.js';
@@ -38,7 +40,15 @@ export interface TurnOutcome {
   error?: string;
 }
 
-export type SessionEventEmitter = (sessionId: string, event: AgentEvent) => void;
+/** `meta` numbers the events of one run — absent for events outside a run. */
+export type SessionEventEmitter = (
+  sessionId: string,
+  event: AgentEvent,
+  meta?: { run: string; seq: number },
+) => void;
+
+/** Streamed text goes out in bundles this far apart instead of one event per token. */
+const DELTA_FLUSH_MS = 40;
 
 export interface StartTurnOptions {
   session: Session;
@@ -56,6 +66,13 @@ export interface StartTurnOptions {
 export type StartGate = { ok: true } | { ok: false; code: string; message: string };
 
 interface ActiveRun {
+  /** Run id — sent with every event and with the draft snapshot. */
+  id: string;
+  /** Number of events broadcast for this run so far. */
+  seq: number;
+  /** Text / thinking deltas waiting for the next bundle, in order. */
+  pending: ThinkPart[];
+  flushTimer?: NodeJS.Timeout;
   sessionId: string;
   session: Session;
   adapter: AgentAdapter;
@@ -99,6 +116,26 @@ export class AgentManager {
 
   activeSessionIds(): string[] {
     return [...this.active.keys()];
+  }
+
+  /** The answer of the active run so far; undefined when nothing is running. */
+  draftOf(sessionId: string): SessionDraft | undefined {
+    const run = this.active.get(sessionId);
+    if (!run) return undefined;
+    // Waiting deltas go out first, so `seq` covers exactly what the snapshot holds.
+    this.flushDeltas(run);
+    return {
+      run: run.id,
+      seq: run.seq,
+      text: run.textBuf,
+      ...(run.thinkingBuf.trim() ? { thinking: run.thinkingBuf } : {}),
+      tools: run.tools.map((t) => ({
+        tool: t.tool,
+        state: run.openTools.has(t) ? ('running' as const) : t.ok ? ('done' as const) : ('error' as const),
+        ...(t.summary ? { summary: t.summary } : {}),
+      })),
+      ...(run.usage ? { usage: run.usage } : {}),
+    };
   }
 
   /** Synchronous pre-flight used by the REST layer to return proper 409s. */
@@ -195,6 +232,9 @@ export class AgentManager {
     }
 
     const run: ActiveRun = {
+      id: newId('run'),
+      seq: 0,
+      pending: [],
       sessionId: session.id,
       session,
       adapter,
@@ -220,7 +260,7 @@ export class AgentManager {
     run.timer.unref?.();
 
     if (plan.notice) {
-      this.emit(session.id, { type: 'raw', line: `[agentdeck] ${plan.notice}` });
+      this.send(run, { type: 'raw', line: `[agentdeck] ${plan.notice}` });
     }
 
     if (child.stdin && plan.stdinPayloads) {
@@ -252,6 +292,9 @@ export class AgentManager {
       run.stderrTail = (run.stderrTail + errorMessage(err)).slice(-4000);
     }
 
+    // A last line without a newline still counts.
+    if (run.stdoutBuf.trim()) this.handleLine(run, run.stdoutBuf);
+    run.stdoutBuf = '';
     run.exited = true;
     clearTimeout(run.timer);
     this.active.delete(session.id);
@@ -317,6 +360,7 @@ export class AgentManager {
   // -------------------------------------------------------------------------
 
   private onStdoutChunk(run: ActiveRun, chunk: string): void {
+    if (run.exited) return;
     run.stdoutBuf += chunk;
     for (;;) {
       const idx = run.stdoutBuf.indexOf('\n');
@@ -338,7 +382,7 @@ export class AgentManager {
       run.plan.parse(trimmed, (event) => this.onAgentEvent(run, event));
     } catch (err) {
       this.logger.warn({ err, session: run.sessionId }, 'adapter parse error');
-      this.emit(run.sessionId, { type: 'raw', line: trimmed });
+      this.send(run, { type: 'raw', line: trimmed });
     }
   }
 
@@ -349,7 +393,8 @@ export class AgentManager {
         return;
       case 'thinking-delta':
         run.thinkingBuf += event.text;
-        break;
+        this.queueDelta(run, 'thinking', event.text);
+        return;
       case 'tool-use':
         {
           const rec: ToolRecord = { tool: event.tool, ok: true, ...(event.summary ? { summary: event.summary } : {}) };
@@ -386,28 +431,67 @@ export class AgentManager {
       default:
         break; // tool-*/raw/message events are broadcast-only
     }
-    this.emit(run.sessionId, event);
+    this.send(run, event);
   }
 
-  /** Routes split text/thinking parts into the buffers and broadcasts them. */
+  /** Broadcasts one run event. Waiting text goes out first, so the order stays as produced. */
+  private send(run: ActiveRun, event: AgentEvent): void {
+    this.flushDeltas(run);
+    run.seq += 1;
+    this.emit(run.sessionId, event, { run: run.id, seq: run.seq });
+  }
+
+  /** Collects streamed text; it is broadcast in bundles (DELTA_FLUSH_MS) rather than per token. */
+  private queueDelta(run: ActiveRun, kind: ThinkPart['kind'], text: string): void {
+    if (!text) return;
+    const last = run.pending[run.pending.length - 1];
+    if (last && last.kind === kind) last.text += text;
+    else run.pending.push({ kind, text });
+    if (!run.flushTimer) {
+      run.flushTimer = setTimeout(() => this.flushDeltas(run), DELTA_FLUSH_MS);
+      run.flushTimer.unref?.();
+    }
+  }
+
+  private flushDeltas(run: ActiveRun): void {
+    if (run.flushTimer) {
+      clearTimeout(run.flushTimer);
+      run.flushTimer = undefined;
+    }
+    if (run.pending.length === 0) return;
+    const parts = run.pending;
+    run.pending = [];
+    for (const part of parts) {
+      run.seq += 1;
+      this.emit(
+        run.sessionId,
+        { type: part.kind === 'thinking' ? 'thinking-delta' : 'text-delta', text: part.text },
+        { run: run.id, seq: run.seq },
+      );
+    }
+  }
+
+  /** Routes split text/thinking parts into the buffers and queues them for broadcast. */
   private onText(run: ActiveRun, parts: ThinkPart[]): void {
     for (const part of parts) {
       if (part.kind === 'thinking') {
         run.thinkingBuf += part.text;
-        this.emit(run.sessionId, { type: 'thinking-delta', text: part.text });
+        this.queueDelta(run, 'thinking', part.text);
         continue;
       }
       let text = part.text;
       if (run.needSep && run.textBuf.trim() && !/\n\s*$/.test(run.textBuf) && text.trim()) text = '\n\n' + text;
       if (text.trim()) run.needSep = false;
       run.textBuf += text;
-      this.emit(run.sessionId, { type: 'text-delta', text });
+      this.queueDelta(run, 'text', text);
     }
   }
 
   /** Persists buffered text+thinking as one assistant ChatMessage and clears the buffers. */
   private async flush(run: ActiveRun): Promise<string> {
     this.onText(run, run.splitter.end());
+    // Nothing may trail the finished message — this also stops the bundle timer.
+    this.flushDeltas(run);
     const text = run.textBuf;
     const thinking = run.thinkingBuf;
     const tools = run.tools;

@@ -150,6 +150,26 @@ export interface FileEntry {
   modifiedAt?: number;
 }
 
+/** What a run in progress has produced so far — lets a client that joins mid-run show the whole answer. */
+export interface SessionDraft {
+  /** Run id; with `seq` it tells which `session:event`s this snapshot already contains. */
+  run: string;
+  seq: number;
+  text: string;
+  thinking?: string;
+  tools: { tool: string; state: 'running' | 'done' | 'error'; summary?: string }[];
+  usage?: MessageUsage;
+}
+
+export interface SessionDetailResponse {
+  session: Session;
+  messages: ChatMessage[];
+  /** null = no run active. Missing on servers before 0.11.16. */
+  draft?: SessionDraft | null;
+  /** True when `messages` holds only those after the requested `after` id. */
+  partial?: boolean;
+}
+
 export interface SendTurnRequest {
   text: string;
   attachmentIds?: string[];

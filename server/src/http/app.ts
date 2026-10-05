@@ -5,6 +5,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import zlib from 'node:zlib';
 import fastify, {
   type FastifyBaseLogger,
   type FastifyError,
@@ -41,6 +43,10 @@ import { terminalBroadcasts } from '../routes/terminals.js';
 import type { AppDeps } from '../routes/deps.js';
 import { NAME, REPO_ROOT, VERSION } from '../version.js';
 import { UpdateManager } from '../update/manager.js';
+
+const gzip = promisify(zlib.gzip);
+/** Smaller answers are not worth compressing. */
+const GZIP_MIN_CHARS = 1024;
 
 const FALLBACK_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -116,8 +122,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     broadcast: (notification) => broadcast('notification', { notification }),
   });
   await notifications.init();
-  const manager = new AgentManager(config, store, agents, log, (sessionId, event) => {
-    broadcast('session:event', { sessionId, ts: Date.now(), event });
+  const manager = new AgentManager(config, store, agents, log, (sessionId, event, meta) => {
+    broadcast('session:event', { sessionId, ts: Date.now(), event, ...meta });
     if (event.type === 'status' && (event.status === 'idle' || event.status === 'error')) {
       void notifySessionFinished(sessionId, event.status);
     }
@@ -290,6 +296,21 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
 
   // Auth for /api/* (health, pair and the bridge scope are handled separately).
   app.addHook('onRequest', makeDeviceAuthHook(jwtSecret, (deviceId) => store.touchDevice(deviceId)));
+
+  // API answers go out gzipped: a chat history or a diff shrinks to a fraction,
+  // which is what a phone on mobile data waits for. Only serialized JSON/text —
+  // file streams and downloads pass through untouched.
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (typeof payload !== 'string' || payload.length < GZIP_MIN_CHARS) return payload;
+    if (req.method === 'HEAD' || reply.hasHeader('content-encoding')) return payload;
+    if (!/\bgzip\b/i.test(String(req.headers['accept-encoding'] ?? ''))) return payload;
+    if (!/json|^text\//i.test(String(reply.getHeader('content-type') ?? ''))) return payload;
+    const zipped = await gzip(payload);
+    reply.header('content-encoding', 'gzip');
+    reply.header('vary', 'Accept-Encoding');
+    reply.removeHeader('content-length');
+    return zipped;
+  });
 
   // Error shaping: every error is {"error":{"message","code"}}. Declared
   // BEFORE the routes plugin registers so the /api encapsulation context
