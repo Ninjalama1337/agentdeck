@@ -113,4 +113,17 @@ describe('Store', () => {
     expect(found?.name).toBe('pic.png');
     expect(await store.findAttachment(session, project, 'f_nope')).toBeUndefined();
   });
+
+  it('resets sessions left running by a restart and tells the user', async () => {
+    await store.saveProject({ id: 'p_rec', name: 'rec', path: '/tmp/rec', createdAt: 1, updatedAt: 1 });
+    const session = await store.newSession({ projectId: 'p_rec', agentId: 'claude' });
+    await store.saveSession({ ...session, status: 'running' });
+
+    const restarted = new Store(dataDir);
+    await restarted.init();
+    expect(restarted.getSession(session.id)?.status).toBe('idle');
+    const messages = await restarted.getMessages(session.id);
+    expect(messages.at(-1)?.role).toBe('system');
+    expect(messages.at(-1)?.text).toMatch(/restarted/);
+  });
 });
