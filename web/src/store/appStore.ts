@@ -438,6 +438,13 @@ export const useAppStore = create<AppStore>()((set, get) => {
       set({ connection: 'online' });
       void get().bootstrap(true);
       void syncInbox();
+      resyncActiveSession();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const sock = getSocket();
+      if (sock && !sock.connected) sock.connect();
+      else resyncActiveSession();
     });
     socket.on('disconnect', () => {
       set({ connection: 'offline' });
@@ -720,6 +727,35 @@ export const useAppStore = create<AppStore>()((set, get) => {
       if (list.some((m) => m.id === message.id)) return {};
       return { messagesBySession: { ...st.messagesBySession, [sessionId]: [...list, message] } };
     });
+  }
+
+  /** After a socket gap or the app returning to the front: events were missed, so pull the open session's history again. */
+  async function resyncSession(sessionId: string): Promise<void> {
+    try {
+      const { session, messages } = await api.session(sessionId);
+      set((st) => {
+        const pendingLocal = (st.messagesBySession[sessionId] ?? []).filter(
+          (m) => m.id.startsWith('tmp-') && !messages.some((r) => r.role === 'user' && r.text === m.text && r.ts >= m.ts - 5000),
+        );
+        const patch: Partial<AppStore> = {
+          sessionsByProject: upsertSessionMap(st.sessionsByProject, session),
+          messagesBySession: { ...st.messagesBySession, [sessionId]: [...messages, ...pendingLocal] },
+        };
+        if (session.status !== 'running' && st.drafts[sessionId]) {
+          const drafts = { ...st.drafts };
+          delete drafts[sessionId];
+          patch.drafts = drafts;
+        }
+        return patch;
+      });
+    } catch {
+      /* offline again — the next connect retries */
+    }
+  }
+
+  function resyncActiveSession(): void {
+    const id = get().activeSessionId;
+    if (id && get().loadedSessions[id]) void resyncSession(id);
   }
 
   function finalizeDraft(sessionId: string, message: ChatMessage): void {
