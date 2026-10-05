@@ -11,7 +11,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { Account, ChatMessage, DeviceInfo, Project, Routine, Session, TeamRun } from '@agentdeck/shared';
 import { ensureDir } from '../util/paths.js';
-import { newAccountId, newDeviceId, newRoutineId, newSessionId } from '../util/ids.js';
+import { newAccountId, newDeviceId, newMessageId, newRoutineId, newSessionId } from '../util/ids.js';
 
 export type MessageSource = NonNullable<ChatMessage['source']>
 
@@ -88,12 +88,33 @@ export class Store {
           if (meta?.session?.id) {
             this.sessions.set(meta.session.id, meta.session);
             if (meta.source) this.sessionSources.set(meta.session.id, meta.source);
+            await this.recoverInterrupted(meta.session);
           }
         } catch {
           // Skip unreadable session dirs.
         }
       }),
     );
+  }
+
+  /**
+   * A run cannot outlive the server process. A session still marked running or
+   * queued at startup lost its turn (restart, crash) — without this it would
+   * show "working" forever and refuse new messages.
+   */
+  private async recoverInterrupted(session: Session): Promise<void> {
+    if (session.status !== 'running' && session.status !== 'queued') return;
+    session.status = 'idle';
+    await this.appendMessage({
+      id: newMessageId(),
+      sessionId: session.id,
+      role: 'system',
+      agentId: session.agentId,
+      text: 'The server restarted while this run was active — the answer was lost. Send your message again.',
+      attachments: [],
+      ts: Date.now(),
+    });
+    await this.saveSession(session);
   }
 
   onChange(handler: ChangeHandler): () => void {
