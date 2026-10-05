@@ -81,6 +81,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
       try {
         const att = await uploadFile(projectId, file, 'uploads', (p) =>
           setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, progress: p } : a))),
+          session.id,
         );
         setAtts((prev) => prev.map((a) => (a.localId === localId ? { ...a, att, progress: 1 } : a)));
       } catch (err) {

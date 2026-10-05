@@ -393,7 +393,7 @@ export class Store {
     project: Project,
     fileId: string,
   ): Promise<{ absPath: string; name: string } | undefined> {
-    const candidates: string[] = [this.attachmentsDirFor(session.id), project.path];
+    const candidates: string[] = [this.attachmentsDirFor(session.id), path.join(project.path, 'uploads'), project.path];
     for (const dir of candidates) {
       let entries: string[];
       try {

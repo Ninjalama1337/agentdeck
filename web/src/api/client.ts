@@ -583,12 +583,13 @@ export function uploadFile(
   file: File,
   dir = 'uploads',
   onProgress?: (fraction: number) => void,
+  sessionId?: string,
 ): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(
       'POST',
-      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?dir=${encodeURIComponent(dir)}`,
+      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?${sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : `dir=${encodeURIComponent(dir)}`}`,
     );
     const token = getToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
