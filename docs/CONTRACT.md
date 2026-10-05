@@ -28,7 +28,8 @@ your machine from a mobile app (PWA / Android APK):
 - Node v22.23.2, npm 10.9.8, npm registry reachable.
 - `claude` — Claude Code **2.1.285** at
   `~/.nvm/versions/node/v22.23.2/bin/claude`. Full headless support:
-  `claude -p --input-format stream-json --output-format stream-json --verbose`,
+  `claude -p --input-format stream-json --output-format stream-json --verbose
+  --include-partial-messages`,
   `--model <id>`, `--permission-mode <default|acceptEdits|plan|bypassPermissions>`,
   `--resume <sessionId>`, `--dangerously-skip-permissions`, cwd defines project.
   Thinking effort: `--effort <low|medium|high>` (verified in 2.1.285 help).
@@ -40,6 +41,13 @@ your machine from a mobile app (PWA / Android APK):
   `{type:"assistant",message:{content:[{type:"text"|"thinking"|"tool_use",...}]}}`,
   `{type:"user",message:{content:[{type:"tool_result",...}]}}`,
   `{type:"result",subtype:"success"|"error",result,usage,...}`.
+  With `--include-partial-messages` (verified in 2.1.289) the text arrives as
+  it is written: `{type:"stream_event",parent_tool_use_id,event}` lines carry
+  the raw API stream — `message_start` (`message.id`), `content_block_delta`
+  with `text_delta` / `thinking_delta` — followed by the usual `assistant`
+  line with the finished block (same `message.id`), which the adapter then
+  skips. Sub-agent chunks (`parent_tool_use_id` set) are not streamed; their
+  text is taken from the `assistant` line.
   `thinking` blocks stream as `thinking-delta` and are persisted SEPARATELY on
   the assistant `ChatMessage.thinking` — never mixed into `text`.
   Image input: user-turn content block `{"type":"image","source":{"type":"base64","media_type":...,"data":...}}`.
@@ -209,10 +217,10 @@ again. `AgentInfo.admin` lists the per-agent actions.
 | PUT | `/api/projects/:id/files/content` | `SaveFileRequest → SaveFileResponse` — atomic write (temp+rename), creates missing parent dirs, cap 1 MB, 415 NON_TEXT, 403 inside `.git/` |
 | POST | `/api/projects/:id/files/create` | `CreateEntryRequest → 204` — new empty file or dir, 409 EXISTS, same sandbox rules |
 | DELETE | `/api/projects/:id/files/entry` `?path=&recursive=0` | `204` — file always; dir only when empty (`recursive=1` for non-empty), 403 inside `.git/` |
-| POST | `/api/projects/:id/files/upload` `?dir=` (multipart `file`) | `Attachment` |
+| POST | `/api/projects/:id/files/upload` `?dir=` or `?sessionId=` (multipart `file`) | `Attachment` — `sessionId` stores it as an attachment of that session (what the chat does), `dir` inside the project. `Attachment.url` is signed for 120 s; the app shows images through `/files/raw` with its device login instead |
 | GET | `/api/sessions?projectId=` | `Session[]` |
 | POST | `/api/sessions` | `CreateSessionRequest → Session` (now incl. optional `thinkingEffort`) |
-| GET | `/api/sessions/:id` | `{session: Session, messages: ChatMessage[]}` |
+| GET | `/api/sessions/:id` `?after=` | `SessionDetailResponse` `{session, messages, draft, partial?}` — `draft` (`SessionDraft`, else `null`) is what a run in progress has produced so far (`text`, `thinking`, `tools`, `usage`) plus `run`/`seq`; `after=<messageId>` returns only newer messages with `partial: true` (unknown id → whole history) |
 | DELETE | `/api/sessions/:id` | `204` |
 | POST | `/api/sessions/:id/messages` | `SendTurnRequest → SendTurnResponse` (409 if a run is active; `model`/`thinkingEffort` override the session defaults for that turn and update them) |
 | POST | `/api/sessions/:id/interrupt` | `204` |
@@ -231,7 +239,16 @@ Every mutating endpoint emits the matching WS update afterwards.
 
 ## WebSocket protocol (socket.io, path `/socket.io`)
 
-Typed in `packages/shared/src/events.ts`. Server pushes `session:event`,
+JSON and text answers of the REST API are gzipped for clients that accept it
+(file streams and downloads are not).
+
+Typed in `packages/shared/src/events.ts`. `session:event` payloads of a run
+carry `run` (id) and `seq` (counter from 1): a client that loaded a
+`SessionDraft` skips the events with the same `run` and `seq <= draft.seq`,
+so joining mid-run neither doubles nor loses text. Text and thinking deltas
+are bundled server-side (40 ms) instead of one event per token.
+
+Server pushes `session:event`,
 `session:update`, `project:update`, `agent:update`, `team:update`,
 `files:changed {projectId, events:[{type:'change'|'create'|'delete', path}]}`,
 `notify`. Client emits `session:interrupt {sessionId}` with ack.

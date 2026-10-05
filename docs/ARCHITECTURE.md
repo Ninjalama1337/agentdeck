@@ -157,7 +157,7 @@ socket.io unter `/socket.io`, Handshake mit `auth.token` (JWT). Events sind in
 
 | Richtung | Event | Zweck |
 |---|---|---|
-| Server → Client | `session:event` | Live-`AgentEvent`-Stream einer Session |
+| Server → Client | `session:event` | Live-`AgentEvent`-Stream einer Session; Events eines Runs tragen `run` + `seq`, passend zum `draft` aus `GET /api/sessions/:id` (Einstieg mitten im Run) |
 | Server → Client | `session:update` | Session-Metadaten (Status, Modell, …) |
 | Server → Client | `project:update` | Projekt geändert / Clone-Fortschritt |
 | Server → Client | `agent:update` | Verfügbarkeit/Capabilities geändert |
