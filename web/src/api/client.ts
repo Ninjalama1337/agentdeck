@@ -49,6 +49,7 @@ import type {
   SendTurnRequest,
   SendTurnResponse,
   Session,
+  SessionDetailResponse,
   StartAdminJobRequest,
   ServerInfo,
   TeamRun,
@@ -324,8 +325,9 @@ export const api = {
     return request('GET', '/api/sessions', { query: { projectId } });
   },
 
-  session(id: string): Promise<{ session: Session; messages: ChatMessageList }> {
-    return request('GET', `/api/sessions/${encodeURIComponent(id)}`);
+  /** `after`: only the messages newer than this id (`partial: true`) — older servers send the full history. */
+  session(id: string, after?: string): Promise<SessionDetailResponse> {
+    return request('GET', `/api/sessions/${encodeURIComponent(id)}`, { query: { after } });
   },
 
   createSession(body: CreateSessionRequest): Promise<Session> {
@@ -569,9 +571,6 @@ export const api = {
     return request('POST', `/api/projects/${encodeURIComponent(projectId)}/git/suggest-message`, { json: body });
   },
 };
-
-// Local alias to avoid importing the type at runtime — ChatMessage lives in shared.
-type ChatMessageList = import('@agentdeck/shared').ChatMessage[];
 
 /**
  * Multipart upload with progress. Per contract the upload endpoint lives at

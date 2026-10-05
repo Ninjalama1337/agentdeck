@@ -34,7 +34,6 @@ export function ChatScreen() {
   const session = useAppStore((s) => selectSession(s, s.activeSessionId));
   const agents = useAppStore((s) => s.agents);
   const projects = useAppStore((s) => s.projects);
-  const drafts = useAppStore((s) => s.drafts);
   const messagesBySession = useAppStore((s) => s.messagesBySession);
   const openSession = useAppStore((s) => s.openSession);
   const closeSession = useAppStore((s) => s.closeSession);
@@ -170,16 +169,17 @@ export function ChatScreen() {
 
       {/* messages */}
       <MessageList
+        key={`messages:${session.id}`}
+        sessionId={session.id}
         messages={shownMessages}
-        draft={drafts[session.id]}
         agent={agent}
         loading={!loadedSessions[session.id]}
         running={running}
       />
 
-      {/* composer */}
+      {/* composer — keyed: each session has its own unsent input */}
       <ModeBar session={session} agent={agent} />
-      <Composer session={session} agent={agent} />
+      <Composer key={`composer:${session.id}`} session={session} agent={agent} />
 
       {/* sheets */}
       <Sheet open={modelSheetOpen} onClose={() => setModelSheetOpen(false)} title="Model" subtitle={`${agent?.label ?? session.agentId} · applies from your next message`}>

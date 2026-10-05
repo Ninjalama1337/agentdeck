@@ -23,12 +23,13 @@ import type {
   CloneProjectRequest,
   DeckNotification,
   DeviceInfo,
-  MessageUsage,
   PairResponse,
   PermissionMode,
   Project,
   Routine,
+  ServerToClientEvents,
   Session,
+  SessionDetailResponse,
   SessionStatus,
   TeamRun,
   TeamRunRequest,
@@ -55,6 +56,15 @@ import {
   updateActiveServer,
 } from '../api/servers';
 import { usePrefs } from './prefs';
+import {
+  draftFromSnapshot,
+  isCovered,
+  lastServerMessageId,
+  mergeHistory,
+  reduceDraft,
+  type StreamDraft,
+  type StreamMark,
+} from './sessionStream';
 import { haptic } from '../util/haptics';
 import { currentPushSubscription, fcmRegistered, showSystemNotification, stateOf } from '../util/notify';
 
@@ -93,20 +103,7 @@ export function routeToHash(route: Route): string {
 
 /* ------------------------------------------------------------------- types */
 
-export interface ToolCard {
-  id: number;
-  tool: string;
-  state: 'running' | 'done' | 'error';
-  summary?: string;
-}
-
-export interface StreamDraft {
-  text: string;
-  /** Model reasoning stream — rendered separately from the answer. */
-  thinking?: string;
-  tools: ToolCard[];
-  usage?: MessageUsage;
-}
+export type { StreamDraft, ToolCard } from './sessionStream';
 
 export interface Toast {
   id: number;
@@ -233,6 +230,8 @@ export interface AppStore {
   serverBase: string;
   serverInfo: PairResponse['server'] | null;
   connection: 'online' | 'offline';
+  /** Counts socket (re)connects — views that follow a live stream reload their state when it changes. */
+  socketEpoch: number;
   booted: boolean;
   /** Servers saved on this device (one login each); the app talks to the active one. */
   servers: SavedServer[];
@@ -393,10 +392,18 @@ export interface AppStore {
   takePendingFiles(): File[];
 }
 
+type SessionEventPayload = Parameters<ServerToClientEvents['session:event']>[0];
+
+/** Hidden for longer than this, the socket is not trusted any more when the app returns. */
+const STALE_SOCKET_MS = 15_000;
+
 let initialized = false;
 let socketAttached = false;
-let toolSeq = 0;
 let tmpMsgSeq = 0;
+/** Per session: which run events the draft from the last snapshot already holds. */
+const streamMarks = new Map<string, StreamMark>();
+/** Sessions being (re)loaded: their stream events wait here until the snapshot is in. */
+const syncing = new Map<string, { queue: SessionEventPayload[]; promise: Promise<void> }>();
 let toastSeq = 0;
 /** Admin job ids we already toasted a done/error for (WS replays the full job). */
 const toastedAdminJobs = new Set<string>();
@@ -435,106 +442,47 @@ export const useAppStore = create<AppStore>()((set, get) => {
     socketAttached = true;
 
     socket.on('connect', () => {
-      set({ connection: 'online' });
+      // Whatever was streamed while the socket was down never arrived: other
+      // sessions reload when they are opened, the open one right away.
+      const open = get().activeSessionId;
+      set((st) => ({
+        connection: 'online',
+        socketEpoch: st.socketEpoch + 1,
+        loadedSessions: open && st.loadedSessions[open] ? { [open]: true } : {},
+        drafts: open && st.drafts[open] ? { [open]: st.drafts[open] } : {},
+      }));
       void get().bootstrap(true);
       void syncInbox();
       resyncActiveSession();
     });
+    // Back in front. Android freezes a backgrounded app with the socket still
+    // looking connected; after a longer pause it is replaced right away rather
+    // than waiting for the heartbeat to notice — the connect above catches up.
+    let hiddenAt = 0;
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        hiddenAt = Date.now();
+        return;
+      }
       const sock = getSocket();
-      if (sock && !sock.connected) sock.connect();
+      if (!sock) return;
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if (!sock.connected || away > STALE_SOCKET_MS) sock.disconnect().connect();
       else resyncActiveSession();
     });
-    socket.on('disconnect', () => {
-      set({ connection: 'offline' });
+    socket.on('disconnect', (reason) => {
+      // Our own reconnect above is back in a moment — no "offline" flash for it.
+      if (reason !== 'io client disconnect') set({ connection: 'offline' });
     });
     socket.on('connect_error', () => {
       set({ connection: 'offline' });
     });
 
-    socket.on('session:event', ({ sessionId, event }) => {
-      switch (event.type) {
-        case 'status': {
-          applyStatus(sessionId, event.status, event.detail);
-          break;
-        }
-        case 'text-delta': {
-          set((st) => {
-            const draft = st.drafts[sessionId] ?? { text: '', tools: [] };
-            return {
-              drafts: { ...st.drafts, [sessionId]: { ...draft, text: draft.text + event.text } },
-            };
-          });
-          break;
-        }
-        case 'thinking-delta': {
-          set((st) => {
-            const draft = st.drafts[sessionId] ?? { text: '', tools: [] };
-            return {
-              drafts: {
-                ...st.drafts,
-                [sessionId]: { ...draft, thinking: (draft.thinking ?? '') + event.text },
-              },
-            };
-          });
-          break;
-        }
-        case 'message': {
-          appendMessage(sessionId, event.message);
-          if (event.message.role !== 'user') {
-            finalizeDraft(sessionId, event.message);
-          }
-          break;
-        }
-        case 'tool-use': {
-          set((st) => {
-            const draft = st.drafts[sessionId] ?? { text: '', tools: [] };
-            const card: ToolCard = { id: ++toolSeq, tool: event.tool, state: 'running', summary: event.summary };
-            return {
-              drafts: { ...st.drafts, [sessionId]: { ...draft, tools: [...draft.tools, card] } },
-            };
-          });
-          break;
-        }
-        case 'tool-result': {
-          set((st) => {
-            const draft = st.drafts[sessionId];
-            if (!draft) return {};
-            const idx = [...draft.tools].reverse().findIndex((t) => t.tool === event.tool && t.state === 'running');
-            let tools: ToolCard[];
-            if (idx >= 0) {
-              const real = draft.tools.length - 1 - idx;
-              tools = draft.tools.map((t, i) =>
-                i === real ? { ...t, state: event.ok ? ('done' as const) : ('error' as const), summary: event.summary ?? t.summary } : t,
-              );
-            } else {
-              tools = [
-                ...draft.tools,
-                { id: ++toolSeq, tool: event.tool, state: event.ok ? ('done' as const) : ('error' as const), summary: event.summary },
-              ];
-            }
-            return { drafts: { ...st.drafts, [sessionId]: { ...draft, tools } } };
-          });
-          break;
-        }
-        case 'usage': {
-          const usage: MessageUsage = {
-            inputTokens: event.inputTokens,
-            outputTokens: event.outputTokens,
-            costUsd: event.costUsd,
-          };
-          set((st) => {
-            const draft = st.drafts[sessionId];
-            return {
-              drafts: draft ? { ...st.drafts, [sessionId]: { ...draft, usage } } : st.drafts,
-            };
-          });
-          break;
-        }
-        case 'raw':
-          break;
-      }
+    socket.on('session:event', (payload) => {
+      const pending = syncing.get(payload.sessionId);
+      if (pending) pending.queue.push(payload);
+      else applySessionEvent(payload);
     });
 
     socket.on('session:update', ({ session }) => {
@@ -729,33 +677,80 @@ export const useAppStore = create<AppStore>()((set, get) => {
     });
   }
 
-  /** After a socket gap or the app returning to the front: events were missed, so pull the open session's history again. */
-  async function resyncSession(sessionId: string): Promise<void> {
-    try {
-      const { session, messages } = await api.session(sessionId);
-      set((st) => {
-        const pendingLocal = (st.messagesBySession[sessionId] ?? []).filter(
-          (m) => m.id.startsWith('tmp-') && !messages.some((r) => r.role === 'user' && r.text === m.text && r.ts >= m.ts - 5000),
-        );
-        const patch: Partial<AppStore> = {
-          sessionsByProject: upsertSessionMap(st.sessionsByProject, session),
-          messagesBySession: { ...st.messagesBySession, [sessionId]: [...messages, ...pendingLocal] },
-        };
-        if (session.status !== 'running' && st.drafts[sessionId]) {
-          const drafts = { ...st.drafts };
-          delete drafts[sessionId];
-          patch.drafts = drafts;
-        }
-        return patch;
-      });
-    } catch {
-      /* offline again — the next connect retries */
+  function applySessionEvent({ sessionId, event, run, seq }: SessionEventPayload): void {
+    if (isCovered(streamMarks.get(sessionId), run, seq)) return;
+    switch (event.type) {
+      case 'status':
+        applyStatus(sessionId, event.status, event.detail);
+        break;
+      case 'message':
+        appendMessage(sessionId, event.message);
+        if (event.message.role !== 'user') finalizeDraft(sessionId, event.message);
+        break;
+      case 'raw':
+        break;
+      default:
+        set((st) => {
+          const before = st.drafts[sessionId];
+          const after = reduceDraft(before, event);
+          return after && after !== before ? { drafts: { ...st.drafts, [sessionId]: after } } : {};
+        });
     }
   }
 
+  /**
+   * Loads a session — the whole history the first time, afterwards only what
+   * is new — together with the answer of a run in progress. Stream events
+   * arriving meanwhile are replayed on top, so nothing is doubled or lost.
+   */
+  function syncSession(id: string): Promise<void> {
+    const running = syncing.get(id);
+    if (running) return running.promise;
+    const queue: SessionEventPayload[] = [];
+    const promise = (async () => {
+      try {
+        const st = get();
+        const after = st.loadedSessions[id] ? lastServerMessageId(st.messagesBySession[id] ?? []) : undefined;
+        applySnapshot(id, await api.session(id, after), after);
+      } finally {
+        syncing.delete(id);
+        for (const payload of queue) applySessionEvent(payload);
+      }
+    })();
+    syncing.set(id, { queue, promise });
+    return promise;
+  }
+
+  function applySnapshot(id: string, detail: SessionDetailResponse, after: string | undefined): void {
+    const { session, messages, draft } = detail;
+    if (draft) streamMarks.set(id, { run: draft.run, seq: draft.seq });
+    else streamMarks.delete(id);
+    set((st) => {
+      const local = st.messagesBySession[id] ?? [];
+      const partial = detail.partial === true;
+      // The list this answer continues is gone (session deleted meanwhile): load it whole next time.
+      if (partial && !local.some((m) => m.id === after)) {
+        const loadedSessions = { ...st.loadedSessions };
+        delete loadedSessions[id];
+        return { loadedSessions };
+      }
+      const drafts = { ...st.drafts };
+      if (draft) drafts[id] = draftFromSnapshot(draft);
+      // Servers before the draft snapshot: keep what was streamed while the run is still going.
+      else if (draft === null || (session.status !== 'running' && session.status !== 'queued')) delete drafts[id];
+      return {
+        sessionsByProject: upsertSessionMap(st.sessionsByProject, session),
+        messagesBySession: { ...st.messagesBySession, [id]: mergeHistory(local, messages, partial) },
+        loadedSessions: { ...st.loadedSessions, [id]: true },
+        drafts,
+      };
+    });
+  }
+
+  /** After a socket gap or the app returning to the front: catch up on the open session. */
   function resyncActiveSession(): void {
     const id = get().activeSessionId;
-    if (id && get().loadedSessions[id]) void resyncSession(id);
+    if (id && get().loadedSessions[id]) void syncSession(id).catch(() => undefined);
   }
 
   function finalizeDraft(sessionId: string, message: ChatMessage): void {
@@ -787,6 +782,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     activeServerId: getActiveServer().id,
     serverInfo: null,
     connection: 'online',
+    socketEpoch: 0,
     booted: false,
     route: parseHash(window.location.hash),
     agents: {},
@@ -1171,13 +1167,9 @@ export const useAppStore = create<AppStore>()((set, get) => {
       }
       set({ activeSessionId: id });
       if (get().loadedSessions[id]) return;
-      const { session, messages } = await api.session(id);
-      set((st) => ({
-        currentUsageAgent: session.agentId,
-        sessionsByProject: upsertSessionMap(st.sessionsByProject, session),
-        messagesBySession: { ...st.messagesBySession, [id]: messages },
-        loadedSessions: { ...st.loadedSessions, [id]: true },
-      }));
+      await syncSession(id);
+      const session = selectSession(get(), id);
+      if (session) set({ currentUsageAgent: session.agentId });
     },
 
     closeSession() {
@@ -1197,6 +1189,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
         delete messagesBySession[id];
         const drafts = { ...st.drafts };
         delete drafts[id];
+        streamMarks.delete(id);
         return {
           sessionsByProject,
           loadedSessions,

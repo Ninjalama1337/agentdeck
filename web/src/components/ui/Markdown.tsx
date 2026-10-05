@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { memo, useRef, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -42,12 +42,15 @@ const components: Components = {
   ),
 };
 
-export function MarkdownView({ text }: { text: string }) {
+const remarkPlugins = [remarkGfm];
+
+/** Memoized: parsing is the expensive part of a chat render, and a finished message never changes. */
+export const MarkdownView = memo(function MarkdownView({ text }: { text: string }) {
   return (
     <div className="md">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+      <Markdown remarkPlugins={remarkPlugins} components={components}>
         {text}
       </Markdown>
     </div>
   );
-}
+});
