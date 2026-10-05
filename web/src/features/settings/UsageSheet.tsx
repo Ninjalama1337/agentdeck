@@ -7,7 +7,7 @@ import { api } from '../../api/client';
 import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { AgentAvatar } from '../../components/ui/Avatar';
-import { normalizeMeridiemTimes } from '../../util/format';
+import { normalizeMeridiemTimes, resetLabel } from '../../util/format';
 
 /** "2m ago" style relative time for the fetch timestamp. */
 function ago(ts: number): string {
@@ -62,25 +62,14 @@ function Bar({ label, win, accent }: { label: string; win: UsageWindow; accent: 
   const pct = win.pct ?? 0;
   const danger = pct >= 80;
   const fill = danger ? '#F43F5E' : accent;
-  const resetAt = win.resetsAt ? Date.parse(win.resetsAt) : NaN;
-  const resetLabel = win.resetsAt
-    ? Number.isNaN(resetAt)
-      ? normalizeMeridiemTimes(win.resetsAt)
-      : new Intl.DateTimeFormat(undefined, {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          hourCycle: 'h23',
-        }).format(new Date(resetAt))
-    : undefined;
+  const resetText = win.resetsAt ? resetLabel(win.resetsAt) : undefined;
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[12.5px] font-medium text-ink">{label}</span>
         <span className="text-[12px] text-dim">
           <span className={danger ? 'font-semibold text-danger' : 'font-semibold text-ink'}>{pct}% used</span>
-          {resetLabel ? <span> · resets {resetLabel}</span> : null}
+          {resetText ? <span> · resets {resetText}</span> : null}
         </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]" role="img" aria-label={`${label}: ${pct}% used`}>
@@ -228,7 +217,7 @@ function UsageCard({
                             {p.session.pct}%
                           </span>
                           {p.session.resetsAt && (
-                            <span className="text-dim/80">({p.session.resetsAt})</span>
+                            <span className="text-dim/80">({resetLabel(p.session.resetsAt)})</span>
                           )}
                         </span>
                       )}
@@ -239,7 +228,7 @@ function UsageCard({
                             {p.week.pct}%
                           </span>
                           {p.week.resetsAt && (
-                            <span className="text-dim/80">({p.week.resetsAt})</span>
+                            <span className="text-dim/80">({resetLabel(p.week.resetsAt)})</span>
                           )}
                         </span>
                       )}
@@ -248,7 +237,7 @@ function UsageCard({
                           <span className="font-medium text-ink">Kontingent:</span>
                           <span className="text-ink">{(p.tokens / 1_000_000).toFixed(0)}M Tokens</span>
                           {p.resetsAt && (
-                            <span className="text-dim/80">(bis {p.resetsAt})</span>
+                            <span className="text-dim/80">(bis {resetLabel(p.resetsAt)})</span>
                           )}
                         </span>
                       )}

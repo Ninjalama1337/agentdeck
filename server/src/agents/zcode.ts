@@ -335,28 +335,14 @@ export interface ZcodePlanDetails {
   raw?: string;
 }
 
-/** Formats timestamp ms into human-readable relative/absolute reset text. */
+/**
+ * Reset instant as an ISO string — the app formats it in the device's timezone
+ * (the server's own timezone is often UTC and would show the wrong clock time).
+ */
 export function formatResetTime(ms?: number | null, now = Date.now()): string | undefined {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return undefined;
-  const diff = ms - now;
-  const date = new Date(ms);
-  const timeStr = date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-  if (diff <= 0) return 'abgelaufen';
-
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-
-  if (diff < 24 * 3600 * 1000) {
-    if (hours === 0) return `${timeStr} (in ${Math.max(1, mins)}m)`;
-    const remMins = mins % 60;
-    return remMins > 0 ? `${timeStr} (in ${hours}h ${remMins}m)` : `${timeStr} (in ${hours}h)`;
-  }
-  if (diff < 48 * 3600 * 1000) {
-    return `Morgen ${timeStr} (in ${hours}h)`;
-  }
-  const dateStr = date.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
-  return `${dateStr}, ${timeStr} (in ${days}d)`;
+  if (ms - now <= 0) return 'abgelaufen';
+  return new Date(ms).toISOString();
 }
 
 /**
@@ -504,14 +490,11 @@ export async function getZcodePlanInfo(
           if (typeof p.starts_at === 'number') freeStartsAtSec = p.starts_at;
           if (typeof p.ends_at === 'number' && p.ends_at > 0) {
             freeEndsAtSec = p.ends_at;
-            freeEndsAt = new Date(p.ends_at * 1000).toLocaleString('de-DE', {
-              dateStyle: 'short',
-              timeStyle: 'short',
-              hourCycle: 'h23',
-            });
+            freeEndsAt = new Date(p.ends_at * 1000).toISOString();
           }
           const mTokens = freeTokens ? `${(freeTokens / 1_000_000).toFixed(0)}M Tokens` : 'Free Tokens';
-          freeDetail = `${mTokens} · Status: ${freeStatus}${freeEndsAt ? ` · Gültig bis: ${freeEndsAt}` : ''}`;
+          // the expiry itself is shown by the app in device time (resetsAt)
+          freeDetail = `${mTokens} · Status: ${freeStatus}`;
         }
       }
     } catch {

@@ -89,14 +89,10 @@ function formatResetIso(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   try {
     const d = new Date(iso);
+    // Keep it machine-readable: the server runs in its own timezone (often UTC),
+    // so the app formats the instant in the device's timezone.
     if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    });
+    return d.toISOString();
   } catch {
     return iso;
   }

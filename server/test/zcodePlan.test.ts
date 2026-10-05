@@ -116,17 +116,13 @@ describe('ZCode plan management', () => {
     expect(() => switchZcodePlan('free', '/nonexistent/path/here')).toThrow(/not found/);
   });
 
-  it('formats reset times accurately across different windows', () => {
+  it('returns the reset as a timezone-neutral ISO instant', () => {
     const now = 1790795414614; // fixed timestamp
     expect(formatResetTime(undefined, now)).toBeUndefined();
     expect(formatResetTime(0, now)).toBeUndefined();
     expect(formatResetTime(-100, now)).toBeUndefined();
     expect(formatResetTime(now - 1000, now)).toBe('abgelaufen');
-    expect(formatResetTime(now + 30 * 60000, now)).toContain('(in 30m)');
-    expect(formatResetTime(now + 90 * 60000, now)).toContain('(in 1h 30m)');
-    expect(formatResetTime(now + 120 * 60000, now)).toContain('(in 2h)');
-    expect(formatResetTime(now + 26 * 3600000, now)).toContain('Morgen');
-    expect(formatResetTime(now + 26 * 3600000, now)).toContain('(in 26h)');
-    expect(formatResetTime(now + 6 * 86400000, now)).toContain('(in 6d)');
+    expect(formatResetTime(now + 30 * 60000, now)).toBe(new Date(now + 30 * 60000).toISOString());
+    expect(formatResetTime(now + 6 * 86400000, now)).toBe(new Date(now + 6 * 86400000).toISOString());
   });
 });

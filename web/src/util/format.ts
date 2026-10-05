@@ -53,6 +53,20 @@ export function clock(ts: number): string {
   });
 }
 
+/** Reset time from the server: an ISO instant shows in the device's timezone, provider text is kept. */
+export function resetLabel(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return normalizeMeridiemTimes(value);
+  const t = Date.parse(value);
+  if (Number.isNaN(t)) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(t));
+}
+
 /** Converts provider text such as "1:19pm" to a 24-hour clock for display. */
 export function normalizeMeridiemTimes(text: string): string {
   return text.replace(
