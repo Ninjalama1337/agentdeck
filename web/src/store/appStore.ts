@@ -347,6 +347,8 @@ export interface AppStore {
   interrupt(sessionId: string): Promise<void>;
   openInIde(sessionId: string): Promise<void>;
   setSessionModel(sessionId: string, model: string | undefined): void;
+  /** Optimistic; reverted with a toast when the server rejects it. Applies from the next turn. */
+  setSessionPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>;
   setSessionEffort(sessionId: string, effort: string | undefined): void;
   setModelPref(agentId: AgentId, model: string | undefined): void;
   launchTeam(req: TeamRunRequest): Promise<TeamRun>;
@@ -1238,6 +1240,21 @@ export const useAppStore = create<AppStore>()((set, get) => {
       });
       const session = selectSession(get(), sessionId);
       if (session) get().setModelPref(session.agentId, model);
+    },
+
+    async setSessionPermissionMode(sessionId, mode) {
+      const before = selectSession(get(), sessionId);
+      if (!before || before.permissionMode === mode) return;
+      const put = (session: Session) =>
+        set((st) => ({ sessionsByProject: upsertSessionMap(st.sessionsByProject, session) }));
+      put({ ...before, permissionMode: mode });
+      try {
+        await api.updateSession(sessionId, { permissionMode: mode });
+      } catch (err) {
+        const current = selectSession(get(), sessionId);
+        if (current) put({ ...current, permissionMode: before.permissionMode });
+        get().toast('error', errorMessage(err));
+      }
     },
 
     setSessionEffort(sessionId, effort) {

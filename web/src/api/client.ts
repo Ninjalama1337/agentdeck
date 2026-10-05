@@ -17,6 +17,7 @@ import type {
   CreateProjectRequest,
   CreateRoutineRequest,
   CreateSessionRequest,
+  UpdateSessionRequest,
   CreateTerminalRequest,
   DeckNotification,
   DeviceInfo,
@@ -329,6 +330,10 @@ export const api = {
 
   createSession(body: CreateSessionRequest): Promise<Session> {
     return request('POST', '/api/sessions', { json: body });
+  },
+
+  updateSession(id: string, body: UpdateSessionRequest): Promise<Session> {
+    return request('PATCH', `/api/sessions/${encodeURIComponent(id)}`, { json: body });
   },
 
   deleteSession(id: string): Promise<void> {

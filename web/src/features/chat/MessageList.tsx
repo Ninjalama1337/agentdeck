@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Wrench } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, Pencil, RotateCcw, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { splitThinkTags } from '@agentdeck/shared';
 import type { AgentInfo, Attachment, ChatMessage, ToolRecord } from '@agentdeck/shared';
@@ -8,6 +8,7 @@ import type { StreamDraft, ToolCard } from '../../store/appStore';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
 import { MarkdownView } from '../../components/ui/Markdown';
 import { AgentAvatar } from '../../components/ui/Avatar';
+import { useChatActions } from '../../store/chatActions';
 import { Spinner } from '../../components/ui/Spinner';
 import { clock, cost, tokens } from '../../util/format';
 
@@ -16,16 +17,21 @@ export function MessageList({
   draft,
   agent,
   loading,
+  running,
 }: {
   messages: ChatMessage[] | undefined;
   draft: StreamDraft | undefined;
   agent: AgentInfo | undefined;
   loading: boolean;
+  running: boolean;
 }) {
   const scrollRef = useStickyScroll<HTMLDivElement>();
   const accent = agent?.accentColor ?? '#7C5CFF';
 
-  const hasDraft = draft !== undefined && (draft.text.length > 0 || draft.tools.length > 0);
+  const hasDraft =
+    draft !== undefined && (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '');
+  // While a run is active the bubble is always there — even before the first token arrives.
+  const showBubble = hasDraft || running;
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
@@ -35,7 +41,7 @@ export function MessageList({
         </div>
       )}
 
-      {!loading && (!messages || messages.length === 0) && !hasDraft && (
+      {!loading && (!messages || messages.length === 0) && !showBubble && (
         <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
           <AgentAvatar agent={agent} agentId={agent?.id ?? 'claude'} size="lg" glow={false} />
           <p className="mt-4 text-[15px] font-semibold">Ready when you are</p>
@@ -46,12 +52,16 @@ export function MessageList({
       )}
 
       <div className="flex flex-col gap-3">
-        {(messages ?? []).map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} agent={agent} accent={accent} />
-        ))}
+        {(messages ?? []).map((msg, i, all) => {
+          // Regenerate = resend the prompt of the final exchange; only offered on the last answer.
+          const lastUser = i === all.length - 1 && msg.role === 'assistant' && !running
+            ? [...all].reverse().find((m) => m.role === 'user')
+            : undefined;
+          return <MessageBubble key={msg.id} msg={msg} agent={agent} accent={accent} regenerateFrom={lastUser} />;
+        })}
 
-        {hasDraft && draft && (
-          <StreamingBubble draft={draft} agent={agent} accent={accent} />
+        {showBubble && (
+          <StreamingBubble draft={draft ?? { text: '', tools: [] }} agent={agent} accent={accent} />
         )}
       </div>
     </div>
@@ -60,8 +70,19 @@ export function MessageList({
 
 /* ---------------------------------------------------------------- bubbles */
 
-function MessageBubble({ msg, agent, accent }: { msg: ChatMessage; agent?: AgentInfo; accent: string }) {
+function MessageBubble({
+  msg,
+  agent,
+  accent,
+  regenerateFrom,
+}: {
+  msg: ChatMessage;
+  agent?: AgentInfo;
+  accent: string;
+  regenerateFrom?: ChatMessage;
+}) {
   const setLightbox = useAppStore((s) => s.setLightbox);
+  const sendTurn = useAppStore((s) => s.sendTurn);
 
   if (msg.role === 'system') {
     return (
@@ -101,9 +122,21 @@ function MessageBubble({ msg, agent, accent }: { msg: ChatMessage; agent?: Agent
             {msg.text}
           </div>
         )}
-        <p className="mt-1 px-1 text-[10.5px] text-dim/70">
-          {clock(msg.ts)}
-          {msg.source && msg.source !== 'app' ? ` · via ${msg.source}` : ''}
+        <p className="mt-1 flex items-center gap-2 px-1 text-[10.5px] text-dim/70">
+          <span>
+            {clock(msg.ts)}
+            {msg.source && msg.source !== 'app' ? ` · via ${msg.source}` : ''}
+          </span>
+          {msg.text && (
+            <button
+              type="button"
+              onClick={() => useChatActions.getState().setPrefill(msg.sessionId, msg.text)}
+              aria-label="Edit and resend"
+              className="press inline-flex items-center gap-1 text-dim/70"
+            >
+              <Pencil size={11} /> Edit
+            </button>
+          )}
         </p>
       </div>
     );
@@ -138,12 +171,28 @@ function MessageBubble({ msg, agent, accent }: { msg: ChatMessage; agent?: Agent
         {thinking && <ThinkingBlock thinking={thinking} accent={accent} />}
         {answer && <MarkdownView text={answer} />}
         {msg.usage && <UsageLine usage={msg.usage} />}
+        {regenerateFrom && regenerateFrom.text && (
+          <button
+            type="button"
+            onClick={() => void sendTurn(msg.sessionId, regenerateFrom.text, regenerateFrom.attachments).catch(() => undefined)}
+            className="press tap mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[11.5px] text-dim"
+          >
+            <RotateCcw size={12} /> Regenerate
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?: AgentInfo; accent: string }) {
+  const phase = draft.text
+    ? 'writing…'
+    : draft.tools.some((t) => t.state === 'running')
+      ? 'working…'
+      : (draft.thinking ?? '').trim() !== ''
+        ? 'thinking…'
+        : 'waiting for response…';
   return (
     <div className="msg-in flex flex-col items-start">
       <div
@@ -156,7 +205,7 @@ function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?:
           </span>
           <span className="inline-flex items-center gap-1 text-[10.5px]" style={{ color: accent }}>
             <span className="h-1.5 w-1.5 rounded-full pulse-dot" style={{ background: accent }} />
-            working…
+            {phase}
           </span>
         </div>
 

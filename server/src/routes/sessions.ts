@@ -46,6 +46,10 @@ const CreateSessionSchema = z.object({
   title: z.string().max(120).optional(),
 });
 
+const UpdateSessionSchema = z.object({
+  permissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypass']).optional(),
+});
+
 const SendTurnSchema = z.object({
   text: z.string().min(1).max(200_000),
   attachmentIds: z.array(z.string().min(1)).max(10).optional(),
@@ -109,6 +113,13 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const session = getSessionOr404(deps, (req.params as { id: string }).id);
     const messages = await deps.store.getMessages(session.id);
     return { session, messages };
+  });
+
+  fastify.patch('/sessions/:id', async (req) => {
+    const session = getSessionOr404(deps, (req.params as { id: string }).id);
+    const body = UpdateSessionSchema.parse(req.body);
+    if (body.permissionMode !== undefined) session.permissionMode = body.permissionMode;
+    return deps.store.saveSession(session);
   });
 
   fastify.delete('/sessions/:id', async (req, reply) => {

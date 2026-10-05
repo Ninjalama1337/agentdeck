@@ -5,6 +5,7 @@ import {
   Monitor,
   MoreVertical,
   Plus,
+  Search,
   Trash2,
   Users,
   X,
@@ -18,10 +19,12 @@ import { Sheet } from '../../components/ui/Sheet';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
 import { ModelBar } from './ModelBar';
+import { ModeBar } from './ModeBar';
 import { ModelSheet } from './ModelSheet';
 import { NewSessionSheet } from './NewSessionSheet';
 import { TeamComposer } from './TeamComposer';
 import { UsageSheet } from '../settings/UsageSheet';
+import { ChatSearch, messageMatches } from './ChatSearch';
 import { SessionListPanel } from '../sessions/SessionListPanel';
 
 export function ChatScreen() {
@@ -45,6 +48,8 @@ export function ChatScreen() {
   const [teamOpen, setTeamOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
 
   const agent: AgentInfo | undefined = session ? agents[session.agentId] : undefined;
   const project = session ? projects.find((p) => p.id === session.projectId) : undefined;
@@ -81,6 +86,12 @@ export function ChatScreen() {
     const usedPct = own?.week?.pct ?? own?.rateLimits?.[0]?.window.pct;
     return typeof usedPct === 'number' ? Math.max(0, 100 - usedPct) : undefined;
   }, [usage, session]);
+
+  const allMessages = activeSessionId ? messagesBySession[activeSessionId] : undefined;
+  const shownMessages = useMemo(
+    () => (searchOpen && query.trim() ? allMessages?.filter((m) => messageMatches(m, query)) : allMessages),
+    [allMessages, searchOpen, query],
+  );
 
   if (!session) {
     return (
@@ -145,15 +156,29 @@ export function ChatScreen() {
         onOpenUsage={() => setUsageOpen(true)}
       />
 
+      {searchOpen && (
+        <ChatSearch
+          query={query}
+          onChange={setQuery}
+          onClose={() => {
+            setSearchOpen(false);
+            setQuery('');
+          }}
+          count={shownMessages?.length ?? 0}
+        />
+      )}
+
       {/* messages */}
       <MessageList
-        messages={messagesBySession[session.id]}
+        messages={shownMessages}
         draft={drafts[session.id]}
         agent={agent}
         loading={!loadedSessions[session.id]}
+        running={running}
       />
 
       {/* composer */}
+      <ModeBar session={session} agent={agent} />
       <Composer session={session} agent={agent} />
 
       {/* sheets */}
@@ -192,6 +217,14 @@ export function ChatScreen() {
               }}
             />
           )}
+          <MenuRow
+            icon={<Search size={18} strokeWidth={1.8} />}
+            label="Search in chat"
+            onClick={() => {
+              setMenuOpen(false);
+              setSearchOpen(true);
+            }}
+          />
           <MenuRow
             icon={<ExternalLink size={18} strokeWidth={1.8} />}
             label="Open files"

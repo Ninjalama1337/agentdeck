@@ -184,6 +184,11 @@ export interface CreateSessionRequest {
   title?: string;
 }
 
+export interface UpdateSessionRequest {
+  /** Applies from the session's next turn (each turn starts the CLI with `--permission-mode`). */
+  permissionMode?: PermissionMode;
+}
+
 export interface TeamRunRequest {
   projectId: string;
   title?: string;

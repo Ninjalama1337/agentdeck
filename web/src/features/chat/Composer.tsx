@@ -9,6 +9,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { DictationHint, MicButton } from '../../components/MicButton';
 import { useDictation } from '../../hooks/useDictation';
 import { usePrefs } from '../../store/prefs';
+import { useChatActions } from '../../store/chatActions';
 import { haptic } from '../../util/haptics';
 
 interface PendingAttachment {
@@ -56,6 +57,15 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
     if (files.length) void addFiles(files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, agent?.capabilities.headless]);
+
+  /* "Edit" on a sent message puts its text back into the input */
+  const prefill = useChatActions((st) => st.prefill);
+  useEffect(() => {
+    if (!prefill || prefill.sessionId !== session.id) return;
+    setText(prefill.text);
+    useChatActions.getState().clearPrefill();
+    textarea.current?.focus();
+  }, [prefill, session.id]);
 
   useEffect(() => {
     const el = textarea.current;

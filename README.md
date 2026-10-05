@@ -235,7 +235,7 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 ## Roadmap
 
 - [ ] APK-Signierung inkl. Keystore-Workflow (Release-APK ist aktuell unsigniert)
-- [ ] Benachrichtigungen, wenn ein langer Turn fertig ist
+- [x] Benachrichtigungen, wenn ein langer Turn fertig ist
 - [ ] Mehrere Projekte in einem Team-Run
 - [ ] Optionale E2E-Verschlüsselung für Fernzugriff ohne TLS-Terminierung
 
