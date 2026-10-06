@@ -70,10 +70,10 @@ async function harness() {
       return world.ci;
     },
   });
-  /** One tick, and time for the fires it started. */
+  /** One tick, and everything it set off. */
   const tick = async (now: number) => {
     await scheduler.tick(now);
-    await new Promise((r) => setTimeout(r, 60));
+    await scheduler.idle();
   };
   return { store, scheduler, calls, world, tick };
 }
