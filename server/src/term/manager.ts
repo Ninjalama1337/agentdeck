@@ -6,7 +6,8 @@
  *   making terminal sessions persistent across server restarts / crashes / rebuilds
  * - optionally types a launch command (agent TUI preset) into the fresh shell
  * - streams UTF-8 chunks to every authed client (single-user deck)
- * - detects "needs attention" (bell, OSC 9/777 notifications, quiet after work)
+ * - detects "needs attention" (bell, OSC 9/777 notifications, quiet after work;
+ *   Claude Code reports it itself through hooks — see claudeHooks.ts)
  * - caps concurrency, reaps idle terminals, detaches on shutdown, restores on reboot
  */
 import fs from 'node:fs';
@@ -19,7 +20,9 @@ import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
 import { augmentedPath } from './presets.js';
 import { AttentionDetector, type AttentionReason } from './attention.js';
-import { classifyScreen, type Verdict } from '../notify/classify.js';
+import { classifyScreen, type PromptKind, type Verdict } from '../notify/classify.js';
+import type { DeckNotificationState } from '@agentdeck/shared';
+import { interpretClaudeHook, removeClaudeHookSettings, withClaudeHooks, writeClaudeHookSettings } from './claudeHooks.js';
 import {
   isTmuxAvailable,
   tmuxSocketPath,
@@ -37,7 +40,14 @@ export interface TerminalBroadcasts {
   onExit: (id: string, code: number) => void;
   onList: () => void;
   /** Terminal wants the user (bell / notification / finished work). */
-  onAttention?: (info: TerminalInfo, reason: AttentionReason, verdict: Verdict) => void;
+  onAttention?: (info: TerminalInfo, reason: AttentionReason, verdict: AttentionVerdict) => void;
+}
+
+/** A screen verdict, or what the program reported itself (which can also be a failure). */
+export interface AttentionVerdict {
+  state: DeckNotificationState;
+  prompt?: PromptKind;
+  detail?: string;
 }
 
 export interface SpawnOptions {
@@ -56,6 +66,8 @@ export interface TerminalManagerOptions {
   useTmux?: boolean;
   serverPid?: number;
   serverPort?: number;
+  /** Bridge token Claude Code terminals present when their hooks report in. */
+  hookToken?: string;
 }
 
 export interface PersistedTerminal {
@@ -80,6 +92,10 @@ interface ActiveTerminal {
   tmuxSession?: string;
   projectPath: string;
   detaching?: boolean;
+  /** A dialog was announced by a hook; reported once the screen shows it. */
+  askTimer?: NodeJS.Timeout;
+  /** When a dialog was last reported — its follow-up notification is the same news. */
+  askedAt?: number;
 }
 
 const MAX_CONCURRENT = 10;
@@ -87,6 +103,10 @@ const MAX_CONCURRENT = 10;
 const IDLE_MS = 12 * 60 * 60_000;
 const SCROLLBACK = 5000;
 const REPLAY_SCROLLBACK = 5000;
+/** Time for a dialog to appear on screen — and for a user sitting at it to answer first. */
+const ASK_GRACE_MS = 1500;
+/** Claude follows a dialog with its own notification a few seconds later. */
+const ASK_REPEAT_MS = 20_000;
 
 /** The visible screen as plain text, one line per row. */
 function screenText(screen: ActiveTerminal['screen']): string {
@@ -161,6 +181,28 @@ export class TerminalManager {
     if (this.options.serverPort) env.AGENTDECK_PORT = String(this.options.serverPort);
     if (this.options.dataDir) env.AGENTDECK_DATA_DIR = this.options.dataDir;
     return env;
+  }
+
+  /** The launch command as the shell runs it: Claude Code gets its hook settings attached. */
+  private launchCommand(id: string, opts: SpawnOptions): string {
+    const command = opts.command ?? '';
+    const { dataDir, serverPort, hookToken } = this.options;
+    if (opts.presetId !== 'claude' || !dataDir || !serverPort || !hookToken) return command;
+    try {
+      return withClaudeHooks(command, writeClaudeHookSettings(dataDir, id, serverPort, hookToken));
+    } catch (err) {
+      this.log.warn({ err, terminal: id }, 'could not write Claude hook settings — falling back to screen heuristics');
+      return command;
+    }
+  }
+
+  private removeHooks(id: string): void {
+    if (!this.options.dataDir) return;
+    try {
+      removeClaudeHookSettings(this.options.dataDir, id);
+    } catch {
+      // stale file is harmless
+    }
   }
 
   // --- Persistence -----------------------------------------------------------
@@ -258,7 +300,7 @@ export class TerminalManager {
     // aliases, PATH) and drops back into a fresh shell when the TUI exits —
     // passing it as an argument avoids racing rc scripts that query the
     // terminal on startup (typed input would be swallowed by those reads).
-    const args = opts.command ? shellArgsFor(shell, opts.command) : ['-l'];
+    const args = opts.command ? shellArgsFor(shell, this.launchCommand(id, opts)) : ['-l'];
     let tmuxSession: string | undefined = undefined;
 
     if (useTmux) {
@@ -362,8 +404,10 @@ export class TerminalManager {
       // An explicit kill() already removed+broadcast this terminal — only
       // natural exits (user typed `exit`) run the cleanup path.
       if (this.active.get(id) !== term) return;
+      clearTimeout(term.askTimer);
       this.active.delete(id);
       this.removePersisted(id);
+      this.removeHooks(id);
       this.log.info({ terminal: id, code: exitCode }, 'terminal exited');
       broadcast.onExit(id, exitCode);
       broadcast.onList();
@@ -476,8 +520,10 @@ export class TerminalManager {
       term.attention.dispose();
       term.screen.dispose();
       if (this.active.get(id) !== term) return;
+      clearTimeout(term.askTimer);
       this.active.delete(id);
       this.removePersisted(id);
+      this.removeHooks(id);
       this.log.info({ terminal: id, code: exitCode }, 'restored terminal exited');
       broadcast.onExit(id, exitCode);
       broadcast.onList();
@@ -492,6 +538,8 @@ export class TerminalManager {
     try {
       term.proc.write(data);
       term.attention.input();
+      // Answered before it was reported — nothing left to announce.
+      clearTimeout(term.askTimer);
       return true;
     } catch {
       return false;
@@ -521,7 +569,8 @@ export class TerminalManager {
   /**
    * Flags the terminal and reports why. The verdict is read off the screen
    * once the emulator has parsed everything written so far — the bell usually
-   * arrives in the same chunk as the prompt it rings for.
+   * arrives in the same chunk as the prompt it rings for. `reported` is what
+   * the program said itself; the screen then only adds how to answer.
    */
   private raiseAttention(
     id: string,
@@ -529,16 +578,65 @@ export class TerminalManager {
     broadcast: TerminalBroadcasts,
     reason: AttentionReason,
     text?: string,
+    reported?: { state: DeckNotificationState; detail?: string; ifOnScreen?: boolean },
   ): void {
     term.screen.write('', () => {
       if (this.active.get(id) !== term) return;
-      const verdict = classifyScreen(screenText(term.screen), text);
+      const seen = classifyScreen(screenText(term.screen), text);
+      let verdict: AttentionVerdict = seen;
+      if (reported) {
+        if (reported.ifOnScreen && seen.state !== 'waiting') return;
+        const detail = reported.detail ?? (seen.state === reported.state ? seen.detail : undefined);
+        verdict = {
+          state: reported.state,
+          ...(reported.state === 'waiting' && seen.prompt ? { prompt: seen.prompt } : {}),
+          ...(detail ? { detail } : {}),
+        };
+        if (reported.state === 'waiting') term.askedAt = Date.now();
+      }
       const changed = !term.info.attention || term.info.attentionState !== verdict.state;
       term.info.attention = true;
       term.info.attentionState = verdict.state;
       broadcast.onAttention?.(term.info, reason, verdict);
       if (changed) broadcast.onList();
     });
+  }
+
+  /**
+   * A Claude Code hook reported in (see claudeHooks.ts). Returns false when
+   * the terminal is gone.
+   */
+  hookEvent(id: string, payload: unknown, broadcast: TerminalBroadcasts): boolean {
+    const term = this.active.get(id);
+    if (!term) return false;
+    // Hooks work here, and they are exact: the quiet-after-work guess would
+    // only add late and vaguer duplicates.
+    term.attention.stopIdleNotify();
+    const signal = interpretClaudeHook(payload);
+    if (!signal) return true;
+    clearTimeout(term.askTimer);
+    if (signal.kind === 'working') {
+      delete term.askedAt;
+    } else if (signal.kind === 'result') {
+      delete term.askedAt;
+      this.raiseAttention(id, term, broadcast, 'notify', undefined, signal);
+    } else if (signal.confirmed) {
+      if (term.askedAt === undefined || Date.now() - term.askedAt > ASK_REPEAT_MS) {
+        this.raiseAttention(id, term, broadcast, 'notify', undefined, { state: 'waiting', detail: signal.detail });
+      }
+    } else {
+      // Sent before the dialog is drawn, and also for requests that get
+      // settled without one — only what reaches the screen is reported.
+      term.askTimer = setTimeout(() => {
+        this.raiseAttention(id, term, broadcast, 'notify', undefined, {
+          state: 'waiting',
+          detail: signal.detail,
+          ifOnScreen: true,
+        });
+      }, ASK_GRACE_MS);
+      term.askTimer.unref?.();
+    }
+    return true;
   }
 
   /** What the terminal's screen asks right now (a fresh read, not the last alert). */
@@ -567,6 +665,7 @@ export class TerminalManager {
       if (rec?.tmuxSession) {
         killTmuxSession(rec.tmuxSession);
         this.removePersisted(id);
+        this.removeHooks(id);
         broadcast.onExit(id, -1);
         broadcast.onList();
         return true;
@@ -576,8 +675,10 @@ export class TerminalManager {
     term.attention.dispose();
     term.screen.dispose();
     clearTimeout(term.idleTimer);
+    clearTimeout(term.askTimer);
     this.active.delete(id);
     this.removePersisted(id);
+    this.removeHooks(id);
     if (term.tmuxSession) {
       killTmuxSession(term.tmuxSession);
     }
@@ -598,8 +699,10 @@ export class TerminalManager {
       const term = this.active.get(id);
       if (!term) continue;
       clearTimeout(term.idleTimer);
+      clearTimeout(term.askTimer);
       term.attention.dispose();
       term.screen.dispose();
+      this.removeHooks(id);
       if (term.tmuxSession) {
         killTmuxSession(term.tmuxSession);
       }
@@ -624,6 +727,7 @@ export class TerminalManager {
       if (!term) continue;
       term.detaching = true;
       clearTimeout(term.idleTimer);
+      clearTimeout(term.askTimer);
       term.attention.dispose();
       term.screen.dispose();
       try {

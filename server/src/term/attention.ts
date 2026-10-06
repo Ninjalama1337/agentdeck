@@ -34,12 +34,14 @@ export class AttentionDetector {
   private lastOutput = 0;
   private lastFired = Number.NEGATIVE_INFINITY;
   private quietTimer: NodeJS.Timeout | null = null;
+  private idleNotify: boolean;
   private readonly quietMs: number;
   private readonly minBusyMs: number;
   private readonly throttleMs: number;
   private readonly now: () => number;
 
   constructor(private readonly opts: AttentionOptions) {
+    this.idleNotify = opts.idleNotify;
     this.quietMs = opts.quietMs ?? 12_000;
     this.minBusyMs = opts.minBusyMs ?? 6_000;
     this.throttleMs = opts.throttleMs ?? 20_000;
@@ -50,7 +52,7 @@ export class AttentionDetector {
   output(chunk: string): void {
     const t = this.now();
     this.scan(chunk);
-    if (!this.opts.idleNotify) return;
+    if (!this.idleNotify) return;
     // A gap > quietMs between chunks starts a fresh busy streak.
     if (this.busyStart === null || t - this.lastOutput > this.quietMs) this.busyStart = t;
     this.lastOutput = t;
@@ -64,6 +66,12 @@ export class AttentionDetector {
       clearTimeout(this.quietTimer);
       this.quietTimer = null;
     }
+  }
+
+  /** The program reports its state itself from now on — stop guessing from silence. */
+  stopIdleNotify(): void {
+    this.idleNotify = false;
+    this.input();
   }
 
   dispose(): void {
