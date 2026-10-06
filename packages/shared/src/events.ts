@@ -8,6 +8,7 @@ import type {
   DeckNotification,
   DeckNotificationState,
   FileChangeEvent,
+  PairRequestInfo,
   Project,
   Routine,
   Session,
@@ -72,6 +73,8 @@ export interface ServerToClientEvents {
   }) => void;
   /** Inbox-worthy event (run finished, terminal waiting, team done). Also sent via Web Push. */
   notification: (payload: { notification: DeckNotification }) => void;
+  /** Pairing requests from outside the network that wait for approval (full list). */
+  'pair:requests': (payload: { requests: PairRequestInfo[] }) => void;
   notify: (payload: { level: 'info' | 'warn' | 'error'; text: string }) => void;
 }
 

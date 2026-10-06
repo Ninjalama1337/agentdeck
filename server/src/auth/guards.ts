@@ -23,7 +23,7 @@ export function bearerToken(req: FastifyRequest): string | undefined {
 
 /**
  * Fastify onRequest hook enforcing device-JWT auth on every /api route except
- * the explicitly public ones (health, pair, apk info/latest), the bridge scope
+ * the explicitly public ones (health, pair, pair/status, apk info/latest), the bridge scope
  * (own guard), apk upload (own guard: device JWT or bridge token) and
  * signed-token file downloads (the HMAC token in the query IS the credential;
  * the route verifies signature, expiry and path binding).
@@ -32,7 +32,7 @@ export function makeDeviceAuthHook(secretHex: string, touchDevice: (deviceId: st
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const path = req.url.split('?')[0] ?? '';
     if (!path.startsWith('/api/')) return;
-    if (path === '/api/health' || path === '/api/pair') return;
+    if (path === '/api/health' || path === '/api/pair' || path === '/api/pair/status') return;
     if (path === '/api/apk/info' || path === '/api/apk/latest' || path === '/api/apk/upload') return;
     if (path.startsWith('/api/bridge/')) return;
     if (

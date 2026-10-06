@@ -9,6 +9,7 @@ import type { AgentManager } from '../agents/manager.js';
 import type { TeamOrchestrator } from '../team/orchestrator.js';
 import type { PairingCodeManager } from '../auth/secrets.js';
 import type { AttemptLimiter } from '../auth/attemptLimiter.js';
+import type { PairRequests } from '../auth/pairRequests.js';
 import type { TunnelManager } from '../tunnel/manager.js';
 import type { ApkStore } from '../apk/store.js';
 import type { UsageCollector } from '../usage/collector.js';
@@ -32,6 +33,10 @@ export interface AppDeps {
   usage: UsageCollector;
   pairing: PairingCodeManager;
   limiter: AttemptLimiter;
+  /** Failed pairing attempts from outside the LAN, all clients together. */
+  remoteLimiter: AttemptLimiter;
+  /** Pairing requests from outside the LAN awaiting approval on a paired device. */
+  pairRequests: PairRequests;
   tunnel: TunnelManager;
   apk: ApkStore;
   /** Runs the fixed agent admin recipes (update/install/login), one at a time. */

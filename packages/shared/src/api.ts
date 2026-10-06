@@ -134,6 +134,39 @@ export interface PairResponse {
   server: ServerInfo;
 }
 
+/**
+ * Answer to `POST /api/pair` from outside the server's network: the code was
+ * right, now a paired device has to approve. The new device shows `checkCode`
+ * and polls `POST /api/pair/status` with `id` + `pollToken`.
+ */
+export interface PairPendingResponse {
+  pending: { id: string; pollToken: string; checkCode: string; expiresAt: number };
+}
+
+export interface PairStatusRequest {
+  id: string;
+  pollToken: string;
+}
+
+/** `gone`: denied, expired or already collected — start over with a new code. */
+export type PairStatusResponse = { status: 'pending' } | { status: 'gone' } | ({ status: 'approved' } & PairResponse);
+
+/** A device outside the network waiting for approval, as paired devices see it. */
+export interface PairRequestInfo {
+  id: string;
+  deviceName: string;
+  ip: string;
+  /** Same number the waiting device displays. */
+  checkCode: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** Current pairing code, readable by paired devices (`GET /api/pair/code`). */
+export interface PairCodeResponse {
+  code: string;
+}
+
 export interface DeviceInfo {
   id: string;
   name: string;

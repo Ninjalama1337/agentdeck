@@ -25,6 +25,7 @@ import { AgentManager } from '../agents/manager.js';
 import { TeamOrchestrator } from '../team/orchestrator.js';
 import { PairingCodeManager, loadOrCreateSecret } from '../auth/secrets.js';
 import { AttemptLimiter } from '../auth/attemptLimiter.js';
+import { PairRequests } from '../auth/pairRequests.js';
 import { makeApkUploadGuard, makeBridgeGuard, makeDeviceAuthHook } from '../auth/guards.js';
 import { TunnelManager } from '../tunnel/manager.js';
 import { ApkStore } from '../apk/store.js';
@@ -273,6 +274,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     usage: new UsageCollector({ agents }),
     pairing,
     limiter,
+    remoteLimiter: new AttemptLimiter(10),
+    pairRequests: new PairRequests(),
     tunnel: tunnelManager,
     apk,
     adminJobs: adminJobRunner,

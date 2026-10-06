@@ -39,8 +39,13 @@ import type {
   GithubRepo,
   GitCommitRequest,
   ModelPreset,
+  PairCodeResponse,
+  PairPendingResponse,
   PairRequest,
+  PairRequestInfo,
   PairResponse,
+  PairStatusRequest,
+  PairStatusResponse,
   Project,
   ProjectGitInfo,
   Routine,
@@ -195,8 +200,30 @@ export const api = {
     return request('GET', '/api/health', { noAuth: true });
   },
 
-  pair(body: PairRequest): Promise<PairResponse> {
+  /** A token from the server's network; from outside, a request a paired device has to approve. */
+  pair(body: PairRequest): Promise<PairResponse | PairPendingResponse> {
     return request('POST', '/api/pair', { json: body, noAuth: true });
+  },
+
+  pairStatus(body: PairStatusRequest): Promise<PairStatusResponse> {
+    return request('POST', '/api/pair/status', { json: body, noAuth: true });
+  },
+
+  /** Current pairing code, to pair another device from this one. */
+  pairCode(): Promise<PairCodeResponse> {
+    return request('GET', '/api/pair/code');
+  },
+
+  newPairCode(): Promise<PairCodeResponse> {
+    return request('POST', '/api/pair/code');
+  },
+
+  pairRequests(): Promise<PairRequestInfo[]> {
+    return request('GET', '/api/pair/requests');
+  },
+
+  decidePairRequest(id: string, approve: boolean): Promise<void> {
+    return request('POST', `/api/pair/requests/${encodeURIComponent(id)}`, { json: { approve } });
   },
 
   /** Name/version of the paired server (404 on servers older than this route). */

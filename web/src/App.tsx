@@ -10,6 +10,7 @@ import { Lightbox } from './components/Lightbox';
 import { UpdateBanner } from './components/UpdateBanner';
 import { OtherServers } from './components/SavedServers';
 import { PairScreen } from './features/pairing/PairScreen';
+import { PairApproval } from './features/pairing/PairApproval';
 import { HomeScreen } from './features/home/HomeScreen';
 import { ChatScreen } from './features/chat/ChatScreen';
 import { TeamScreen } from './features/chat/TeamScreen';
@@ -310,6 +311,7 @@ export default function App() {
       <TabBar />
       <UsageSheet />
       <Lightbox />
+      <PairApproval />
       <ToastStack />
     </>
   );

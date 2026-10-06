@@ -38,9 +38,9 @@ sequenceDiagram
     S->>S: erster Start: 6-stelliger Pairing-Code + QR erzeugen
     Note over S: Code in Konsole + dataDir/pairing-code.txt
     H->>S: POST /api/pair { code, deviceName }
-    S->>S: Code pruefen, Herkunft muss LAN/localhost sein,<br/>max. 5 Fehlversuche pro IP / 10 min (429)
-    S-->>H: JWT (HS256, 30 Tage, deviceId) + Server-Info
+    S->>S: Code pruefen (Herkunft LAN/localhost),<br/>max. 5 Fehlversuche pro IP / 10 min (429)
     S->>S: Pairing-Code rotieren, Device in devices.json registrieren
+    S-->>H: JWT (HS256, 30 Tage, deviceId) + Server-Info
     H->>S: GET /api/agents (Authorization: Bearer ...)
     S-->>H: AgentInfo[]
     Note over H,S: WebSocket-Handshake mit auth.token
@@ -49,12 +49,25 @@ sequenceDiagram
 Eigenschaften:
 
 - `/api/health` ist die einzige Route ohne Auth (für Liveness-Checks).
-- Pairing nur aus dem LAN bzw. localhost — ein Angreifer aus dem Internet kann
-  selbst mit abgefangenem Code nichts paaren. Das gilt auch mit Tunnel oder
-  Reverse Proxy: Anfragen, die ein lokaler Proxy für eine öffentliche Adresse
-  weiterreicht (`X-Forwarded-For`, `CF-Connecting-IP` …), werden abgelehnt.
-- Der Code **rotiert nach jeder erfolgreichen Paarung**; ein Code ist also
-  maximal einmal brauchbar.
+- Aus dem LAN bzw. localhost genügt der Code. **Von außerhalb** — also bei
+  Anfragen, die ein Tunnel oder Reverse Proxy für eine öffentliche Adresse
+  weiterreicht (`X-Forwarded-For`, `CF-Connecting-IP` …) — reicht der Code
+  allein nicht: Der Server legt eine Anfrage an, meldet sie allen gepaarten
+  Geräten (in der App und per Push, unabhängig von Ruhezeiten) und gibt das
+  JWT erst heraus, wenn eines davon **Allow** tippt. Ein Angreifer aus dem
+  Internet kann selbst mit abgefangenem Code nichts paaren.
+- Beide Geräte zeigen dieselbe vierstellige **Prüfnummer**. Erlaube eine
+  Anfrage nur, wenn du gerade selbst pairst und die Nummer übereinstimmt.
+- Anfragen von außen verfallen nach 5 Minuten, höchstens 3 warten gleichzeitig.
+  Fehlversuche von außen zählen zusätzlich in einen gemeinsamen Topf
+  (10 pro 10 min für alle Adressen zusammen), weil die gemeldete Adresse hinter
+  einem Proxy vom Absender mitbestimmt wird. Das LAN bleibt davon unberührt.
+- Solange noch **kein** Gerät gepaart ist, werden Anfragen von außen abgelehnt
+  — das erste Gerät pairt im LAN.
+- Der Code **rotiert nach jeder Verwendung** (Paarung oder Anfrage von außen);
+  ein Code ist also maximal einmal brauchbar. Gepaarte Geräte lesen den
+  aktuellen Code unter Settings → Paired devices und können dort einen neuen
+  erzeugen.
 - Geräte-Liste in der App: einzelnes Gerät abmelden (`DELETE /api/devices/:id`).
 - **Alle Geräte sofort abmelden:** `jwt-secret` aus `dataDir` löschen und den
   Server neu starten. Ohne gültige Signatur ist jede vorhandene JWT wertlos,
@@ -129,7 +142,8 @@ gleichen Rechner + localhost-Bindung bedeutet: Der Klartext verlässt die
 Maschine nie unverschlüsselt.
 
 **3. Pairing-Code geheim halten, aber entspannt.** Der Code ist kurzlebig
-(Rotation nach jeder Paarung), nur LAN-paarbar und ratengeschützt. Trotzdem: Nicht in
+(Rotation nach jeder Verwendung), von außen nur mit Bestätigung auf einem
+gepaarten Gerät nutzbar und ratengeschützt. Trotzdem: Nicht in
 Screenshots posten. Aktuellen Code jederzeit nachlesbar via
 `dataDir/pairing-code.txt` oder Server-Konsole.
 
