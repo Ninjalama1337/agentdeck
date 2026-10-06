@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Play, Repeat, Trash2 } from 'lucide-react';
-import type { AgentId, Routine, RoutineSchedule } from '@agentdeck/shared';
-import { useAppStore } from '../../store/appStore';
+import { ChevronDown, ChevronRight, Copy, Loader2, Play, RefreshCw, Repeat, Trash2 } from 'lucide-react';
+import type { AgentId, Routine, RoutineSchedule, RunRecord } from '@agentdeck/shared';
+import { api, getApiBase } from '../../api/client';
+import { errorMessage, useAppStore } from '../../store/appStore';
+import { RunMark } from '../activity/ActivitySheet';
+import { compact, duration, money } from '../activity/activityMath';
 import { Sheet } from '../../components/ui/Sheet';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { relTime } from '../../util/format';
@@ -14,6 +17,9 @@ export function scheduleLabel(schedule: RoutineSchedule): string {
     return `every ${Math.round((m / 60) * 10) / 10} h`;
   }
   if (schedule.kind === 'daily') return `daily ${schedule.time}`;
+  if (schedule.kind === 'commit') return 'on every new commit';
+  if (schedule.kind === 'ci-failed') return 'when CI fails';
+  if (schedule.kind === 'webhook') return 'when its webhook is called';
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return `${days[schedule.weekday] ?? '?'} ${schedule.time}`;
 }
@@ -130,7 +136,10 @@ export function RoutinesSheet({ open, onClose }: { open: boolean; onClose: () =>
                     )}
                     {routine.lastRunAt && <span>last {relTime(routine.lastRunAt)}</span>}
                     {routine.lastStatus === 'error' && <span className="text-danger">last run failed</span>}
+                    {routine.freshContext && <span>fresh context each run</span>}
                   </div>
+
+                  {routine.schedule.kind === 'webhook' && routine.hookToken && <HookUrl routine={routine} />}
 
                   <div className="mt-3 flex items-center gap-2">
                     <button
@@ -158,6 +167,8 @@ export function RoutinesSheet({ open, onClose }: { open: boolean; onClose: () =>
                       <Trash2 size={15} />
                     </button>
                   </div>
+
+                  <RoutineHistory routine={routine} onOpen={onClose} />
                 </div>
               );
             })
@@ -168,7 +179,156 @@ export function RoutinesSheet({ open, onClose }: { open: boolean; onClose: () =>
   );
 }
 
+/* ----------------------------------------------------------------- history */
+
+/** The routine's past runs (from the server's activity record), loaded when opened. */
+function RoutineHistory({ routine, onOpen }: { routine: Routine; onOpen: () => void }) {
+  const toast = useAppStore((s) => s.toast);
+  const [open, setOpen] = useState(false);
+  const [runs, setRuns] = useState<RunRecord[] | null>(null);
+  const [next, setNext] = useState<number | undefined>();
+  const [loading, setLoading] = useState(false);
+
+  const load = async (before?: number) => {
+    setLoading(true);
+    try {
+      const page = await api.routineRuns(routine.id, { limit: 10, ...(before ? { before } : {}) });
+      setRuns((old) => (before && old ? [...old, ...page.runs] : page.runs));
+      setNext(page.next);
+    } catch (err) {
+      toast('error', errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reloads when a run ended while the list is open.
+  useEffect(() => {
+    if (open) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, routine.lastRunAt]);
+
+  const openSession = (run: RunRecord) => {
+    const st = useAppStore.getState();
+    if (!run.sessionId) return;
+    onOpen();
+    st.navigate({ name: 'chat' });
+    void st.openSession(run.sessionId).catch(() => st.toast('warn', 'Session no longer exists'));
+  };
+
+  return (
+    <div className="mt-2 border-t border-line pt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="press tap flex w-full items-center gap-1 py-1 text-left text-[12px] font-medium text-dim"
+      >
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        History
+        {loading && <Loader2 size={12} className="ml-1 animate-spin" />}
+      </button>
+      {open && runs && (
+        <>
+          {runs.length === 0 && <p className="py-1 text-[12px] text-dim">No runs on record yet.</p>}
+          <ul className="flex flex-col">
+            {runs.map((run) => {
+              const used = (run.inputTokens ?? 0) + (run.outputTokens ?? 0) + (run.cacheWriteTokens ?? 0);
+              const facts = [
+                duration(run.endedAt - run.startedAt),
+                used > 0 ? `${compact(used)} tokens` : undefined,
+                run.costUsd !== undefined ? money(run.costUsd) : undefined,
+              ].filter(Boolean);
+              return (
+                <li key={run.id}>
+                  <button type="button" onClick={() => openSession(run)} className="press tap w-full rounded-lg py-1.5 text-left">
+                    <span className="flex items-start gap-2">
+                      <RunMark status={run.status} />
+                      <span className="min-w-0 flex-1 text-[12px] text-ink/90">
+                        {relTime(run.startedAt)} <span className="text-dim">· {facts.join(' · ')}</span>
+                      </span>
+                    </span>
+                    {(run.status === 'ok' ? run.summary : (run.error ?? run.summary)) && (
+                      <span className="clamp-2 mt-0.5 block pl-6 text-[11.5px] leading-snug text-dim">
+                        {run.status === 'ok' ? run.summary : (run.error ?? run.summary)}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {next !== undefined && (
+            <button type="button" disabled={loading} onClick={() => void load(next)} className="press tap w-full py-1.5 text-center text-[12px] text-dim">
+              Show older
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The address a `webhook` routine is fired with — to copy into CI, a cron job, another service. */
+function HookUrl({ routine }: { routine: Routine }) {
+  const toast = useAppStore((s) => s.toast);
+  const [busy, setBusy] = useState(false);
+  const base = getApiBase() || window.location.origin;
+  const url = `${base}/api/hooks/routine/${routine.id}/${routine.hookToken ?? ''}`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('info', 'Webhook URL copied');
+    } catch {
+      toast('warn', 'Could not copy — select the address instead.');
+    }
+  };
+  const renew = async () => {
+    setBusy(true);
+    try {
+      // The routine:update broadcast brings the new token into the list.
+      await api.renewRoutineHook(routine.id);
+      toast('info', 'New webhook URL — the old one no longer works.');
+    } catch (err) {
+      toast('error', errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-2.5 rounded-xl border border-line bg-black/25 p-2.5">
+      <p className="text-[11px] text-dim">
+        Fires on <span className="font-mono">POST</span> to this address; a request body reaches the agent with the prompt.
+      </p>
+      <p className="mt-1 select-all break-all font-mono text-[11px] leading-snug text-ink/90">{url}</p>
+      <div className="mt-2 flex gap-2">
+        <button type="button" onClick={() => void copy()} className="press tap flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] font-medium">
+          <Copy size={12} /> Copy
+        </button>
+        <button type="button" disabled={busy} onClick={() => void renew()} className="press tap flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] font-medium text-dim disabled:opacity-50">
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} New address
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ editor */
+
+const WHEN: { kind: RoutineSchedule['kind']; label: string }[] = [
+  { kind: 'interval', label: 'Interval' },
+  { kind: 'daily', label: 'Daily' },
+  { kind: 'weekly', label: 'Weekly' },
+  { kind: 'commit', label: 'New commit' },
+  { kind: 'ci-failed', label: 'CI failed' },
+  { kind: 'webhook', label: 'Webhook' },
+];
+
+const EVENT_HINTS: Partial<Record<RoutineSchedule['kind'], string>> = {
+  commit: 'Runs when the project’s checked-out branch gets a new commit — yours, an agent’s or a pull. The commit is named in the prompt.',
+  'ci-failed': 'Runs when the newest finished GitHub Actions run of the project failed (checked every two minutes via gh). The run is linked in the prompt.',
+  webhook: 'Runs when its address is called. You get the address after saving.',
+};
 
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -197,8 +357,9 @@ function RoutineEditor({
     routine?.schedule.kind === 'interval' ? String(routine.schedule.minutes) : '60',
   );
   const [time, setTime] = useState(
-    routine?.schedule && routine.schedule.kind !== 'interval' ? routine.schedule.time : '09:00',
+    routine?.schedule.kind === 'daily' || routine?.schedule.kind === 'weekly' ? routine.schedule.time : '09:00',
   );
+  const [freshContext, setFreshContext] = useState(routine?.freshContext === true);
   const [weekday, setWeekday] = useState<Weekday>(
     routine?.schedule.kind === 'weekly' ? ((routine.schedule.weekday as Weekday) ?? 1) : 1,
   );
@@ -211,6 +372,7 @@ function RoutineEditor({
       if (!Number.isInteger(n) || n < 1 || n > 20160) return null;
       return { kind: 'interval', minutes: n };
     }
+    if (kind === 'commit' || kind === 'ci-failed' || kind === 'webhook') return { kind };
     if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(time.trim())) return null;
     return kind === 'daily'
       ? { kind: 'daily', time: time.trim() }
@@ -233,6 +395,7 @@ function RoutineEditor({
         prompt: prompt.trim(),
         schedule,
         enabled: true,
+        freshContext,
       });
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Failed to save routine');
@@ -284,23 +447,26 @@ function RoutineEditor({
       </div>
 
       <div>
-        <label className="mb-1.5 block px-1 text-[12px] font-medium text-dim">Schedule (server time)</label>
-        <div className="mb-2 flex gap-1.5">
-          {(['interval', 'daily', 'weekly'] as const).map((k) => (
+        <label className="mb-1.5 block px-1 text-[12px] font-medium text-dim">When (times are server time)</label>
+        <div className="mb-2 grid grid-cols-3 gap-1.5">
+          {WHEN.map(({ kind: k, label }) => (
             <button
               key={k}
               type="button"
+              aria-pressed={kind === k}
               onClick={() => setKind(k)}
               className={
-                'press flex h-9 flex-1 items-center justify-center rounded-xl border text-[12.5px] font-semibold ' +
+                'press flex h-9 items-center justify-center rounded-xl border text-[12.5px] font-semibold ' +
                 (kind === k ? 'border-accent/50 bg-accent/15 text-ink' : 'border-line bg-surface-2 text-dim')
               }
             >
-              {k === 'interval' ? 'Interval' : k === 'daily' ? 'Daily' : 'Weekly'}
+              {label}
             </button>
           ))}
         </div>
-        {kind === 'interval' ? (
+        {EVENT_HINTS[kind] ? (
+          <p className="px-1 text-[12px] leading-relaxed text-dim">{EVENT_HINTS[kind]}</p>
+        ) : kind === 'interval' ? (
           <div className="flex items-center gap-2">
             <span className="text-[13px] text-dim">every</span>
             <input
@@ -341,6 +507,19 @@ function RoutineEditor({
           </div>
         )}
       </div>
+
+      <label className="flex items-start gap-2.5 px-1">
+        <input
+          type="checkbox"
+          checked={freshContext}
+          onChange={(e) => setFreshContext(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#7C5CFF]"
+        />
+        <span className="text-[12.5px] leading-snug text-dim">
+          <span className="font-medium text-ink">Fresh context each run</span> — the agent does not carry the earlier runs’
+          conversation along. Cheaper for long-lived routines; the chat still shows every run.
+        </span>
+      </label>
 
       <div className="flex gap-2 pt-1">
         <button

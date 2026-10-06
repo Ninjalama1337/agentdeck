@@ -73,6 +73,20 @@ Eigenschaften:
   Server neu starten. Ohne gültige Signatur ist jede vorhandene JWT wertlos,
   alle Geräte müssen neu pairen.
 
+## Routinen-Webhooks
+
+Eine Routine mit Auslöser *Webhook* hat eine Adresse
+`/api/hooks/routine/<id>/<token>`, die **ohne Geräte-Login** einen Lauf
+startet — der Token in der URL ist der Schlüssel (192 Bit Zufall, zeitkonstant
+verglichen, 30 Aufrufe/Minute je Aufrufer). Wer die Adresse kennt, kann genau
+diese eine Routine auslösen, sonst nichts. Zwei Dinge solltest du wissen:
+
+- Der Request-Body landet als Text **im Prompt** des Agents. Was ein fremder
+  Dienst dort hineinschreibt, liest der Agent — gib die Adresse nur Diensten,
+  denen du traust, und lass Webhook-Routinen nicht im Modus `bypass` laufen.
+- Ist die Adresse durchgesickert: *New address* an der Routine vergibt einen
+  neuen Token, der alte gilt sofort nicht mehr.
+
 ## Warum Download-Tokens signiert sind
 
 Android-Download-Manager (und „Teilen → in Datei speichern“) senden keine

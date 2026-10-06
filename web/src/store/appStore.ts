@@ -434,6 +434,8 @@ export function routineNextRunAt(routine: Routine, now = Date.now()): number | n
   const anchor = routine.lastRunAt ?? routine.createdAt;
   const schedule = routine.schedule;
   if (schedule.kind === 'interval') return anchor + schedule.minutes * 60_000;
+  // Event routines (commit, CI failure, webhook) have no clock.
+  if (schedule.kind !== 'daily' && schedule.kind !== 'weekly') return null;
   const [h, m] = schedule.time.split(':').map(Number);
   const base = new Date(anchor);
   base.setHours(h || 0, m || 0, 0, 0);

@@ -503,6 +503,15 @@ export const api = {
     return request('POST', `/api/routines/${encodeURIComponent(id)}/run`);
   },
 
+  routineRuns(id: string, query: { limit?: number; before?: number } = {}): Promise<RunListResponse> {
+    return request('GET', `/api/routines/${encodeURIComponent(id)}/runs`, { query });
+  },
+
+  /** A new webhook URL for the routine; the old one stops working. */
+  renewRoutineHook(id: string): Promise<Routine & { nextRunAt: number | null }> {
+    return request('POST', `/api/routines/${encodeURIComponent(id)}/hook-token`);
+  },
+
   /** Account profiles (env overrides per agent). */
   accounts(agentId?: string): Promise<Account[]> {
     return request('GET', '/api/accounts', { query: { agentId } });

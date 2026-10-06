@@ -35,6 +35,8 @@ export function makeDeviceAuthHook(secretHex: string, touchDevice: (deviceId: st
     if (path === '/api/health' || path === '/api/pair' || path === '/api/pair/status') return;
     if (path === '/api/apk/info' || path === '/api/apk/latest' || path === '/api/apk/upload') return;
     if (path.startsWith('/api/bridge/')) return;
+    // Routine webhooks carry their own secret in the URL.
+    if (path.startsWith('/api/hooks/')) return;
     if (
       /^\/api\/projects\/[^/]+\/files\/raw$/.test(path) &&
       new URL(req.url, 'http://localhost').searchParams.has('token')

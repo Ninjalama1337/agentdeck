@@ -32,6 +32,8 @@ export interface AppDeps {
   manager: AgentManager;
   teams: TeamOrchestrator;
   usage: UsageCollector;
+  /** Calls to routine webhooks per caller. */
+  hookLimiter: RateLimiter;
   /** Record of every agent run and of the subscription limits over time. */
   stats: StatsDb;
   pairing: PairingCodeManager;

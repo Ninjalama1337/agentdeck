@@ -601,7 +601,7 @@ function Runs({ agent, onClose }: { agent: string | null; onClose: () => void })
 }
 
 /** Outcome as an icon with a name — never color alone. */
-function RunMark({ status }: { status: RunRecord['status'] }) {
+export function RunMark({ status }: { status: RunRecord['status'] }) {
   if (status === 'ok') {
     return (
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ok/15 text-ok" role="img" aria-label="Finished">

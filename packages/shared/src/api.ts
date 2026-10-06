@@ -814,10 +814,22 @@ export interface GitOpResult {
 // Routines — agents on recurring jobs
 // ---------------------------------------------------------------------------
 
+/**
+ * When a routine fires: on a clock (`interval`, `daily`, `weekly`) or on an
+ * event — `commit`: the project's checked-out HEAD moved (a commit, a pull);
+ * `ci-failed`: the newest finished GitHub Actions run of the project failed;
+ * `webhook`: something called the routine's hook URL.
+ */
 export type RoutineSchedule =
   | { kind: 'interval'; minutes: number }
   | { kind: 'daily'; time: string }
-  | { kind: 'weekly'; weekday: number; time: string };
+  | { kind: 'weekly'; weekday: number; time: string }
+  | { kind: 'commit' }
+  | { kind: 'ci-failed' }
+  | { kind: 'webhook' };
+
+/** What set a routine off. */
+export type RoutineTrigger = 'schedule' | 'manual' | 'commit' | 'ci-failed' | 'webhook';
 
 export interface Routine {
   id: string;
@@ -830,6 +842,12 @@ export interface Routine {
   accountId?: string;
   schedule: RoutineSchedule;
   enabled: boolean;
+  /** Every run starts without the earlier runs' conversation (their chat stays readable). */
+  freshContext?: boolean;
+  /** `webhook` routines: the secret that is part of the hook URL (`/api/hooks/routine/<id>/<token>`). */
+  hookToken?: string;
+  /** Event routines: what was last seen (commit hash, CI run id) — a change fires. */
+  triggerState?: string;
   /** Session used for every fire (created on the first run). */
   sessionId?: string;
   lastRunAt?: number;
@@ -848,6 +866,7 @@ export interface CreateRoutineRequest {
   accountId?: string;
   schedule: RoutineSchedule;
   enabled?: boolean;
+  freshContext?: boolean;
 }
 
 export type UpdateRoutineRequest = Partial<CreateRoutineRequest>;

@@ -347,6 +347,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     notifications,
     voice: new VoiceService({ config, log }),
     apkLimiter: new RateLimiter(30, 60_000),
+    hookLimiter: new RateLimiter(30, 60_000),
     jwtSecret,
     bridgeToken,
     bridgeGuard: makeBridgeGuard(bridgeToken),

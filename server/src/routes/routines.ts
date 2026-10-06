@@ -1,6 +1,7 @@
 /**
  * Routine CRUD + "fire now" (BridgeMind: agents on recurring jobs).
  */
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { Routine, RoutineSchedule } from '@agentdeck/shared';
 import { z } from 'zod';
@@ -14,6 +15,9 @@ const ScheduleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('interval'), minutes: z.number() }),
   z.object({ kind: z.literal('daily'), time: z.string() }),
   z.object({ kind: z.literal('weekly'), weekday: z.number(), time: z.string() }),
+  z.object({ kind: z.literal('commit') }),
+  z.object({ kind: z.literal('ci-failed') }),
+  z.object({ kind: z.literal('webhook') }),
 ]);
 
 const RoutineBodySchema = z.object({
@@ -26,7 +30,21 @@ const RoutineBodySchema = z.object({
   accountId: z.string().optional(),
   schedule: ScheduleSchema,
   enabled: z.boolean().optional(),
+  freshContext: z.boolean().optional(),
 });
+
+/** What a hook caller may send along: JSON, or plain text. */
+const HOOK_BODY_MAX = 16_000;
+
+function newHookToken(): string {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
 
 function scheduleOr400(schedule: RoutineSchedule): RoutineSchedule {
   const problem = validateSchedule(schedule);
@@ -73,6 +91,8 @@ export async function routineRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
       ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
       schedule: scheduleOr400(body.schedule),
       enabled: body.enabled ?? true,
+      ...(body.freshContext ? { freshContext: true } : {}),
+      ...(body.schedule.kind === 'webhook' ? { hookToken: newHookToken() } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -103,8 +123,10 @@ export async function routineRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
       ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
       ...(body.schedule !== undefined ? { schedule: scheduleOr400(body.schedule) } : {}),
       ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
-      // schedule changes reset the cadence anchor
-      ...(body.schedule !== undefined ? { lastRunAt: undefined } : {}),
+      ...(body.freshContext !== undefined ? { freshContext: body.freshContext } : {}),
+      // schedule changes reset the cadence anchor and what an event routine saw last
+      ...(body.schedule !== undefined ? { lastRunAt: undefined, triggerState: undefined } : {}),
+      ...(body.schedule?.kind === 'webhook' && !existing.hookToken ? { hookToken: newHookToken() } : {}),
     });
     return withNext(routine);
   });
@@ -113,6 +135,45 @@ export async function routineRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const id = (req.params as { id: string }).id;
     if (!deps.store.deleteRoutine(id)) throw notFound('Routine not found');
     reply.code(204).send();
+  });
+
+  // The runs of a routine, newest first — from the activity database.
+  fastify.get('/routines/:id/runs', async (req) => {
+    const id = (req.params as { id: string }).id;
+    if (!deps.store.getRoutine(id)) throw notFound('Routine not found');
+    const query = z
+      .object({ limit: z.coerce.number().int().min(1).max(100).optional(), before: z.coerce.number().int().optional() })
+      .parse(req.query ?? {});
+    return deps.stats.runs({ routineId: id, limit: query.limit ?? 20, ...(query.before ? { before: query.before } : {}) });
+  });
+
+  // A new hook URL: the old one stops working.
+  fastify.post('/routines/:id/hook-token', async (req) => {
+    const existing = deps.store.getRoutine((req.params as { id: string }).id);
+    if (!existing) throw notFound('Routine not found');
+    return withNext(await deps.store.saveRoutine({ ...existing, hookToken: newHookToken() }));
+  });
+
+  /**
+   * The hook of a `webhook` routine — called by CI, a cron job, another
+   * service. No device login: the secret in the URL is the key (the auth hook
+   * lets /api/hooks/ through). The body, if any, reaches the agent with the prompt.
+   */
+  fastify.post('/hooks/routine/:id/:token', async (req, reply) => {
+    const { id, token } = req.params as { id: string; token: string };
+    if (!deps.hookLimiter.allow(req.ip)) throw httpError(429, 'RATE_LIMITED', 'Too many requests.');
+    const routine = deps.store.getRoutine(id);
+    // One answer for "no such routine" and "wrong secret": nothing to probe.
+    if (!routine || routine.schedule.kind !== 'webhook' || !routine.hookToken || !sameSecret(routine.hookToken, token)) {
+      throw notFound('Not found');
+    }
+    if (!routine.enabled) throw httpError(409, 'ROUTINE_PAUSED', 'This routine is paused.');
+    const body = req.body;
+    const payload = typeof body === 'string' ? body : body && typeof body === 'object' ? JSON.stringify(body, null, 2) : '';
+    const context = payload.trim() ? `Webhook payload:\n${payload.trim().slice(0, HOOK_BODY_MAX)}` : undefined;
+    // Not awaited: the caller learns that the run started, not how it ended.
+    void deps.routines.fire(id, 'webhook', context);
+    reply.code(202).send({ ok: true });
   });
 
   fastify.post('/routines/:id/run', async (req, reply) => {
