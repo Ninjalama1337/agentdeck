@@ -167,6 +167,17 @@ Berechtigung; ältere Geräte laden über den System-Browser. Der
 gesamte AgentDeck-Traffic geht als REST/WebSocket an deinen Server; die
 WebView lädt ausschließlich lokal gebaute Assets aus dem APK.
 
+### Teilen-Ziel
+
+Das Patch-Skript trägt in die `MainActivity` Intent-Filter für
+`ACTION_SEND` (Text, Bilder, Dateien) und `ACTION_SEND_MULTIPLE` (Bilder)
+ein — AgentDeck erscheint damit im Teilen-Menü anderer Apps. Das Plugin
+`ShareTarget` (`mobile/native/ShareTargetPlugin.java`) meldet der Web-App,
+was geteilt wurde, und liefert die Dateien auf Anfrage (bis 10 Dateien, je
+25 MB). Die App fragt, in welchen Chat es soll; dort landet es als Entwurf.
+Eine Berechtigung braucht das nicht: Die teilende App gibt den Lesezugriff
+auf genau diese Dateien mit.
+
 ### Hintergrundverbindung
 
 Die WebView kennt kein Web Push; Meldungen kommen über den WebSocket. Damit

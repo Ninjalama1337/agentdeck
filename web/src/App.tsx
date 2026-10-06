@@ -20,6 +20,8 @@ import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications,
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { UsageSheet } from './features/settings/UsageSheet';
 import { ActivitySheet } from './features/activity/ActivitySheet';
+import { ShareSheet } from './features/share/ShareSheet';
+import { listenForNativeShares, takeStashedShare } from './util/shareTarget';
 import { useUsageTracking } from './hooks/useUsageTracking';
 import { Spinner } from './components/ui/Spinner';
 
@@ -53,20 +55,6 @@ const CodeScreen = lazy(() => loadScreen(screenChunks.code).then((m) => ({ defau
 const FilesScreen = lazy(() => loadScreen(screenChunks.files).then((m) => ({ default: m.FilesScreen })));
 const GitScreen = lazy(() => loadScreen(screenChunks.git).then((m) => ({ default: m.GitScreen })));
 const SettingsScreen = lazy(() => loadScreen(screenChunks.settings).then((m) => ({ default: m.SettingsScreen })));
-
-/** Consume an image handed over by the PWA share_target (stashed in Cache API by sw.ts). */
-async function consumeSharedImage(): Promise<File | null> {
-  try {
-    const cache = await caches.open('agentdeck-share');
-    const res = await cache.match('/__shared__');
-    if (!res) return null;
-    await cache.delete('/__shared__');
-    const blob = await res.blob();
-    return new File([blob], `shared-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
-  } catch {
-    return null;
-  }
-}
 
 export default function App() {
   const token = useAppStore((s) => s.token);
@@ -226,21 +214,24 @@ export default function App() {
     };
   }, []);
 
-  // share_target handover: ?shared=1 → queue the stashed image for the composer.
+  // PWA share_target handover: ?shared=1 → what the service worker stashed.
   useEffect(() => {
     if (!token) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has('shared')) return;
     window.history.replaceState(null, '', window.location.pathname);
-    void (async () => {
-      const file = await consumeSharedImage();
-      if (!file) return;
-      const store = useAppStore.getState();
-      store.queuePendingFiles([file]);
-      store.toast('info', 'Screenshot received — open a session to send it');
-      store.navigate({ name: 'chat' });
-    })();
+    void takeStashedShare().then((share) => {
+      if (share) useAppStore.getState().offerShare(share);
+    });
   }, [token]);
+
+  // APK share target: whatever another app shares is offered to a chat.
+  useEffect(() => {
+    listenForNativeShares(
+      (share) => useAppStore.getState().offerShare(share),
+      (message) => useAppStore.getState().toast('warn', message),
+    );
+  }, []);
 
   if (!token) {
     return (
@@ -312,6 +303,7 @@ export default function App() {
       <TabBar />
       <UsageSheet />
       <ActivityHost />
+      <ShareSheet />
       <Lightbox />
       <PairApproval />
       <ToastStack />

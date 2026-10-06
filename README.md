@@ -82,6 +82,11 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   Status/Commit/Push direkt aus der App.
 - **Datei-Browser mit Download** — sandboxed auf `projectsRoot`, Downloads über
   signierte Einmal-Tokens.
+- **Teilen-Ziel** — in jeder Android-App *Teilen → AgentDeck*: Text, Links,
+  Bilder und Dateien landen im Chat deiner Wahl (Auswahl der letzten Chats
+  oder „nächster geöffneter Chat"), als Entwurf mit Anhang — gesendet wird
+  erst, wenn du es tust. In der APK für alles, in der installierten PWA für
+  Text, Links und ein Bild.
 - **Bild-/Screenshot-Anhang im Chat** — Screenshots vom Handy direkt in den
   Agent-Turn (z. B. „Mach es wie auf dem Bild").
 - **Team-Runs** — mehrere Agents als Pipeline, sequenziell (mit
