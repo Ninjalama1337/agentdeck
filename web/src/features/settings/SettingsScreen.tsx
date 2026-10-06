@@ -29,6 +29,7 @@ import { UsageSheet } from './UsageSheet';
 import { AccountSheet } from './AccountSheet';
 import { bytes, relTime } from '../../util/format';
 import { PreferencesSection } from './PreferencesSection';
+import { PairCodeCard } from '../pairing/PairCodeCard';
 import { ServerUpdateSection } from './ServerUpdateSection';
 import { ArrowLeft } from 'lucide-react';
 
@@ -620,6 +621,7 @@ export function SettingsScreen() {
           ))}
           {devices.length === 0 && <p className="text-[13px] text-dim">Loading devices…</p>}
         </div>
+        <PairCodeCard />
       </section>
 
       {/* danger + about */}

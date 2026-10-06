@@ -154,14 +154,17 @@ export class NotificationHub {
     await this.unregisterFcm(deviceId);
   }
 
-  /** Build + broadcast + push. Returns the notification. */
-  notify(input: Omit<DeckNotification, 'id' | 'ts'>): DeckNotification {
+  /**
+   * Build + broadcast + push. Returns the notification. `urgent` reaches every
+   * device regardless of its kind filter and quiet hours.
+   */
+  notify(input: Omit<DeckNotification, 'id' | 'ts'>, opts: { urgent?: boolean } = {}): DeckNotification {
     const notification: DeckNotification = { ...input, id: newId('n'), ts: Date.now() };
     this.history.push(notification);
     if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
     this.opts.broadcast(notification);
-    void this.push(notification);
-    void this.pushFcm(notification);
+    void this.push(notification, opts.urgent ? () => true : undefined);
+    void this.pushFcm(notification, opts.urgent ? () => true : undefined);
     return notification;
   }
 

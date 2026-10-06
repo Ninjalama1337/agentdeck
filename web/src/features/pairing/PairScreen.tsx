@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Check, Globe, KeyRound, Loader2, Lock, Server } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PairPendingResponse } from '@agentdeck/shared';
+import { AlertTriangle, ArrowRight, Check, Globe, KeyRound, Loader2, Lock, Server, ShieldQuestion } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError, getApiBase, setApiBase as persistApiBase } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
@@ -12,6 +13,9 @@ const CODE_LENGTH = 6;
 
 export function PairScreen() {
   const pair = useAppStore((s) => s.pair);
+  const finishPairing = useAppStore((s) => s.finishPairing);
+  // Paired from outside the server's network: waiting for a paired device to allow it.
+  const [pending, setPending] = useState<PairPendingResponse['pending'] | null>(null);
   const refreshApkInfo = useAppStore((s) => s.refreshApkInfo);
   const apkInfo = useAppStore((s) => s.apkInfo);
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
@@ -61,6 +65,28 @@ export function PairScreen() {
     }
   };
 
+  useEffect(() => {
+    if (!pending) return;
+    const giveUp = (message: string) => {
+      setPending(null);
+      setError(message);
+    };
+    const timer = window.setInterval(() => {
+      api
+        .pairStatus({ id: pending.id, pollToken: pending.pollToken })
+        .then((res) => {
+          if (res.status === 'approved') {
+            setPending(null);
+            void finishPairing(res);
+          } else if (res.status === 'gone') {
+            giveUp('Pairing was denied or timed out. Enter the current pairing code to try again.');
+          }
+        })
+        .catch(() => undefined); // a dropped poll is retried by the next one
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [pending, finishPairing]);
+
   const checkServer = async () => {
     persistApiBase(serverUrl);
     setChecking(true);
@@ -94,7 +120,11 @@ export function PairScreen() {
     setRateLimited(false);
     try {
       persistApiBase(serverUrl);
-      await pair(code, deviceName.trim() || guessDeviceName());
+      const waiting = await pair(code, deviceName.trim() || guessDeviceName());
+      if (waiting) {
+        setPending(waiting);
+        setDigits(Array(CODE_LENGTH).fill(''));
+      }
     } catch (err) {
       const status = err instanceof ApiError ? err.status : undefined;
       if (status === 429) {
@@ -128,8 +158,32 @@ export function PairScreen() {
           <p className="mt-1.5 text-[14px] text-dim">Drive your coding agents from anywhere.</p>
         </div>
 
+        {pending && (
+          <div className="glass p-5 text-center" role="status">
+            <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/15 text-accent">
+              <ShieldQuestion size={22} />
+            </span>
+            <h2 className="text-[16px] font-semibold">Allow this device on your phone</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-dim">
+              You are outside the server's network. Open AgentDeck on a device that is already paired and allow the
+              request showing this number:
+            </p>
+            <p className="my-4 font-mono text-[34px] font-semibold tracking-[0.25em]">{pending.checkCode}</p>
+            <p className="flex items-center justify-center gap-2 text-[13px] text-dim">
+              <Loader2 size={14} className="animate-spin" /> Waiting for approval…
+            </p>
+            <button
+              type="button"
+              onClick={() => setPending(null)}
+              className="press tap mt-4 w-full rounded-2xl border border-line bg-white/[0.06] text-[14px] font-medium"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* pairing card */}
-        <div className="glass p-5">
+        <div className={clsx('glass p-5', pending && 'hidden')}>
           <div className="mb-4 flex items-center gap-2 text-[13px] font-medium text-dim">
             <KeyRound size={15} className="text-accent" />
             Enter the 6-digit pairing code
@@ -254,8 +308,9 @@ export function PairScreen() {
           <p>
             Start the AgentDeck server on your machine — the pairing code (with QR) is printed to its
             console and saved to <span className="font-mono text-[12px] text-ink">~/.local/share/agentdeck/pairing-code.txt</span>.
-            Pairing works on the server's local network (its LAN address); afterwards you can switch to
-            its remote address in Settings.
+            A device that is already paired also shows it under Settings → Paired devices. The first device
+            pairs on the server's local network (its LAN address); further ones can pair from anywhere and
+            are then allowed on a paired device.
           </p>
         </div>
       </div>

@@ -23,6 +23,8 @@ import type {
   CloneProjectRequest,
   DeckNotification,
   DeviceInfo,
+  PairPendingResponse,
+  PairRequestInfo,
   PairResponse,
   PermissionMode,
   Project,
@@ -248,6 +250,8 @@ export interface AppStore {
   drafts: Record<string, StreamDraft>;
   teamRuns: TeamRun[];
   devices: DeviceInfo[];
+  /** Devices outside the server's network waiting for this one to let them in. */
+  pairRequests: PairRequestInfo[];
   /** Agent admin jobs (update/install/login), newest first — live via WS. */
   adminJobs: AdminJob[];
   toasts: Toast[];
@@ -298,7 +302,10 @@ export interface AppStore {
   init(): void;
   navigate(route: Route): void;
   bootstrap(silent?: boolean): Promise<void>;
-  pair(code: string, deviceName: string): Promise<void>;
+  /** Pairs; from outside the server's network it returns the request a paired device has to approve. */
+  pair(code: string, deviceName: string): Promise<PairPendingResponse['pending'] | null>;
+  /** Log in with the token of a pairing that went through. */
+  finishPairing(res: PairResponse): Promise<void>;
   unpair(silent?: boolean): void;
   setServerBase(base: string): void;
   /** Switch to another saved server — reloads the app, nothing of the old one survives. */
@@ -308,6 +315,7 @@ export interface AppStore {
   /** Forget a saved server and its login on this device. */
   removeServer(id: string): void;
   refreshDevices(): Promise<void>;
+  refreshPairRequests(): Promise<void>;
   /** One-shot fetch of GET /api/apk/info (app start, settings screen). */
   refreshApkInfo(): Promise<void>;
   /** Fetch GET /api/update; `force` makes the server ask GitHub again. */
@@ -575,6 +583,10 @@ export const useAppStore = create<AppStore>()((set, get) => {
       });
     });
 
+    socket.on('pair:requests', ({ requests }) => {
+      set({ pairRequests: requests });
+    });
+
     socket.on('notify', ({ level, text }) => {
       get().toast(level, text);
     });
@@ -802,6 +814,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     drafts: {},
     teamRuns: [],
     devices: [],
+    pairRequests: [],
     adminJobs: [],
     toasts: [],
     lightbox: null,
@@ -903,6 +916,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
           get().refreshTerminalPresets(),
           get().refreshUpdate(),
           get().refreshDevices(),
+          get().refreshPairRequests(),
           get().fetchTeamRuns(),
           get().refreshTerminals(),
           get().refreshRoutines(),
@@ -917,6 +931,12 @@ export const useAppStore = create<AppStore>()((set, get) => {
 
     async pair(code, deviceName) {
       const res = await api.pair({ code, deviceName });
+      if ('pending' in res) return res.pending;
+      await get().finishPairing(res);
+      return null;
+    },
+
+    async finishPairing(res) {
       persistToken(res.token);
       updateActiveServer({ name: res.server.name });
       set({
@@ -953,6 +973,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
         drafts: {},
         teamRuns: [],
         devices: [],
+        pairRequests: [],
         adminJobs: [],
         overlayDepth: 0,
         filesVersion: {},
@@ -998,6 +1019,14 @@ export const useAppStore = create<AppStore>()((set, get) => {
         set({ devices: await api.devices() });
       } catch {
         /* non-fatal */
+      }
+    },
+
+    async refreshPairRequests() {
+      try {
+        set({ pairRequests: await api.pairRequests() });
+      } catch {
+        /* older server without remote pairing */
       }
     },
 

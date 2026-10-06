@@ -136,8 +136,10 @@ Die Modi (`headless` / `ide` / `auto` / `off`) stellst du pro Agent in
 
 ## Sicherheit (Kurzfassung)
 
-- **Pairing-Code** nur einmalig, rotiert nach jeder erfolgreichen Paarung;
-  Paarung nur aus dem LAN/localhost möglich.
+- **Pairing-Code** nur einmalig, rotiert nach jeder Verwendung. Aus dem
+  LAN/localhost genügt der Code; von außerhalb (Tunnel, Proxy) muss zusätzlich
+  ein bereits gepaartes Gerät die Anfrage in der App erlauben. Den aktuellen
+  Code zeigt die App unter Settings → Paired devices.
 - Danach **JWT (HS256, 30 Tage)** für REST und WebSocket; Geräte lassen sich
   einzeln abmelden.
 - **Datei-Sandbox:** jeder Pfad wird aufgelöst (`realpath`) und muss in

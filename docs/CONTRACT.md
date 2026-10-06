@@ -140,15 +140,20 @@ Storage layout under `dataDir`:
    (with QR) to the console and writes it to `dataDir/pairing-code.txt`.
 2. `POST /api/pair {code, deviceName}` → on success issues a **JWT (HS256,
    30d)** with `deviceId`, rotates the code, registers the device. Max 5
-   failed attempts per IP / 10 min (429). Pairing is only possible while the
-   request originates from the LAN or localhost; requests forwarded by a
-   tunnel or proxy for a public client are refused (403).
+   failed attempts per IP / 10 min (429). From the LAN or localhost the code
+   alone pairs. A request forwarded by a tunnel or proxy for a public client
+   needs the code **and** approval on a paired device: the server answers
+   `202 PairPendingResponse` (the code is spent), announces the request
+   (`pair:requests` + an urgent push) and the new device polls
+   `POST /api/pair/status {id, pollToken}` until a paired device decided via
+   `POST /api/pair/requests/:id {approve}`. Requests expire after 5 min, at
+   most 3 wait at once; all remote clients share 10 failed attempts / 10 min;
+   while no device is paired, remote requests are refused (403).
 3. Every `/api/*` route except `/api/health`, `/api/apk/info` and
    `/api/apk/latest` requires `Authorization: Bearer`. socket.io handshake
-   requires `auth.token`. When a tunnel is enabled, pairing remains the only
-   way in; the two public APK routes are read-only, rate-limited and serve no
-   secrets. Pairing from tunnel requests is allowed (the 5-per-10-min limiter
-   applies; the LAN-only restriction is dropped when a tunnel is active).
+   requires `auth.token`. `/api/pair` and `/api/pair/status` are public by
+   nature. When a tunnel is enabled, pairing remains the only way in; the two
+   public APK routes are read-only, rate-limited and serve no secrets.
    APK uploads additionally accept `x-bridge-token` (bridge token) from
    localhost so CI/scripts can push builds.
 4. File downloads use **signed one-time tokens** because Android download
@@ -168,7 +173,11 @@ Storage layout under `dataDir`:
 | Method | Path | Body → Result |
 |---|---|---|
 | GET | `/api/health` | `{ok,name,version,agents:[{id,available}],tunnel?:{status,publicUrl?}}` (no auth) |
-| POST | `/api/pair` | `PairRequest → PairResponse` |
+| POST | `/api/pair` | `PairRequest → PairResponse`, or `202 PairPendingResponse` from outside the LAN |
+| POST | `/api/pair/status` | `PairStatusRequest → PairStatusResponse` (no auth; the poll token is the credential; `approved` carries the `PairResponse` once) |
+| GET / POST | `/api/pair/code` | `PairCodeResponse` (authed) — read the current pairing code / replace it with a new one |
+| GET | `/api/pair/requests` | `PairRequestInfo[]` (authed) — remote pairing requests awaiting approval |
+| POST | `/api/pair/requests/:id` | `{approve: boolean}` → 204 (authed) |
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
 | GET | `/api/server` | `ServerInfo` `{name,version,host}` (authed) — same object as `server` in the pairing response |
 | GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached 30 s; the app polls every minute while an agent is in use). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
