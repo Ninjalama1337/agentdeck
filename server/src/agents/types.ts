@@ -9,7 +9,9 @@ import type {
   AgentId,
   AgentKind,
   ModelPreset,
+  PermissionDecision,
   PermissionMode,
+  PermissionRequest,
   Session,
   Project,
 } from '@agentdeck/shared';
@@ -34,7 +36,31 @@ export interface RunContext {
   thinkingEffort?: string;
   permissionMode: PermissionMode;
   resumeId?: string;
+  /** The turn comes from the chat, so the user can be asked before a tool call. */
+  interactive?: boolean;
 }
+
+/** What the user answered to a PermissionRequest. */
+export interface PermissionAnswer {
+  decision: PermissionDecision;
+  message?: string;
+  answers?: Record<string, string>;
+}
+
+/** What a stdout line of a run that asks for permissions means for the manager. */
+export type PermissionSignal =
+  | {
+      kind: 'ask';
+      request: PermissionRequest;
+      /** The stdin line that answers it; `permissionMode` when the answer changes the session's mode for good. */
+      answer(answer: PermissionAnswer): { line: string; permissionMode?: PermissionMode };
+    }
+  /** The agent withdrew a question. */
+  | { kind: 'cancel'; id: string }
+  /** A request nobody can answer — reply at once so the agent does not wait. */
+  | { kind: 'reply'; line: string }
+  /** The turn is over: stdin closes and the CLI exits. */
+  | { kind: 'end' };
 
 export interface RunPlan {
   /** Executable to spawn (already resolved from the configured command). */
@@ -46,6 +72,11 @@ export interface RunPlan {
   expectStream: boolean;
   /** Optional one-line caveat shown to the user when the run starts. */
   notice?: string;
+  /**
+   * Set when the run asks the user before tool calls: stdin stays open for the
+   * answers, and every stdout line is offered here first.
+   */
+  permissions?(line: string): PermissionSignal | undefined;
   /**
    * Stateful stdout parser for this specific run. Feeds one raw line at a
    * time and emits normalized events. (Per-run state — e.g. tool_use_id →

@@ -18,6 +18,20 @@ function play(events: AgentEvent[], from?: StreamDraft): StreamDraft | undefined
 }
 
 describe('reduceDraft', () => {
+  it('shows a permission question until it is answered, and takes open ones from a snapshot', () => {
+    const request = { id: 'req-1', tool: 'Bash', summary: 'rm -rf build', ts: 1 };
+    const asking = play([{ type: 'text-delta', text: 'Hi' }, { type: 'permission-request', request }]);
+    expect(asking?.permissions).toEqual([request]);
+    // The same question arriving twice (snapshot + stream) is not doubled.
+    expect(reduceDraft(asking, { type: 'permission-request', request })).toBe(asking);
+    const answered = reduceDraft(asking, { type: 'permission-resolved', id: 'req-1', decision: 'allow' });
+    expect(answered?.permissions).toEqual([]);
+    expect(answered?.text).toBe('Hi');
+
+    const joined = draftFromSnapshot({ run: 'r', seq: 3, text: '', tools: [], permissions: [request] });
+    expect(joined.permissions).toEqual([request]);
+  });
+
   it('builds the live answer from the stream', () => {
     const draft = play([
       { type: 'thinking-delta', text: 'hm' },

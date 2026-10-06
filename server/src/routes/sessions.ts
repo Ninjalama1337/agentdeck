@@ -57,6 +57,12 @@ const SendTurnSchema = z.object({
   thinkingEffort: z.string().optional(),
 });
 
+const AnswerPermissionSchema = z.object({
+  decision: z.enum(['allow', 'always', 'deny']),
+  message: z.string().max(2000).optional(),
+  answers: z.record(z.string().max(2000)).optional(),
+});
+
 /** Builds the client-facing Attachment DTO with a signed download URL. */
 async function attachmentDto(
   deps: AppDeps,
@@ -198,6 +204,15 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
       .catch((err) => deps.log.error({ err, session: session.id }, 'startTurn crashed'));
 
     reply.send({ userMessage });
+  });
+
+  fastify.post('/sessions/:id/permissions/:requestId', async (req, reply) => {
+    const { id, requestId } = req.params as { id: string; requestId: string };
+    const session = getSessionOr404(deps, id);
+    const body = AnswerPermissionSchema.parse(req.body);
+    const answered = await deps.manager.answerPermission(session.id, requestId, body);
+    if (!answered) throw httpError(409, 'PERMISSION_GONE', 'That question is no longer open.');
+    reply.code(204).send();
   });
 
   fastify.post('/sessions/:id/interrupt', async (req, reply) => {

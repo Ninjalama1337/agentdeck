@@ -2,9 +2,19 @@
  * Claude Code adapter — fully headless via stream-json (facts verified in
  * CONTRACT.md): `claude -p --input-format stream-json --output-format
  * stream-json --verbose --include-partial-messages`, `--model`,
- * `--permission-mode`, `--resume`.
+ * `--permission-mode`, `--resume`. Turns from the chat add
+ * `--permission-prompt-tool stdio`: Claude then asks on stdout before a tool
+ * call it may not make on its own, and reads the answer from stdin.
  */
-import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset } from '@agentdeck/shared';
+import type {
+  AgentCapabilities,
+  AgentEvent,
+  AgentId,
+  ModelPreset,
+  PermissionMode,
+  PermissionQuestion,
+  PermissionRequest,
+} from '@agentdeck/shared';
 import { execa } from 'execa';
 import type { ResolvedAgentConfig } from '../config.js';
 import { splitCommand } from '../util/cmd.js';
@@ -17,6 +27,8 @@ import {
   truncate,
   type AgentAdapter,
   type DetectResult,
+  type PermissionAnswer,
+  type PermissionSignal,
   type RunContext,
   type RunPlan,
 } from './types.js';
@@ -117,6 +129,9 @@ export class ClaudeAdapter implements AgentAdapter {
     const effort = effortArg(ctx.thinkingEffort);
     if (effort) args.push('--effort', effort);
     if (ctx.resumeId) args.push('--resume', ctx.resumeId);
+    // Bypass never asks, so there is nothing to answer.
+    const asks = ctx.interactive === true && ctx.permissionMode !== 'bypass';
+    if (asks) args.push('--permission-prompt-tool', 'stdio');
 
     const content: unknown[] = [{ type: 'text', text: promptParts.join('\n') }];
     for (const img of images) {
@@ -131,6 +146,7 @@ export class ClaudeAdapter implements AgentAdapter {
       stdinPayloads: [payload],
       expectStream: true,
       parse: (line, emit) => parser.parse(line, emit),
+      ...(asks ? { permissions: claudePermissionSignal } : {}),
     };
   }
 
@@ -255,6 +271,161 @@ export function createClaudeStreamParser() {
   }
 
   return { parse };
+}
+
+const DETAIL_MAX = 6000;
+
+interface ClaudeControlLine {
+  type?: string;
+  request_id?: string;
+  request?: {
+    subtype?: string;
+    tool_name?: string;
+    input?: unknown;
+    description?: string;
+    permission_suggestions?: ClaudePermissionSuggestion[];
+  };
+}
+
+interface ClaudePermissionSuggestion {
+  type?: string;
+  mode?: string;
+  rules?: { toolName?: string; ruleContent?: string }[];
+  directories?: string[];
+}
+
+/** Reads Claude's control lines (`--permission-prompt-tool stdio`) — see PermissionSignal. */
+export function claudePermissionSignal(line: string): PermissionSignal | undefined {
+  // Cheap pre-check: every stdout line of the run passes through here.
+  if (!line.includes('"control_') && !line.includes('"result"')) return undefined;
+  const parsed = safeJson(line) as ClaudeControlLine | undefined;
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  if (parsed.type === 'result') return { kind: 'end' };
+  if (parsed.type === 'control_cancel_request' && typeof parsed.request_id === 'string') {
+    return { kind: 'cancel', id: parsed.request_id };
+  }
+  if (parsed.type !== 'control_request' || typeof parsed.request_id !== 'string') return undefined;
+  const id = parsed.request_id;
+  const req = parsed.request;
+  if (req?.subtype !== 'can_use_tool') {
+    return {
+      kind: 'reply',
+      line: JSON.stringify({
+        type: 'control_response',
+        response: { subtype: 'error', request_id: id, error: 'Not supported by AgentDeck.' },
+      }),
+    };
+  }
+  const input = req.input;
+  const suggestions = Array.isArray(req.permission_suggestions) ? req.permission_suggestions : [];
+  const questions = questionsOf(req.tool_name, input);
+  const always = questions ? undefined : alwaysLabel(suggestions);
+  const summary = questions ? questions[0]?.question : (summarizeInput(input) ?? req.description);
+  const detail = questions ? undefined : detailOf(req.tool_name, input);
+  const request: PermissionRequest = {
+    id,
+    tool: req.tool_name ?? 'tool',
+    ...(summary ? { summary } : {}),
+    ...(detail ? { detail } : {}),
+    ...(always ? { always } : {}),
+    ...(questions ? { questions } : {}),
+    ts: Date.now(),
+  };
+  const respond = (response: unknown): string =>
+    JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: id, response } });
+  return {
+    kind: 'ask',
+    request,
+    answer(answer: PermissionAnswer) {
+      if (answer.decision === 'deny') {
+        return { line: respond({ behavior: 'deny', message: answer.message?.trim() || 'The user denied this tool call.' }) };
+      }
+      const base = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      const updatedInput = questions ? { ...base, answers: answer.answers ?? {} } : base;
+      if (answer.decision === 'always' && always) {
+        // "Accept edits" lives in the session only — the next turn starts a new
+        // process, so the mode is handed back to be kept with the session.
+        const mode: PermissionMode | undefined = suggestions.some((s) => s.type === 'setMode' && s.mode === 'acceptEdits')
+          ? 'acceptEdits'
+          : undefined;
+        return {
+          line: respond({ behavior: 'allow', updatedInput, updatedPermissions: suggestions }),
+          ...(mode ? { permissionMode: mode } : {}),
+        };
+      }
+      return { line: respond({ behavior: 'allow', updatedInput }) };
+    },
+  };
+}
+
+/** The questions of an AskUserQuestion call; undefined for every other tool. */
+function questionsOf(tool: string | undefined, input: unknown): PermissionQuestion[] | undefined {
+  if (tool !== 'AskUserQuestion' || !input || typeof input !== 'object') return undefined;
+  const raw = (input as { questions?: unknown }).questions;
+  if (!Array.isArray(raw)) return undefined;
+  const questions: PermissionQuestion[] = [];
+  for (const q of raw as Record<string, unknown>[]) {
+    if (!q || typeof q.question !== 'string') continue;
+    const options = Array.isArray(q.options)
+      ? (q.options as Record<string, unknown>[])
+          .filter((o) => o && typeof o.label === 'string')
+          .map((o) => ({
+            label: o.label as string,
+            ...(typeof o.description === 'string' && o.description ? { description: o.description } : {}),
+          }))
+      : [];
+    questions.push({
+      question: q.question,
+      ...(typeof q.header === 'string' && q.header ? { header: q.header } : {}),
+      options,
+      ...(q.multiSelect === true ? { multiSelect: true } : {}),
+    });
+  }
+  return questions.length ? questions : undefined;
+}
+
+/** What "always allow" would cover, in the words of Claude's own suggestion. */
+function alwaysLabel(suggestions: ClaudePermissionSuggestion[]): string | undefined {
+  const parts: string[] = [];
+  for (const s of suggestions) {
+    if (s.type === 'addRules') {
+      for (const rule of s.rules ?? []) {
+        if (rule.toolName) parts.push(rule.ruleContent ? `${rule.toolName}(${rule.ruleContent})` : rule.toolName);
+      }
+    } else if (s.type === 'setMode' && s.mode === 'acceptEdits') {
+      parts.push('all file edits');
+    }
+  }
+  return parts.length ? truncate(parts.join(', '), 200) : undefined;
+}
+
+/** The tool call as the user should read it before deciding. */
+function detailOf(tool: string | undefined, input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return typeof input === 'string' ? truncate(input, DETAIL_MAX) : undefined;
+  const obj = input as Record<string, unknown>;
+  const str = (key: string): string | undefined => (typeof obj[key] === 'string' ? (obj[key] as string) : undefined);
+  const prefixed = (text: string, mark: string): string =>
+    text
+      .split('\n')
+      .map((l) => mark + l)
+      .join('\n');
+  let detail: string | undefined;
+  if (tool === 'Bash' && str('command')) {
+    detail = str('description') ? `${str('command')}\n\n# ${str('description')}` : str('command');
+  } else if (tool === 'Edit' && str('file_path')) {
+    detail = `${str('file_path')}\n${prefixed(str('old_string') ?? '', '- ')}\n${prefixed(str('new_string') ?? '', '+ ')}`;
+  } else if (tool === 'Write' && str('file_path')) {
+    detail = `${str('file_path')}\n${prefixed(str('content') ?? '', '+ ')}`;
+  } else if (tool === 'ExitPlanMode' && str('plan')) {
+    detail = str('plan');
+  } else {
+    try {
+      detail = JSON.stringify(input, null, 2);
+    } catch {
+      detail = undefined;
+    }
+  }
+  return detail ? truncate(detail, DETAIL_MAX) : undefined;
 }
 
 export function safeJson(line: string): unknown {

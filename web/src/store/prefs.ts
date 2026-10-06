@@ -34,6 +34,7 @@ export const DEFAULT_PREFS: Prefs = {
   notifyKinds: {
     'session-done': true,
     'session-error': true,
+    'session-permission': true,
     'terminal-attention': true,
     'team-done': true,
     'team-error': true,

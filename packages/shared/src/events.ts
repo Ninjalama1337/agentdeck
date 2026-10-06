@@ -9,6 +9,8 @@ import type {
   DeckNotificationState,
   FileChangeEvent,
   PairRequestInfo,
+  PermissionDecision,
+  PermissionRequest,
   Project,
   Routine,
   Session,
@@ -37,6 +39,9 @@ export type AgentEvent =
       costUsd?: number;
       model?: string;
     }
+  /** The run waits for the user's say on a tool call (or an answer to its questions). */
+  | { type: 'permission-request'; request: PermissionRequest }
+  | { type: 'permission-resolved'; id: string; decision: PermissionDecision }
   | { type: 'raw'; line: string };
 
 export interface ServerToClientEvents {

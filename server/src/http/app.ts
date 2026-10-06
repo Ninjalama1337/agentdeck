@@ -16,7 +16,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import staticFiles from '@fastify/static';
 import { ZodError } from 'zod';
-import type { DeckNotificationState } from '@agentdeck/shared';
+import type { DeckNotificationState, PermissionRequest } from '@agentdeck/shared';
 import type { Config } from '../config.js';
 import { createLogger, type Logger } from '../logging.js';
 import { Store } from '../state/store.js';
@@ -127,8 +127,29 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     broadcast('session:event', { sessionId, ts: Date.now(), event, ...meta });
     if (event.type === 'status' && (event.status === 'idle' || event.status === 'error')) {
       void notifySessionFinished(sessionId, event.status);
+    } else if (event.type === 'permission-request') {
+      notifyPermission(sessionId, event.request);
     }
   });
+
+  /** The run stopped to ask → inbox + push, with Allow / Deny on the notification. */
+  function notifyPermission(sessionId: string, request: PermissionRequest): void {
+    const session = store.getSession(sessionId);
+    if (!session) return;
+    const project = store.getProject(session.projectId);
+    const label = agents.infoOf(session.agentId)?.label ?? session.agentId;
+    const question = request.questions?.[0]?.question;
+    notifications.notify({
+      kind: 'session-permission',
+      state: 'waiting',
+      title: stateTitle('waiting', label, project?.name ?? 'project'),
+      body: summarize(question ?? `${request.tool}: ${request.summary ?? 'wants to run'}`),
+      projectId: session.projectId,
+      sessionId,
+      // A question with options is answered in the app, not with two buttons.
+      ...(question ? {} : { permissionId: request.id }),
+    });
+  }
 
   /** Run finished → inbox + push ("Claude is done in winterlicht"). */
   async function notifySessionFinished(sessionId: string, status: 'idle' | 'error'): Promise<void> {

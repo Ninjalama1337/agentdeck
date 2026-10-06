@@ -3,7 +3,7 @@
  * events and server snapshots turn into it. Pure logic — appStore wires it to
  * the socket and the REST calls.
  */
-import type { AgentEvent, ChatMessage, MessageUsage, SessionDraft } from '@agentdeck/shared';
+import type { AgentEvent, ChatMessage, MessageUsage, PermissionRequest, SessionDraft } from '@agentdeck/shared';
 
 export interface ToolCard {
   id: number;
@@ -18,6 +18,8 @@ export interface StreamDraft {
   thinking?: string;
   tools: ToolCard[];
   usage?: MessageUsage;
+  /** Questions the run waits on — the user answers them in the chat. */
+  permissions?: PermissionRequest[];
 }
 
 /** Which events of a run a draft already contains (from the server snapshot). */
@@ -74,6 +76,16 @@ export function reduceDraft(draft: StreamDraft | undefined, event: AgentEvent): 
         usage: { inputTokens: event.inputTokens, outputTokens: event.outputTokens, costUsd: event.costUsd },
       };
     }
+    case 'permission-request': {
+      const base = draft ?? { text: '', tools: [] };
+      const open = base.permissions ?? [];
+      if (open.some((p) => p.id === event.request.id)) return draft;
+      return { ...base, permissions: [...open, event.request] };
+    }
+    case 'permission-resolved': {
+      if (!draft?.permissions?.some((p) => p.id === event.id)) return draft;
+      return { ...draft, permissions: draft.permissions.filter((p) => p.id !== event.id) };
+    }
     default:
       return draft;
   }
@@ -86,6 +98,7 @@ export function draftFromSnapshot(snap: SessionDraft): StreamDraft {
     ...(snap.thinking ? { thinking: snap.thinking } : {}),
     tools: snap.tools.map((t) => ({ id: ++toolSeq, ...t })),
     ...(snap.usage ? { usage: snap.usage } : {}),
+    ...(snap.permissions?.length ? { permissions: snap.permissions } : {}),
   };
 }
 

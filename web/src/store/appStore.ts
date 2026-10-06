@@ -11,6 +11,7 @@ import type {
   AgentId,
   AgentInfo,
   AgentUsage,
+  AnswerPermissionRequest,
   ApkInfo,
   UpdateInfo,
   Attachment,
@@ -42,6 +43,7 @@ import type {
 import { AGENT_LABELS } from '@agentdeck/shared';
 import {
   api,
+  ApiError,
   getApiBase,
   getToken,
   setApiBase as persistApiBase,
@@ -352,6 +354,8 @@ export interface AppStore {
   deleteSession(id: string): Promise<void>;
   sendTurn(sessionId: string, text: string, attachments: Attachment[], model?: string, thinkingEffort?: string): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
+  /** Answers a question the session's run waits on (allow / deny a tool call, or pick from its options). */
+  answerPermission(sessionId: string, requestId: string, answer: AnswerPermissionRequest): Promise<void>;
   openInIde(sessionId: string): Promise<void>;
   setSessionModel(sessionId: string, model: string | undefined): void;
   /** Optimistic; reverted with a toast when the server rejects it. Applies from the next turn. */
@@ -1266,6 +1270,23 @@ export const useAppStore = create<AppStore>()((set, get) => {
         const status = err instanceof Error && 'status' in err ? (err as { status?: number }).status : undefined;
         get().toast('error', status === 409 ? 'A run is already active — stop it first' : errorMessage(err));
         throw err;
+      }
+    },
+
+    async answerPermission(sessionId, requestId, answer) {
+      const drop = () =>
+        set((st) => {
+          const before = st.drafts[sessionId];
+          const after = reduceDraft(before, { type: 'permission-resolved', id: requestId, decision: answer.decision });
+          return after && after !== before ? { drafts: { ...st.drafts, [sessionId]: after } } : {};
+        });
+      try {
+        await api.answerPermission(sessionId, requestId, answer);
+        drop();
+      } catch (err) {
+        // Answered elsewhere or the run is over: the card has nothing left to ask.
+        if (err instanceof ApiError && err.code === 'PERMISSION_GONE') drop();
+        get().toast('error', errorMessage(err));
       }
     },
 

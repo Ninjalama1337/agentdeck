@@ -13,9 +13,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * A tap on Yes / No in a notification: tells the server to answer the
- * terminal's question. The server checks that the terminal still shows that
- * very question before it presses a key. The notification then turns into a
+ * A tap on Yes / No (terminal question) or Allow / Deny (a chat session's
+ * permission request) in a notification: tells the server the answer. The
+ * server checks that this very question is still open before it acts. The notification then turns into a
  * short result line.
  */
 public class AnswerReceiver extends BroadcastReceiver {
@@ -44,10 +44,17 @@ public class AnswerReceiver extends BroadcastReceiver {
         String terminalId = intent.getStringExtra("terminalId");
         String answer = intent.getStringExtra("answer");
         String prompt = intent.getStringExtra("prompt");
-        if (terminalId == null || answer == null || prompt == null) return "Could not send the answer";
+        String sessionId = intent.getStringExtra("sessionId");
+        String permissionId = intent.getStringExtra("permissionId");
+        // A session's permission request, or a terminal's question.
+        boolean permission = sessionId != null && permissionId != null;
+        if (answer == null || (!permission && (terminalId == null || prompt == null))) return "Could not send the answer";
+        boolean yes = "yes".equals(answer);
         HttpURLConnection connection = null;
         try {
-            URL url = new URL(base + "/api/terminals/" + URLEncoder.encode(terminalId, "UTF-8") + "/answer");
+            URL url = permission
+                ? new URL(base + "/api/sessions/" + URLEncoder.encode(sessionId, "UTF-8") + "/permissions/" + URLEncoder.encode(permissionId, "UTF-8"))
+                : new URL(base + "/api/terminals/" + URLEncoder.encode(terminalId, "UTF-8") + "/answer");
             connection = (HttpURLConnection) url.openConnection();
             connection.setConnectTimeout(4000);
             connection.setReadTimeout(5000);
@@ -55,12 +62,16 @@ public class AnswerReceiver extends BroadcastReceiver {
             connection.setRequestProperty("Authorization", "Bearer " + token);
             connection.setRequestProperty("Content-Type", "application/json");
             connection.setDoOutput(true);
-            byte[] body = ("{\"answer\":\"" + answer + "\",\"prompt\":\"" + prompt + "\"}").getBytes(StandardCharsets.UTF_8);
+            String json = permission
+                ? "{\"decision\":\"" + (yes ? "allow" : "deny") + "\"}"
+                : "{\"answer\":\"" + answer + "\",\"prompt\":\"" + prompt + "\"}";
+            byte[] body = json.getBytes(StandardCharsets.UTF_8);
             try (OutputStream out = connection.getOutputStream()) {
                 out.write(body);
             }
             int status = connection.getResponseCode();
-            if (status == 200) return "yes".equals(answer) ? "Answered: Yes" : "Answered: No";
+            if (permission && status == 204) return yes ? "Allowed" : "Denied";
+            if (status == 200) return yes ? "Answered: Yes" : "Answered: No";
             if (status == 409) return "That question is gone — open the app";
             if (status == 401) return "Signed out — open the app";
             return "Could not send (HTTP " + status + ")";

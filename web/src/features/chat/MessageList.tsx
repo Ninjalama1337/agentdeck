@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowDown, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, ImageOff, Pencil, RotateCcw, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowDown, Brain, Check, ChevronDown, ChevronRight, Copy, Download, FileText, ImageOff, Pencil, RotateCcw, ShieldQuestion, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { splitThinkTags } from '@agentdeck/shared';
-import type { AgentInfo, Attachment, ChatMessage, ToolRecord } from '@agentdeck/shared';
+import type { AgentInfo, Attachment, ChatMessage, PermissionRequest, ToolRecord } from '@agentdeck/shared';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import type { StreamDraft, ToolCard } from '../../store/appStore';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
@@ -11,6 +11,7 @@ import { MarkdownView } from '../../components/ui/Markdown';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { useChatActions } from '../../store/chatActions';
 import { Spinner } from '../../components/ui/Spinner';
+import { Button } from '../../components/ui/Button';
 import { clock, cost, tokens } from '../../util/format';
 import { parseAttachmentUrl } from '../../util/attachments';
 import { downloadFile, isShareCancel } from '../../util/download';
@@ -18,7 +19,10 @@ import { downloadFile, isShareCancel } from '../../util/download';
 const EMPTY_DRAFT: StreamDraft = { text: '', tools: [] };
 
 function draftHasContent(draft: StreamDraft | undefined): boolean {
-  return draft !== undefined && (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '');
+  return (
+    draft !== undefined &&
+    (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '' || (draft.permissions?.length ?? 0) > 0)
+  );
 }
 
 export function MessageList({
@@ -102,7 +106,7 @@ export function MessageList({
 /** The answer being written — subscribes to its own draft. */
 function LiveAnswer({ sessionId, agent, accent }: { sessionId: string; agent?: AgentInfo; accent: string }) {
   const draft = useAppStore((s) => s.drafts[sessionId]);
-  return <StreamingBubble draft={draft ?? EMPTY_DRAFT} agent={agent} accent={accent} />;
+  return <StreamingBubble sessionId={sessionId} draft={draft ?? EMPTY_DRAFT} agent={agent} accent={accent} />;
 }
 
 /** Memoized: a finished message only re-renders when the message itself changes. */
@@ -245,9 +249,22 @@ function usePacedText(text: string): string {
   return interval === 0 ? text : shown;
 }
 
-function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?: AgentInfo; accent: string }) {
+function StreamingBubble({
+  sessionId,
+  draft,
+  agent,
+  accent,
+}: {
+  sessionId: string;
+  draft: StreamDraft;
+  agent?: AgentInfo;
+  accent: string;
+}) {
   const text = usePacedText(draft.text);
-  const phase = draft.text
+  const asking = draft.permissions ?? [];
+  const phase = asking.length
+    ? 'waiting for you…'
+    : draft.text
     ? 'writing…'
     : draft.tools.some((t) => t.state === 'running')
       ? 'working…'
@@ -288,11 +305,155 @@ function StreamingBubble({ draft, agent, accent }: { draft: StreamDraft; agent?:
             <span className="caret" aria-hidden />
           </div>
         ) : (
-          <span className="caret" aria-hidden />
+          asking.length === 0 && <span className="caret" aria-hidden />
         )}
+
+        {asking.map((request) => (
+          <PermissionCard key={request.id} sessionId={sessionId} request={request} />
+        ))}
 
         {draft.usage && <UsageLine usage={draft.usage} />}
       </div>
+    </div>
+  );
+}
+
+/** The run stopped to ask: allow this tool call — or, for a question, which answer applies. */
+function PermissionCard({ sessionId, request }: { sessionId: string; request: PermissionRequest }) {
+  const answerPermission = useAppStore((s) => s.answerPermission);
+  const [sending, setSending] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  /** Chosen option labels per question. */
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+  const questions = request.questions;
+
+  const send = async (answer: Parameters<typeof answerPermission>[2]) => {
+    setSending(true);
+    await answerPermission(sessionId, request.id, answer);
+    setSending(false);
+  };
+
+  const answerOf = (question: string): string => {
+    const typed = (other[question] ?? '').trim();
+    return [...(picked[question] ?? []), ...(typed ? [typed] : [])].join(', ');
+  };
+
+  if (questions) {
+    const complete = questions.every((q) => answerOf(q.question) !== '');
+    return (
+      <div className="mt-2 rounded-xl border border-warn/40 bg-warn/[0.07] p-3">
+        {questions.map((q) => (
+          <div key={q.question} className="mb-3 last:mb-0">
+            <p className="text-[13px] font-medium leading-snug">{q.question}</p>
+            <div className="mt-2 flex flex-col gap-1.5">
+              {q.options.map((o) => {
+                const on = (picked[q.question] ?? []).includes(o.label);
+                return (
+                  <button
+                    key={o.label}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={sending}
+                    onClick={() =>
+                      setPicked((p) => {
+                        const cur = p[q.question] ?? [];
+                        const next = q.multiSelect ? (on ? cur.filter((l) => l !== o.label) : [...cur, o.label]) : on ? [] : [o.label];
+                        return { ...p, [q.question]: next };
+                      })
+                    }
+                    className={clsx(
+                      'press tap rounded-xl border px-3 py-2 text-left',
+                      on ? 'border-accent bg-accent/15' : 'border-line bg-white/[0.04]',
+                    )}
+                  >
+                    <span className="block text-[13px] font-medium">{o.label}</span>
+                    {o.description && <span className="block text-[11.5px] leading-snug text-dim">{o.description}</span>}
+                  </button>
+                );
+              })}
+              <input
+                value={other[q.question] ?? ''}
+                onChange={(e) => setOther((v) => ({ ...v, [q.question]: e.target.value }))}
+                disabled={sending}
+                placeholder="Something else…"
+                aria-label={`Other answer to: ${q.question}`}
+                className="h-10 rounded-xl border border-line bg-black/25 px-3 text-[13px] outline-none placeholder:text-dim/60"
+              />
+            </div>
+          </div>
+        ))}
+        <div className="mt-3 flex gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            className="flex-1"
+            disabled={!complete}
+            loading={sending}
+            onClick={() =>
+              void send({
+                decision: 'allow',
+                answers: Object.fromEntries(questions.map((q) => [q.question, answerOf(q.question)])),
+              })
+            }
+          >
+            Answer
+          </Button>
+          <Button size="sm" variant="ghost" disabled={sending} onClick={() => void send({ decision: 'deny', message: 'The user skipped the question.' })}>
+            Skip
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-warn/40 bg-warn/[0.07] p-3">
+      <div className="flex items-start gap-2">
+        <ShieldQuestion size={15} className="mt-0.5 shrink-0 text-warn" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium">
+            Allow <span className="font-mono">{request.tool}</span>?
+          </p>
+          {request.summary && <p className="mt-0.5 break-words font-mono text-[11.5px] leading-snug text-dim">{request.summary}</p>}
+        </div>
+      </div>
+      {request.detail && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDetail((v) => !v)}
+            aria-expanded={showDetail}
+            className="press tap mt-1 flex items-center gap-1 py-1 text-[11.5px] text-dim"
+          >
+            {showDetail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Details
+          </button>
+          {showDetail && (
+            <pre className="max-h-64 overflow-auto rounded-lg border border-line bg-black/30 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-ink/90">
+              {request.detail}
+            </pre>
+          )}
+        </>
+      )}
+      <div className="mt-2.5 flex gap-2">
+        <Button size="sm" variant="primary" className="flex-1" loading={sending} onClick={() => void send({ decision: 'allow' })}>
+          Allow
+        </Button>
+        <Button size="sm" variant="danger" className="flex-1" disabled={sending} onClick={() => void send({ decision: 'deny' })}>
+          Deny
+        </Button>
+      </div>
+      {request.always && (
+        <button
+          type="button"
+          disabled={sending}
+          onClick={() => void send({ decision: 'always' })}
+          className="press tap mt-1.5 w-full rounded-xl px-2 py-2 text-center text-[12px] text-dim disabled:opacity-45"
+        >
+          Always allow <span className="break-words font-mono text-ink/80">{request.always}</span>
+        </button>
+      )}
     </div>
   );
 }
