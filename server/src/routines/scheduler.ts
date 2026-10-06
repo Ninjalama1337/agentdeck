@@ -155,6 +155,19 @@ export class RoutineScheduler {
   private firing = new Set<string>();
   /** When each `ci-failed` routine last asked GitHub. */
   private ciChecked = new Map<string, number>();
+  /** Checks and fires a tick started and did not wait for. */
+  private background = new Set<Promise<unknown>>();
+
+  /** Runs `work` without waiting for it; idle() does. */
+  private detach(work: Promise<unknown>): void {
+    const tracked = work.catch(() => undefined).finally(() => this.background.delete(tracked));
+    this.background.add(tracked);
+  }
+
+  /** Resolves once everything the ticks so far set off has finished (tests, shutdown). */
+  async idle(): Promise<void> {
+    while (this.background.size > 0) await Promise.all([...this.background]);
+  }
 
   constructor(private readonly deps: SchedulerDeps) {}
 
@@ -178,12 +191,14 @@ export class RoutineScheduler {
     for (const routine of this.deps.store.listRoutines()) {
       if (!routine.enabled) continue;
       if (routine.schedule.kind === 'commit' || routine.schedule.kind === 'ci-failed') {
-        void this.checkEvent(routine, now).catch((err) => this.deps.log.warn({ err, routine: routine.id }, 'routine event check failed'));
+        this.detach(
+          this.checkEvent(routine, now).catch((err) => this.deps.log.warn({ err, routine: routine.id }, 'routine event check failed')),
+        );
         continue;
       }
       const due = nextRunAt(routine, now);
       if (due === null || due > now) continue;
-      void this.fire(routine.id, 'schedule');
+      this.detach(this.fire(routine.id, 'schedule'));
     }
   }
 
@@ -221,7 +236,7 @@ export class RoutineScheduler {
     if (!current || current.triggerState === seen) return;
     await store.saveRoutine({ ...current, triggerState: seen });
     if (current.triggerState === undefined || !context) return;
-    void this.fire(routine.id, trigger, context);
+    this.detach(this.fire(routine.id, trigger, context));
   }
 
   /**
