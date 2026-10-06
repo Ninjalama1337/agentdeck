@@ -6,7 +6,7 @@
  *
  * - Precaches the app shell and serves SPA navigations from it.
  * - Intercepts the Android share_target POST to /share, stashes the shared
- *   image into the Cache API and redirects into the app (?shared=1), where
+ *   image and text into the Cache API and redirects into the app (?shared=1), where
  *   App.tsx picks it up and queues it for the chat composer.
  */
 import { createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
@@ -64,14 +64,22 @@ swSelf.addEventListener('fetch', (event) => {
         try {
           const form = await event.request.formData();
           const file = form.get('file');
+          const cache = await caches.open('agentdeck-share');
           if (file instanceof File) {
             const blob = await downscaleImage(file);
-            const cache = await caches.open('agentdeck-share');
             await cache.put(
               '/__shared__',
               new Response(blob, { headers: { 'content-type': blob.type || 'application/octet-stream' } }),
             );
           }
+          // Shared text and links: title, text and url, each only once.
+          const parts: string[] = [];
+          for (const key of ['title', 'text', 'url']) {
+            const value = form.get(key);
+            if (typeof value !== 'string' || !value.trim()) continue;
+            if (!parts.some((p) => p.includes(value.trim()))) parts.push(value.trim());
+          }
+          if (parts.length) await cache.put('/__shared_text__', new Response(parts.join('\n')));
         } catch {
           // Best effort — still redirect into the app.
         }

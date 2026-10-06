@@ -33,7 +33,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   const sendTurn = useAppStore((s) => s.sendTurn);
   const interrupt = useAppStore((s) => s.interrupt);
   const toast = useAppStore((s) => s.toast);
-  const takePendingFiles = useAppStore((s) => s.takePendingFiles);
+  const shareTarget = useAppStore((s) => s.share?.target ?? null);
   const projects = useAppStore((s) => s.projects);
 
   // Unsent input of this session, kept across leaving the chat and app restarts.
@@ -68,13 +68,16 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   }, [text, atts, session.id]);
   useEffect(() => () => saveComposerDraft(session.id, draft.current), [session.id]);
 
-  /* PWA share_target handover → pending files queued by App.tsx */
+  /* Something shared from another app, sent to this chat (features/share/ShareSheet.tsx) */
   useEffect(() => {
-    if (!agent?.capabilities.headless) return;
-    const files = takePendingFiles();
-    if (files.length) void addFiles(files, true);
+    if (!shareTarget) return;
+    const share = useAppStore.getState().takeShare(session.id);
+    if (!share) return;
+    if (share.text) setText((t) => (t.trim() ? `${t.replace(/\s+$/, '')}\n\n${share.text}` : share.text));
+    if (share.files.length) void addFiles(share.files, true);
+    textarea.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, agent?.capabilities.headless]);
+  }, [session.id, shareTarget]);
 
   /* "Edit" on a sent message puts its text back into the input */
   const prefill = useChatActions((st) => st.prefill);

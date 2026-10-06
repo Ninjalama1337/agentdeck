@@ -70,6 +70,7 @@ import {
   type StreamMark,
 } from './sessionStream';
 import { haptic } from '../util/haptics';
+import type { IncomingShare } from '../util/shareTarget';
 import { currentPushSubscription, fcmRegistered, showSystemNotification, stateOf } from '../util/notify';
 
 /* ------------------------------------------------------------------ router */
@@ -258,7 +259,12 @@ export interface AppStore {
   adminJobs: AdminJob[];
   toasts: Toast[];
   lightbox: LightboxState | null;
-  pendingFiles: File[];
+  /**
+   * Something another app shared (APK share target, PWA share_target), waiting
+   * for a chat. `target`: null — the user is still choosing; 'any' — the next
+   * chat that opens; otherwise the session it goes to.
+   */
+  share: (IncomingShare & { target: string | null }) | null;
   modelPrefs: Partial<Record<AgentId, string>>;
   /** Metadata of the latest APK on the server (null = unknown / unreachable). */
   apkInfo: ApkInfo | null;
@@ -402,8 +408,12 @@ export interface AppStore {
   toast(level: Toast['level'], text: string): void;
   dismissToast(id: number): void;
   setLightbox(lightbox: LightboxState | null): void;
-  queuePendingFiles(files: File[]): void;
-  takePendingFiles(): File[];
+  /** Offers a share to the user (opens the "send to" sheet). */
+  offerShare(share: IncomingShare): void;
+  aimShare(target: string): void;
+  dropShare(): void;
+  /** Hands the share to the composer of `sessionId` when it is meant for it — once. */
+  takeShare(sessionId: string): IncomingShare | null;
 }
 
 type SessionEventPayload = Parameters<ServerToClientEvents['session:event']>[0];
@@ -826,7 +836,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     adminJobs: [],
     toasts: [],
     lightbox: null,
-    pendingFiles: [],
+    share: null,
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
     apkInfo: null,
     update: null,
@@ -1573,14 +1583,23 @@ export const useAppStore = create<AppStore>()((set, get) => {
       set({ lightbox });
     },
 
-    queuePendingFiles(files) {
-      set((st) => ({ pendingFiles: [...st.pendingFiles, ...files] }));
+    offerShare(share) {
+      set({ share: { ...share, target: null } });
     },
 
-    takePendingFiles() {
-      const files = get().pendingFiles;
-      if (files.length) set({ pendingFiles: [] });
-      return files;
+    aimShare(target) {
+      set((st) => (st.share ? { share: { ...st.share, target } } : {}));
+    },
+
+    dropShare() {
+      set({ share: null });
+    },
+
+    takeShare(sessionId) {
+      const share = get().share;
+      if (!share || (share.target !== 'any' && share.target !== sessionId)) return null;
+      set({ share: null });
+      return { text: share.text, files: share.files };
     },
   };
 });

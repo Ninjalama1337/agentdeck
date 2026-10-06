@@ -5,7 +5,7 @@
  * finished / waiting" alerts, vibration for haptics), the foreground
  * service that keeps the connection alive in the background, and the app's own
  * Java sources from mobile/native (MainActivity, file download and app update
- * plugins).
+ * plugins), and the intent filters that make the app a share target.
  * Idempotent.
  */
 import fs from 'node:fs';
@@ -122,6 +122,34 @@ if (xml.includes('AgentDeckMessagingService')) {
   xml = xml.replace(/(\n\s*<\/application>)/, `\n${MESSAGING_COMPONENTS.trimEnd()}$1`);
   fs.writeFileSync(manifest, xml);
   console.log('patch-android: added messaging service + answer receiver');
+}
+
+// "Share → AgentDeck" from other apps: text and links, images, any file
+// (mobile/native/ShareTargetPlugin.java hands them to the web app).
+const SHARE_FILTERS = `
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+`;
+if (xml.includes('android.intent.action.SEND')) {
+  console.log('patch-android: share target already present');
+} else if (!/<activity[^>]*MainActivity[\s\S]*?<\/activity>/.test(xml)) {
+  console.error('patch-android: MainActivity not found in the manifest — share target NOT added');
+  process.exit(1);
+} else {
+  // Into the main activity, the only one that takes intents.
+  xml = xml.replace(/(<activity[^>]*MainActivity[\s\S]*?)(\n\s*<\/activity>)/, `$1\n${SHARE_FILTERS.trimEnd()}$2`);
+  fs.writeFileSync(manifest, xml);
+  console.log('patch-android: added share target');
 }
 
 const statIcon = path.resolve(here, '../android/app/src/main/res/drawable/ic_stat_agentdeck.xml');
