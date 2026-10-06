@@ -5,7 +5,9 @@
  *              "terminal_bell" notification channel, most TUIs on prompt)
  * - `notify` — OSC 9 (iTerm2/ConEmu style) or OSC 777;notify (urxvt/Ghostty)
  * - `idle`   — output streamed for a while (agent working) and then stopped
- *              (agent done or waiting for input)
+ *              (agent done or waiting for input). Only once the user has
+ *              typed something: a program nobody gave work to has nothing to
+ *              finish, however long its startup screen keeps drawing.
  *
  * Pure logic + timers; the TerminalManager feeds it output/input.
  */
@@ -15,6 +17,8 @@ export interface AttentionOptions {
   onAttention: (reason: AttentionReason, text?: string) => void;
   /** Enable the "quiet after work" heuristic. */
   idleNotify: boolean;
+  /** The program may already be working (re-attached mid-run) — do not wait for input first. */
+  prompted?: boolean;
   /** Silence needed before a busy terminal counts as waiting. */
   quietMs?: number;
   /** Minimum busy streak before quiet is interesting. */
@@ -28,6 +32,17 @@ export interface AttentionOptions {
 // eslint-disable-next-line no-control-regex
 const OSC_RE = /\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 
+// What a terminal emulator sends by itself: focus in/out, mouse, replies to
+// queries (cursor position, device attributes, mode reports, colors).
+const REPORT_RE =
+  // eslint-disable-next-line no-control-regex
+  /\x1b\[[IO]|\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3}|\x1b\[\??\d+(?:;\d+)*R|\x1b\[[?>][\d;]*c|\x1b\[\?\d+;\d+\$y|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+/** Keys a person pressed — not just the emulator reporting focus, mouse or query replies. */
+export function isTyped(data: string): boolean {
+  return data.replace(REPORT_RE, '') !== '';
+}
+
 export class AttentionDetector {
   private carry = '';
   private busyStart: number | null = null;
@@ -35,6 +50,7 @@ export class AttentionDetector {
   private lastFired = Number.NEGATIVE_INFINITY;
   private quietTimer: NodeJS.Timeout | null = null;
   private idleNotify: boolean;
+  private prompted: boolean;
   private readonly quietMs: number;
   private readonly minBusyMs: number;
   private readonly throttleMs: number;
@@ -42,6 +58,7 @@ export class AttentionDetector {
 
   constructor(private readonly opts: AttentionOptions) {
     this.idleNotify = opts.idleNotify;
+    this.prompted = opts.prompted === true;
     this.quietMs = opts.quietMs ?? 12_000;
     this.minBusyMs = opts.minBusyMs ?? 6_000;
     this.throttleMs = opts.throttleMs ?? 20_000;
@@ -52,15 +69,20 @@ export class AttentionDetector {
   output(chunk: string): void {
     const t = this.now();
     this.scan(chunk);
-    if (!this.idleNotify) return;
+    if (!this.idleNotify || !this.prompted) return;
     // A gap > quietMs between chunks starts a fresh busy streak.
     if (this.busyStart === null || t - this.lastOutput > this.quietMs) this.busyStart = t;
     this.lastOutput = t;
     this.armQuiet();
   }
 
-  /** User typed — whatever was waiting got an answer; restart the streak. */
-  input(): void {
+  /**
+   * Something was sent to the program — whatever was waiting got an answer,
+   * and what it draws next is a reaction, not work: restart the streak. Only
+   * `typed` input (see isTyped) can set it to work.
+   */
+  input(typed = false): void {
+    if (typed) this.prompted = true;
     this.busyStart = null;
     if (this.quietTimer) {
       clearTimeout(this.quietTimer);

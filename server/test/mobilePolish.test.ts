@@ -3,7 +3,7 @@ import { execa } from 'execa';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AttentionDetector } from '../src/term/attention.js';
+import { AttentionDetector, isTyped } from '../src/term/attention.js';
 import { listPresets, resolveLaunch } from '../src/term/presets.js';
 import { assertRelPath, gitBranches, gitChanges, gitDiff, gitLog, parsePorcelainZ } from '../src/git/gitOps.js';
 import { cleanTranscript } from '../src/voice/transcribe.js';
@@ -53,6 +53,19 @@ describe('AttentionDetector', () => {
       now: () => now,
       onAttention: (r) => hits.push(r),
     });
+    // nobody gave it work yet (startup screen) → nothing to finish
+    for (let i = 0; i < 8; i++) {
+      now += 500;
+      d.output('.');
+    }
+    now += 1000;
+    vi.advanceTimersByTime(1000);
+    expect(hits).toEqual([]);
+    // focus reports, mouse and query replies are not the user typing
+    expect(isTyped('\x1b[I\x1b[O\x1b[<64;10;5M\x1b[12;1R\x1b[?62;c\x1b]11;rgb:0000/0000/0000\x07')).toBe(false);
+    expect(isTyped('\x1b[Ihi')).toBe(true);
+    expect(isTyped('\r')).toBe(true);
+    d.input(true);
     // short burst → not interesting
     d.output('x');
     now += 500;

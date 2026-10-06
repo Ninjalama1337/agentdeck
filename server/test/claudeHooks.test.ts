@@ -110,6 +110,7 @@ describe('Claude Code terminal hooks', () => {
     const hits: string[] = [];
     const d = new AttentionDetector({
       idleNotify: true,
+      prompted: true,
       quietMs: 20,
       minBusyMs: 10,
       now: () => clock,
