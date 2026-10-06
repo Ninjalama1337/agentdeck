@@ -237,9 +237,10 @@ export class NotificationHub {
         kind: n.kind,
         ...(n.state ? { state: n.state } : {}),
         ...(n.terminalId && n.prompt ? { terminalId: n.terminalId, prompt: n.prompt } : {}),
+        ...(n.sessionId && n.permissionId ? { sessionId: n.sessionId, permissionId: n.permissionId } : {}),
       },
-      // Yes/No buttons need a notification the app draws itself.
-      ...(n.terminalId && n.prompt ? { dataOnly: true } : {}),
+      // Answer buttons need a notification the app draws itself.
+      ...((n.terminalId && n.prompt) || (n.sessionId && n.permissionId) ? { dataOnly: true } : {}),
       ...(n.terminalId ?? n.sessionId ?? n.runId ? { tag: (n.terminalId ?? n.sessionId ?? n.runId) as string } : {}),
     };
     const dead: string[] = [];

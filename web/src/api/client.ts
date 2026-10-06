@@ -6,6 +6,7 @@ import type {
   Account,
   AdminJob,
   AdminJobKey,
+  AnswerPermissionRequest,
   AgentInfo,
   AgentUsage,
   ApkInfo,
@@ -375,6 +376,14 @@ export const api = {
 
   interrupt(sessionId: string): Promise<void> {
     return request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`);
+  },
+
+  answerPermission(sessionId: string, requestId: string, body: AnswerPermissionRequest): Promise<void> {
+    return request(
+      'POST',
+      `/api/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}`,
+      { json: body },
+    );
   },
 
   openInIde(sessionId: string): Promise<void> {

@@ -15,7 +15,8 @@ import java.util.Map;
 /**
  * Receives FCM messages. Everything goes to the Capacitor push plugin as
  * before, except data-only messages for a terminal that asks a yes/no
- * question: those are drawn here, with Yes / No buttons (AnswerReceiver).
+ * question or a chat session that asks for a permission: those are drawn
+ * here, with Yes / No or Allow / Deny buttons (AnswerReceiver).
  * The system cannot add buttons to a notification it renders for a closed app.
  */
 public class AgentDeckMessagingService extends MessagingService {
@@ -23,7 +24,9 @@ public class AgentDeckMessagingService extends MessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage message) {
         Map<String, String> data = message.getData();
-        if (message.getNotification() == null && data.containsKey("terminalId") && data.containsKey("prompt")) {
+        boolean terminalQuestion = data.containsKey("terminalId") && data.containsKey("prompt");
+        boolean permissionQuestion = data.containsKey("sessionId") && data.containsKey("permissionId");
+        if (message.getNotification() == null && (terminalQuestion || permissionQuestion)) {
             // In front, the socket already told the user (toast + inbox).
             if (!MainActivity.visible) showWithActions(this, data);
             return;
@@ -45,18 +48,22 @@ public class AgentDeckMessagingService extends MessagingService {
     }
 
     private static PendingIntent answerIntent(Context context, Map<String, String> data, String answer, String channel) {
+        // One of the two: a terminal question, or a session's permission request.
         String terminalId = data.get("terminalId");
+        String target = terminalId != null ? terminalId : data.get("permissionId");
         Intent intent = new Intent(context, AnswerReceiver.class);
         intent.setAction("com.ninjalama.agentdeck.ANSWER." + answer);
         intent.putExtra("terminalId", terminalId);
         intent.putExtra("prompt", data.get("prompt"));
+        intent.putExtra("sessionId", data.get("sessionId"));
+        intent.putExtra("permissionId", data.get("permissionId"));
         intent.putExtra("answer", answer);
         intent.putExtra("tag", data.get("tag"));
         intent.putExtra("channel", channel);
         intent.putExtra("title", data.get("title"));
         return PendingIntent.getBroadcast(
             context,
-            (terminalId + answer).hashCode(),
+            (target + answer).hashCode(),
             intent,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
@@ -71,20 +78,21 @@ public class AgentDeckMessagingService extends MessagingService {
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         open.putExtra(NotifyActionsPlugin.EXTRA_OPEN, data.containsKey("open") ? data.get("open") : "");
-        String terminalId = data.get("terminalId");
+        boolean permission = !data.containsKey("terminalId");
+        String target = permission ? data.get("permissionId") : data.get("terminalId");
         PendingIntent content = PendingIntent.getActivity(
             context,
-            terminalId.hashCode(),
+            String.valueOf(target).hashCode(),
             open,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
 
         String body = data.containsKey("body") ? data.get("body") : "";
         // Approving from a lock screen is approving without looking: unlock first.
-        NotificationCompat.Action yes = new NotificationCompat.Action.Builder(0, "Yes", answerIntent(context, data, "yes", channel))
+        NotificationCompat.Action yes = new NotificationCompat.Action.Builder(0, permission ? "Allow" : "Yes", answerIntent(context, data, "yes", channel))
             .setAuthenticationRequired(true)
             .build();
-        NotificationCompat.Action no = new NotificationCompat.Action.Builder(0, "No", answerIntent(context, data, "no", channel))
+        NotificationCompat.Action no = new NotificationCompat.Action.Builder(0, permission ? "Deny" : "No", answerIntent(context, data, "no", channel))
             .setAuthenticationRequired(true)
             .build();
 

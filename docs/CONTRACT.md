@@ -32,6 +32,15 @@ your machine from a mobile app (PWA / Android APK):
   --include-partial-messages`,
   `--model <id>`, `--permission-mode <default|acceptEdits|plan|bypassPermissions>`,
   `--resume <sessionId>`, `--dangerously-skip-permissions`, cwd defines project.
+  Permission questions (verified in 2.1.291): with `--permission-prompt-tool stdio`
+  and stdin kept open, a tool call that needs approval arrives on stdout as
+  `{type:"control_request",request_id,request:{subtype:"can_use_tool",tool_name,
+  input,permission_suggestions,tool_use_id}}`; the answer goes to stdin as
+  `{type:"control_response",response:{subtype:"success",request_id,response:
+  {behavior:"allow",updatedInput[,updatedPermissions]} | {behavior:"deny",message}}}`.
+  `AskUserQuestion` comes the same way and is answered with
+  `updatedInput.answers = {<question>: <label>}`. The CLI exits once stdin is
+  closed after the `result` line.
   Thinking effort: `--effort <low|medium|high>` (verified in 2.1.285 help).
   Subscription usage (verified): `claude -p "/usage"` prints plan usage —
   "Current session: N% used · resets <date>", "Current week (all models):
@@ -233,6 +242,7 @@ again. `AgentInfo.admin` lists the per-agent actions.
 | DELETE | `/api/sessions/:id` | `204` |
 | POST | `/api/sessions/:id/messages` | `SendTurnRequest → SendTurnResponse` (409 if a run is active; `model`/`thinkingEffort` override the session defaults for that turn and update them) |
 | POST | `/api/sessions/:id/interrupt` | `204` |
+| POST | `/api/sessions/:id/permissions/:requestId` | body `{decision: allow\|always\|deny, message?, answers?}` → `204`; `409 PERMISSION_GONE` when the question is no longer open |
 | POST | `/api/sessions/:id/ide` | opens/focuses the project in the agent IDE → `204` |
 | GET | `/api/models/:agentId` | `{models: ModelPreset[]}` |
 | GET | `/api/projects/:id/git/status` | `ProjectGitInfo` |

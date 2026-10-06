@@ -7,6 +7,7 @@
  * - broadcasts live events (numbered per run, text deltas bundled), accumulates
  *   text deltas into one assistant ChatMessage flushed at the end
  * - hands out the answer so far (draftOf) to clients that join mid-run
+ * - passes an agent's permission questions to the chat and the answers back
  * - kills runs on interrupt / maxRunMs (SIGINT → 3s → SIGKILL, process group)
  */
 import fsp from 'node:fs/promises';
@@ -16,6 +17,7 @@ import type {
   AgentEvent,
   ChatMessage,
   MessageUsage,
+  PermissionRequest,
   Project,
   Session,
   SessionDraft,
@@ -30,7 +32,7 @@ import type { AgentService } from './registry.js';
 import { newId, newMessageId } from '../util/ids.js';
 import { ensureDir } from '../util/paths.js';
 import { truncate } from './types.js';
-import type { AgentAdapter, RunAttachment, RunPlan } from './types.js';
+import type { AgentAdapter, PermissionAnswer, PermissionSignal, RunAttachment, RunPlan } from './types.js';
 
 type Child = ReturnType<typeof execa>;
 
@@ -79,6 +81,9 @@ interface ActiveRun {
   plan: RunPlan;
   child: Child;
   timer: NodeJS.Timeout;
+  maxRunMs: number;
+  /** Questions the agent waits on, by request id. */
+  permissions: Map<string, Extract<PermissionSignal, { kind: 'ask' }>>;
   exited: boolean;
   interrupted: boolean;
   externalId?: string;
@@ -135,7 +140,34 @@ export class AgentManager {
         ...(t.summary ? { summary: t.summary } : {}),
       })),
       ...(run.usage ? { usage: run.usage } : {}),
+      ...(run.permissions.size ? { permissions: [...run.permissions.values()].map((p) => p.request) } : {}),
     };
+  }
+
+  /** Questions of the session's run still waiting for the user. */
+  pendingPermissions(sessionId: string): PermissionRequest[] {
+    const run = this.active.get(sessionId);
+    return run ? [...run.permissions.values()].map((p) => p.request) : [];
+  }
+
+  /**
+   * Hands the user's answer to the waiting agent. False when that question is
+   * gone (answered from another device, withdrawn, run over).
+   */
+  async answerPermission(sessionId: string, requestId: string, answer: PermissionAnswer): Promise<boolean> {
+    const run = this.active.get(sessionId);
+    const asked = run?.permissions.get(requestId);
+    if (!run || !asked || run.exited || !run.child.stdin?.writable) return false;
+    run.permissions.delete(requestId);
+    const { line, permissionMode } = asked.answer(answer);
+    run.child.stdin.write(line + '\n');
+    this.send(run, { type: 'permission-resolved', id: requestId, decision: answer.decision });
+    if (run.permissions.size === 0) this.armTimer(run);
+    if (permissionMode && run.session.permissionMode !== permissionMode) {
+      run.session.permissionMode = permissionMode;
+      await this.store.saveSession(run.session);
+    }
+    return true;
   }
 
   /** Synchronous pre-flight used by the REST layer to return proper 409s. */
@@ -199,6 +231,8 @@ export class AgentManager {
         thinkingEffort,
         permissionMode: session.permissionMode,
         resumeId,
+        // Only the chat has someone to ask; routines, team steps and delegated runs go unattended.
+        interactive: opts.source === 'app',
       });
     } catch (err) {
       return this.failSession(session, `Failed to build ${info.label} run: ${errorMessage(err)}`);
@@ -240,7 +274,9 @@ export class AgentManager {
       adapter,
       plan,
       child,
-      timer: setTimeout(() => undefined, 2 ** 31 - 1), // replaced below
+      timer: setTimeout(() => undefined, 0), // armed below
+      maxRunMs: opts.maxRunMs ?? this.config.maxRunMs,
+      permissions: new Map(),
       exited: false,
       interrupted: false,
       textBuf: '',
@@ -254,10 +290,7 @@ export class AgentManager {
     };
     this.active.set(session.id, run);
 
-    run.timer = setTimeout(() => {
-      this.interrupt(session.id, `Run exceeded the ${Math.round((opts.maxRunMs ?? this.config.maxRunMs) / 1000)}s limit`);
-    }, opts.maxRunMs ?? this.config.maxRunMs);
-    run.timer.unref?.();
+    this.armTimer(run);
 
     if (plan.notice) {
       this.send(run, { type: 'raw', line: `[agentdeck] ${plan.notice}` });
@@ -267,7 +300,9 @@ export class AgentManager {
       for (const payload of plan.stdinPayloads) {
         child.stdin.write(payload + '\n');
       }
-      child.stdin.end();
+      // A run that asks keeps stdin open for the answers until its turn ends.
+      if (!plan.permissions) child.stdin.end();
+      else child.stdin.on('error', () => undefined); // the CLI may exit before an answer lands
     }
 
     child.stdout?.setEncoding('utf8');
@@ -371,9 +406,46 @@ export class AgentManager {
     }
   }
 
+  /** (Re)starts the run's time limit. */
+  private armTimer(run: ActiveRun): void {
+    clearTimeout(run.timer);
+    run.timer = setTimeout(() => {
+      this.interrupt(run.sessionId, `Run exceeded the ${Math.round(run.maxRunMs / 1000)}s limit`);
+    }, run.maxRunMs);
+    run.timer.unref?.();
+  }
+
+  /** True when the line was a permission exchange and is not agent output. */
+  private handlePermissionLine(run: ActiveRun, line: string): boolean {
+    const signal = run.plan.permissions?.(line);
+    if (!signal) return false;
+    switch (signal.kind) {
+      case 'ask':
+        run.permissions.set(signal.request.id, signal);
+        // Waiting for the user is not running: the limit starts over with the answer.
+        clearTimeout(run.timer);
+        this.send(run, { type: 'permission-request', request: signal.request });
+        return true;
+      case 'cancel':
+        if (run.permissions.delete(signal.id)) {
+          this.send(run, { type: 'permission-resolved', id: signal.id, decision: 'deny' });
+          if (run.permissions.size === 0) this.armTimer(run);
+        }
+        return true;
+      case 'reply':
+        if (run.child.stdin?.writable) run.child.stdin.write(signal.line + '\n');
+        return true;
+      case 'end':
+        // The line itself still carries usage and the result for the parser.
+        if (run.child.stdin?.writable) run.child.stdin.end();
+        return false;
+    }
+  }
+
   private handleLine(run: ActiveRun, line: string): void {
     const trimmed = line.trim();
     if (!trimmed) return;
+    if (this.handlePermissionLine(run, trimmed)) return;
     const externalId = run.adapter.externalSessionIdOf?.(trimmed);
     if (externalId && externalId !== run.externalId) {
       run.externalId = externalId;
@@ -424,6 +496,8 @@ export class AgentManager {
         break;
       }
       case 'status':
+        // A run the user stopped did not fail, whatever the CLI reports on its way out.
+        if (event.status === 'error' && run.interrupted) return;
         if (event.status === 'error' && event.detail && !run.errorDetail) {
           run.errorDetail = event.detail;
         }

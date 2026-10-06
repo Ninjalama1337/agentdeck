@@ -183,6 +183,42 @@ export interface FileEntry {
   modifiedAt?: number;
 }
 
+/** One question the agent puts to the user, with the answers it offers. */
+export interface PermissionQuestion {
+  question: string;
+  header?: string;
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+}
+
+/**
+ * A run stopped to ask the user: may it make this tool call — or, with
+ * `questions`, which of the offered answers applies. Answered from the chat.
+ */
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  /** One-line gist of the call (command, file path). */
+  summary?: string;
+  /** The call in full as readable text (command, file content, diff), capped. */
+  detail?: string;
+  /** What an "always" answer would allow from now on; absent when the agent offers none. */
+  always?: string;
+  questions?: PermissionQuestion[];
+  ts: number;
+}
+
+/** `always`: allow, and stop asking for this kind of call. */
+export type PermissionDecision = 'allow' | 'always' | 'deny';
+
+export interface AnswerPermissionRequest {
+  decision: PermissionDecision;
+  /** Deny: what the agent is told instead. */
+  message?: string;
+  /** Answers to `questions`, keyed by question text (several labels joined with ", "). */
+  answers?: Record<string, string>;
+}
+
 /** What a run in progress has produced so far — lets a client that joins mid-run show the whole answer. */
 export interface SessionDraft {
   /** Run id; with `seq` it tells which `session:event`s this snapshot already contains. */
@@ -192,6 +228,8 @@ export interface SessionDraft {
   thinking?: string;
   tools: { tool: string; state: 'running' | 'done' | 'error'; summary?: string }[];
   usage?: MessageUsage;
+  /** Questions of this run still waiting for the user. Missing on older servers. */
+  permissions?: PermissionRequest[];
 }
 
 export interface SessionDetailResponse {
@@ -558,6 +596,7 @@ export interface TerminalPreset {
 export type DeckNotificationKind =
   | 'session-done'
   | 'session-error'
+  | 'session-permission'
   | 'terminal-attention'
   | 'team-done'
   | 'team-error'
@@ -584,6 +623,8 @@ export interface DeckNotification {
   runId?: string;
   /** Terminal waiting on a yes/no question the notification can answer. */
   prompt?: 'menu' | 'yesno';
+  /** Session waiting on this permission request — the notification can allow or deny it. */
+  permissionId?: string;
 }
 
 export interface PushStatus {

@@ -57,6 +57,12 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   die App mitten in einer Antwort wieder öffnet, sieht den bisherigen Stand
   und liest live weiter; ungesendeter Text und Anhänge bleiben pro Session
   erhalten.
+- **Rechte-Abfragen im Chat** — will Claude Code einen Befehl ausführen oder
+  eine Datei ändern, der es nicht ohne Zustimmung darf, erscheint die Anfrage
+  im Chat: *Allow*, *Deny* oder *Always allow*, mit dem vollständigen Befehl
+  bzw. der Änderung zum Aufklappen. Rückfragen des Agents mit Auswahloptionen
+  beantwortest du genauso. Dazu kommt eine Benachrichtigung; in der APK
+  mit Allow/Deny direkt auf der Benachrichtigung.
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit
   Presets pro Agent.
 - **Projekte & GitHub** — Projekte registrieren, aus GitHub klonen (`gh`),
