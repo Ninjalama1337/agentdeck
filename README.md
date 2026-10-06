@@ -63,6 +63,13 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   bzw. der Änderung zum Aufklappen. Rückfragen des Agents mit Auswahloptionen
   beantwortest du genauso. Dazu kommt eine Benachrichtigung; in der APK
   mit Allow/Deny direkt auf der Benachrichtigung.
+- **Aktivität & Kosten** — der Server hält jeden Agent-Lauf in einer
+  SQLite-Datenbank fest (Chat, Routinen, Team-Runs, Terminal-Turns): Agent,
+  Modell, Projekt, Dauer, Tokens, Tool-Aufrufe und Kosten. Die App zeigt daraus
+  unter *Activity*, welcher Agent wie viel erledigt hat — pro Tag, Agent,
+  Projekt und Modell, dazu die Abo-Limits im Zeitverlauf und die einzelnen
+  Läufe. Kosten sind der API-Gegenwert, wie ihn die CLI meldet; für
+  Terminal-Turns liefert nur Claude Code Tokens (aus seinem Transkript).
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit
   Presets pro Agent.
 - **Projekte & GitHub** — Projekte registrieren, aus GitHub klonen (`gh`),

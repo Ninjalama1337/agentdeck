@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Settings, SquareTerminal, Trash2 } from 'lucide-react';
+import { BarChart3, FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Settings, SquareTerminal, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { GlassCard } from '../../components/ui/GlassCard';
@@ -216,6 +216,20 @@ export function HomeScreen() {
           </div>
         </section>
       )}
+
+      <button
+        type="button"
+        onClick={() => useAppStore.getState().setActivitySheetOpen(true)}
+        className="press tap glass mb-5 flex w-full items-center gap-3 p-3.5 text-left active:bg-surface-2"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+          <BarChart3 size={16} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13.5px] font-semibold">Activity</span>
+          <span className="block text-[12px] leading-snug text-dim">Which agent did how much — runs, time, tokens, cost.</span>
+        </span>
+      </button>
 
       {/* routines */}
       <section aria-label="Routines" className="mb-5">

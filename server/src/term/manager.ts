@@ -18,7 +18,7 @@ import { pty } from './pty.js';
 import type { TerminalInfo } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
-import { augmentedPath } from './presets.js';
+import { augmentedPath, PRESET_DEFS } from './presets.js';
 import { AttentionDetector, isTyped, type AttentionReason } from './attention.js';
 import { classifyScreen, type PromptKind, type Verdict } from '../notify/classify.js';
 import type { DeckNotificationState } from '@agentdeck/shared';
@@ -70,6 +70,21 @@ export interface TerminalManagerOptions {
   serverPort?: number;
   /** Bridge token Claude Code terminals present when their hooks report in. */
   hookToken?: string;
+  /** An agent in a terminal finished a turn (activity database). */
+  onTurn?: (turn: TerminalTurn) => void;
+}
+
+/** One finished turn of an agent TUI: from the user's prompt to the agent going idle. */
+export interface TerminalTurn {
+  info: TerminalInfo;
+  startedAt: number;
+  endedAt: number;
+  state: DeckNotificationState;
+  /** Claude Code: what the user asked, and the transcript that holds the turn's usage. */
+  prompt?: string;
+  transcriptPath?: string;
+  /** How it ended, in the agent's words. */
+  detail?: string;
 }
 
 export interface PersistedTerminal {
@@ -98,6 +113,12 @@ interface ActiveTerminal {
   askTimer?: NodeJS.Timeout;
   /** When a dialog was last reported — its follow-up notification is the same news. */
   askedAt?: number;
+  /** Agent TUI: its turns go on record. */
+  agent: boolean;
+  /** Claude Code reports through hooks — its turns start and end there, not at a keypress. */
+  hooked?: boolean;
+  /** The turn the agent is working on. */
+  turn?: { startedAt: number; prompt?: string; transcriptPath?: string };
 }
 
 const MAX_CONCURRENT = 10;
@@ -382,6 +403,7 @@ export class TerminalManager {
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
+      agent: opts.idleNotify === true,
       attention: new AttentionDetector({
         // "Quiet after work" only makes sense for agent TUIs; a plain shell
         // going quiet after `ls` is not news.
@@ -502,6 +524,7 @@ export class TerminalManager {
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
+      agent: PRESET_DEFS.some((p) => p.id === info.presetId && p.kind === 'agent'),
       attention: new AttentionDetector({
         idleNotify: info.presetId !== 'shell',
         // It may have been given work before the restart.
@@ -544,6 +567,10 @@ export class TerminalManager {
     try {
       term.proc.write(data);
       term.attention.input(isTyped(data));
+      // Enter hands the agent its next piece of work.
+      if (term.agent && !term.hooked && !term.turn && data.includes('\r') && isTyped(data)) {
+        term.turn = { startedAt: Date.now() };
+      }
       // Answered before it was reported — nothing left to announce.
       clearTimeout(term.askTimer);
       return true;
@@ -605,6 +632,20 @@ export class TerminalManager {
       const changed = !term.info.attention || term.info.attentionState !== verdict.state;
       term.info.attention = true;
       term.info.attentionState = verdict.state;
+      if (verdict.state !== 'waiting' && term.turn) {
+        const turn = term.turn;
+        delete term.turn;
+        this.options.onTurn?.({
+          info: { ...term.info },
+          startedAt: turn.startedAt,
+          // "Quiet after work" is noticed late: the work ended with the last output.
+          endedAt: reason === 'idle' ? Math.max(term.info.lastOutputAt ?? Date.now(), turn.startedAt) : Date.now(),
+          state: verdict.state,
+          ...(turn.prompt ? { prompt: turn.prompt } : {}),
+          ...(turn.transcriptPath ? { transcriptPath: turn.transcriptPath } : {}),
+          ...(verdict.detail ? { detail: verdict.detail } : {}),
+        });
+      }
       this.log.info({ terminal: id, reason, state: verdict.state }, 'terminal attention');
       broadcast.onAttention?.(term.info, reason, verdict);
       if (changed) broadcast.onList();
@@ -621,13 +662,22 @@ export class TerminalManager {
     // Hooks work here, and they are exact: the quiet-after-work guess would
     // only add late and vaguer duplicates.
     term.attention.stopIdleNotify();
+    term.hooked = true;
     const signal = interpretClaudeHook(payload);
     if (!signal) return true;
     clearTimeout(term.askTimer);
+    const text = (key: string): string | undefined => {
+      const value = (payload as Record<string, unknown>)[key];
+      return typeof value === 'string' && value ? value : undefined;
+    };
     if (signal.kind === 'working') {
       delete term.askedAt;
+      const prompt = text('prompt');
+      term.turn = { startedAt: Date.now(), ...(prompt ? { prompt } : {}) };
     } else if (signal.kind === 'result') {
       delete term.askedAt;
+      const transcriptPath = text('transcript_path');
+      if (term.turn && transcriptPath) term.turn.transcriptPath = transcriptPath;
       this.raiseAttention(id, term, broadcast, 'notify', undefined, signal);
     } else if (signal.confirmed) {
       if (term.askedAt === undefined || Date.now() - term.askedAt > ASK_REPEAT_MS) {

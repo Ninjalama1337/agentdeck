@@ -34,7 +34,7 @@ import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
 import { FileWatchers } from '../files/watcher.js';
-import { TerminalManager } from '../term/manager.js';
+import { TerminalManager, type TerminalTurn } from '../term/manager.js';
 import { RoutineScheduler } from '../routines/scheduler.js';
 import { NotificationHub, stateTitle, summarize } from '../notify/hub.js';
 import { classifyReply, isLimitError } from '../notify/classify.js';
@@ -43,6 +43,9 @@ import { registerRoutes } from '../routes/index.js';
 import { terminalBroadcasts } from '../routes/terminals.js';
 import type { AppDeps } from '../routes/deps.js';
 import { NAME, REPO_ROOT, VERSION } from '../version.js';
+import { StatsDb } from '../stats/db.js';
+import { readClaudeTurn } from '../stats/claudeTranscript.js';
+import { newId } from '../util/ids.js';
 import { UpdateManager } from '../update/manager.js';
 
 const gzip = promisify(zlib.gzip);
@@ -123,14 +126,50 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     broadcast: (notification) => broadcast('notification', { notification }),
   });
   await notifications.init();
-  const manager = new AgentManager(config, store, agents, log, (sessionId, event, meta) => {
-    broadcast('session:event', { sessionId, ts: Date.now(), event, ...meta });
-    if (event.type === 'status' && (event.status === 'idle' || event.status === 'error')) {
-      void notifySessionFinished(sessionId, event.status);
-    } else if (event.type === 'permission-request') {
-      notifyPermission(sessionId, event.request);
+  const stats = await StatsDb.open(StatsDb.fileIn(config.dataDir), log);
+  const manager = new AgentManager(
+    config,
+    store,
+    agents,
+    log,
+    (sessionId, event, meta) => {
+      broadcast('session:event', { sessionId, ts: Date.now(), event, ...meta });
+      if (event.type === 'status' && (event.status === 'idle' || event.status === 'error')) {
+        void notifySessionFinished(sessionId, event.status);
+      } else if (event.type === 'permission-request') {
+        notifyPermission(sessionId, event.request);
+      }
+    },
+    (run) => stats.recordRun(run),
+  );
+
+  /** A turn of an agent TUI goes on record; Claude Code's with what its transcript says it used. */
+  async function recordTerminalTurn(turn: TerminalTurn): Promise<void> {
+    try {
+      const used = turn.transcriptPath ? await readClaudeTurn(turn.transcriptPath, turn.startedAt) : undefined;
+      const { toolCalls, model, ...usage } = used ?? { toolCalls: undefined, model: undefined };
+      stats.recordRun({
+        id: newId('run'),
+        startedAt: turn.startedAt,
+        endedAt: turn.endedAt,
+        // Only Claude Code reports through hooks with a transcript.
+        agentId: turn.transcriptPath ? 'claude' : (turn.info.presetId ?? 'terminal'),
+        ...(model ? { model } : {}),
+        projectId: turn.info.projectId,
+        ...(store.getProject(turn.info.projectId) ? { projectName: store.getProject(turn.info.projectId)?.name } : {}),
+        terminalId: turn.info.id,
+        source: 'terminal',
+        status: turn.state === 'done' ? 'ok' : 'error',
+        ...(turn.state !== 'done' && turn.detail ? { error: turn.detail } : {}),
+        ...(turn.prompt ? { title: turn.prompt } : {}),
+        ...(turn.state === 'done' && turn.detail ? { summary: turn.detail } : {}),
+        ...usage,
+        ...(toolCalls !== undefined ? { toolCalls } : {}),
+      });
+    } catch (err) {
+      log.warn({ err }, 'could not record terminal turn');
     }
-  });
+  }
 
   /** The run stopped to ask → inbox + push, with Allow / Deny on the notification. */
   function notifyPermission(sessionId: string, request: PermissionRequest): void {
@@ -192,6 +231,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     serverPort: config.port,
     serverPid: process.pid,
     hookToken: bridgeToken,
+    onTurn: (turn) => void recordTerminalTurn(turn),
   });
   const routines = new RoutineScheduler({ store, manager, log });
   const io = attachGateway({
@@ -293,6 +333,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     manager,
     teams: new TeamOrchestrator(store, manager, log),
     usage: new UsageCollector({ agents }),
+    stats,
     pairing,
     limiter,
     remoteLimiter: new AttemptLimiter(10),
@@ -369,6 +410,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     adminJobRunner.stop('Server shutting down');
     await adminJobRunner.idle().catch(() => undefined);
     fileWatchers.stopAll();
+    stats.close();
   });
 
   app.setNotFoundHandler((req, reply) => {

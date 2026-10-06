@@ -13,6 +13,7 @@ import type { PairRequests } from '../auth/pairRequests.js';
 import type { TunnelManager } from '../tunnel/manager.js';
 import type { ApkStore } from '../apk/store.js';
 import type { UsageCollector } from '../usage/collector.js';
+import type { StatsDb } from '../stats/db.js';
 import type { RateLimiter } from '../util/rateLimit.js';
 import type { Broadcaster } from '../ws/gateway.js';
 import type { FileWatchers } from '../files/watcher.js';
@@ -31,6 +32,8 @@ export interface AppDeps {
   manager: AgentManager;
   teams: TeamOrchestrator;
   usage: UsageCollector;
+  /** Record of every agent run and of the subscription limits over time. */
+  stats: StatsDb;
   pairing: PairingCodeManager;
   limiter: AttemptLimiter;
   /** Failed pairing attempts from outside the LAN, all clients together. */

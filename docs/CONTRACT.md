@@ -252,6 +252,8 @@ again. `AgentInfo.admin` lists the per-agent actions.
 | POST | `/api/team/runs` | `TeamRunRequest → TeamRun` |
 | GET | `/api/team/runs?projectId=` | `TeamRun[]` |
 | GET | `/api/team/runs/:id` | `TeamRun` |
+| GET | `/api/stats` `?from=&to=&tzOffset=` | `StatsResponse` — sums of the recorded runs per agent, model, project, source and day (default: last 30 days; `tzOffset` = minutes ahead of UTC, decides where a day begins), plus subscription snapshots |
+| GET | `/api/stats/runs` `?limit=&before=&agentId=&projectId=&routineId=` | `RunListResponse` — single runs, newest first |
 | POST | `/api/bridge/run` | `{agent, prompt, project?, model?, timeoutMs?} → {ok, text?, error?, sessionId}` (bridge token, localhost only) |
 
 Every mutating endpoint emits the matching WS update afterwards.

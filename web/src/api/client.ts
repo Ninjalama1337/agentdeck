@@ -49,6 +49,8 @@ import type {
   PairStatusResponse,
   Project,
   ProjectGitInfo,
+  RunListResponse,
+  StatsResponse,
   Routine,
   SaveFileRequest,
   SaveFileResponse,
@@ -376,6 +378,15 @@ export const api = {
 
   interrupt(sessionId: string): Promise<void> {
     return request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`);
+  },
+
+  /** What the agents did between `from` and `to`; days follow the device's timezone. */
+  stats(query: { from?: number; to?: number }): Promise<StatsResponse> {
+    return request('GET', '/api/stats', { query: { ...query, tzOffset: -new Date().getTimezoneOffset() } });
+  },
+
+  statsRuns(query: { limit?: number; before?: number; agentId?: string; projectId?: string; routineId?: string }): Promise<RunListResponse> {
+    return request('GET', '/api/stats/runs', { query });
   },
 
   answerPermission(sessionId: string, requestId: string, body: AnswerPermissionRequest): Promise<void> {
