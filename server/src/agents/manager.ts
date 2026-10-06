@@ -19,6 +19,7 @@ import type {
   MessageUsage,
   PermissionRequest,
   Project,
+  RunRecord,
   Session,
   SessionDraft,
   SessionStatus,
@@ -63,6 +64,8 @@ export interface StartTurnOptions {
   source: NonNullable<ChatMessage['source']>;
   /** Per-run override of config.maxRunMs. */
   maxRunMs?: number;
+  /** The routine that fired this turn — kept with the run's record. */
+  routineId?: string;
 }
 
 export type StartGate = { ok: true } | { ok: false; code: string; message: string };
@@ -70,6 +73,7 @@ export type StartGate = { ok: true } | { ok: false; code: string; message: strin
 interface ActiveRun {
   /** Run id — sent with every event and with the draft snapshot. */
   id: string;
+  startedAt: number;
   /** Number of events broadcast for this run so far. */
   seq: number;
   /** Text / thinking deltas waiting for the next bundle, in order. */
@@ -113,6 +117,8 @@ export class AgentManager {
     private readonly agents: AgentService,
     private readonly logger: Logger,
     private readonly emit: SessionEventEmitter,
+    /** Called with every finished run (activity database). */
+    private readonly recordRun: (run: RunRecord) => void = () => undefined,
   ) {}
 
   isActive(sessionId: string): boolean {
@@ -267,6 +273,7 @@ export class AgentManager {
 
     const run: ActiveRun = {
       id: newId('run'),
+      startedAt: Date.now(),
       seq: 0,
       pending: [],
       sessionId: session.id,
@@ -334,6 +341,9 @@ export class AgentManager {
     clearTimeout(run.timer);
     this.active.delete(session.id);
 
+    // flush() hands these to the message and clears them.
+    const usage = run.usage;
+    const toolCalls = run.tools.length;
     const text = await this.flush(run);
 
     let status: SessionStatus;
@@ -361,6 +371,25 @@ export class AgentManager {
     session.lastError = status === 'error' ? error : undefined;
     await this.store.saveSession(session);
     this.emit(session.id, { type: 'status', status });
+
+    this.recordRun({
+      id: run.id,
+      startedAt: run.startedAt,
+      endedAt: Date.now(),
+      agentId: session.agentId,
+      ...((run.modelUsed ?? model) ? { model: run.modelUsed ?? model } : {}),
+      projectId: project.id,
+      projectName: project.name,
+      sessionId: session.id,
+      ...(opts.routineId ? { routineId: opts.routineId } : {}),
+      source: opts.source,
+      status: status === 'idle' ? 'ok' : status === 'stopped' ? 'stopped' : 'error',
+      ...(status !== 'idle' && error ? { error } : {}),
+      title: opts.text,
+      ...(text ? { summary: text } : {}),
+      ...usage,
+      toolCalls,
+    });
 
     this.logger.info({ session: session.id, agent: session.agentId, status, exitCode }, 'run finished');
     return { ok: status !== 'error', text, error };
@@ -490,6 +519,8 @@ export class AgentManager {
         run.usage = {
           inputTokens: event.inputTokens ?? run.usage?.inputTokens,
           outputTokens: event.outputTokens ?? run.usage?.outputTokens,
+          cacheReadTokens: event.cacheReadTokens ?? run.usage?.cacheReadTokens,
+          cacheWriteTokens: event.cacheWriteTokens ?? run.usage?.cacheWriteTokens,
           costUsd: event.costUsd ?? run.usage?.costUsd,
         };
         if (event.model) run.modelUsed = event.model;

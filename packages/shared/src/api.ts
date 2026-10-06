@@ -22,6 +22,9 @@ export interface Attachment {
 export interface MessageUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt tokens served from / written to the provider's cache — not part of `inputTokens`. */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   costUsd?: number;
 }
 
@@ -513,6 +516,97 @@ export interface AgentUsage {
 
 export interface ApiError {
   error: { message: string; code?: string };
+}
+
+// ---------------------------------------------------------------------------
+// Activity — every agent run on record (server database): who did how much
+// ---------------------------------------------------------------------------
+
+/** Where a run came from; `terminal` is a turn of an agent TUI in the Code tab. */
+export type RunSource = 'app' | 'mcp' | 'team' | 'routine' | 'terminal';
+
+export type RunOutcome = 'ok' | 'error' | 'stopped';
+
+/** One finished agent run. */
+export interface RunRecord {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  /** An AgentId, or the launcher preset of a terminal. */
+  agentId: string;
+  model?: string;
+  projectId?: string;
+  projectName?: string;
+  sessionId?: string;
+  terminalId?: string;
+  routineId?: string;
+  source: RunSource;
+  status: RunOutcome;
+  error?: string;
+  /** What was asked, shortened. */
+  title?: string;
+  /** How the answer began, shortened. */
+  summary?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /** As the CLI reports it — for a subscription the price the same work costs over the API. */
+  costUsd?: number;
+  toolCalls?: number;
+}
+
+/** Sums over a set of runs. */
+export interface StatsBucket {
+  runs: number;
+  ok: number;
+  errors: number;
+  stopped: number;
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  toolCalls: number;
+}
+
+/** A subscription's limits at one moment (kept whenever usage is read). */
+export interface PlanSnapshot {
+  agentId: string;
+  ts: number;
+  plan?: string;
+  sessionPct?: number;
+  weekPct?: number;
+  sessionResetsAt?: string;
+  weekResetsAt?: string;
+}
+
+export interface StatsResponse {
+  /** False when the server cannot keep the database (Node without SQLite). */
+  available: boolean;
+  reason?: string;
+  from: number;
+  to: number;
+  totals: StatsBucket;
+  byAgent: (StatsBucket & { agentId: string })[];
+  byModel: (StatsBucket & { agentId: string; model: string })[];
+  byProject: (StatsBucket & { projectId: string; projectName: string })[];
+  bySource: (StatsBucket & { source: RunSource })[];
+  /** Per calendar day in the caller's timezone (`YYYY-MM-DD`) and agent. */
+  byDay: (StatsBucket & { day: string; agentId: string })[];
+  /** Latest subscription state per agent. */
+  plans: PlanSnapshot[];
+  /** Subscription use over the range, thinned to one point per agent and hour. */
+  planHistory: PlanSnapshot[];
+  /** Start of the oldest run on record — how far back the data reaches. */
+  firstRunAt?: number;
+}
+
+export interface RunListResponse {
+  runs: RunRecord[];
+  /** Pass as `before` to load older runs; absent at the end. */
+  next?: number;
 }
 
 // ---------------------------------------------------------------------------

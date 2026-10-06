@@ -50,8 +50,12 @@ interface ClaudeStreamLine {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
     total_cost_usd?: number;
   };
+  /** `result` line: what each model used, keyed by its full id. */
+  modelUsage?: Record<string, { outputTokens?: number }>;
   /** Set on everything a sub-agent (Task tool) produced. */
   parent_tool_use_id?: string | null;
   message?: {
@@ -249,11 +253,15 @@ export function createClaudeStreamParser() {
         const usage = parsed.usage;
         const costUsd = parsed.total_cost_usd ?? usage?.total_cost_usd;
         if (usage || costUsd !== undefined) {
+          const model = mainModelOf(parsed.modelUsage);
           emit({
             type: 'usage',
             inputTokens: usage?.input_tokens,
             outputTokens: usage?.output_tokens,
+            ...(usage?.cache_read_input_tokens !== undefined ? { cacheReadTokens: usage.cache_read_input_tokens } : {}),
+            ...(usage?.cache_creation_input_tokens !== undefined ? { cacheWriteTokens: usage.cache_creation_input_tokens } : {}),
             costUsd,
+            ...(model ? { model } : {}),
           });
         }
         if (parsed.is_error === true || parsed.subtype === 'error_during_execution' || parsed.subtype === 'error') {
@@ -271,6 +279,20 @@ export function createClaudeStreamParser() {
   }
 
   return { parse };
+}
+
+/** The model that wrote most of the turn — "haiku" or no model at all becomes the id that really ran. */
+function mainModelOf(modelUsage: ClaudeStreamLine['modelUsage']): string | undefined {
+  let best: string | undefined;
+  let most = -1;
+  for (const [model, used] of Object.entries(modelUsage ?? {})) {
+    const out = used?.outputTokens ?? 0;
+    if (out > most) {
+      most = out;
+      best = model;
+    }
+  }
+  return best;
 }
 
 const DETAIL_MAX = 6000;

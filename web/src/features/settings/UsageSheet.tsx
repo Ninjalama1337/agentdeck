@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Coins, Gauge, Loader2, RefreshCw, Sparkles, Zap } from 'lucide-react';
+import { BarChart3, Check, ChevronDown, ChevronRight, Coins, Gauge, Loader2, RefreshCw, Sparkles, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import { AGENT_ACCENTS, AGENT_LABELS, AGENT_SHORT_LABELS } from '@agentdeck/shared';
@@ -379,6 +379,7 @@ function UsageCard({
 export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => void }) {
   const storeUsageOpen = useAppStore((s) => s.usageSheetOpen);
   const setUsageSheetOpen = useAppStore((s) => s.setUsageSheetOpen);
+  const setActivitySheetOpen = useAppStore((s) => s.setActivitySheetOpen);
   const currentUsageAgent = useAppStore((s) => s.currentUsageAgent);
   const setCurrentUsageAgent = useAppStore((s) => s.setCurrentUsageAgent);
   const usage = useAppStore((s) => s.usage);
@@ -443,6 +444,19 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
           Refresh
         </button>
       </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          handleClose();
+          setActivitySheetOpen(true);
+        }}
+        className="press tap mb-3 flex w-full items-center gap-2 rounded-xl border border-line bg-white/[0.04] px-3 py-2.5 text-left"
+      >
+        <BarChart3 size={15} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 text-[13px] font-medium text-ink">Activity — runs, tokens and cost over time</span>
+        <ChevronRight size={15} className="shrink-0 text-dim" />
+      </button>
 
       {!usage ? (
         <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-dim">

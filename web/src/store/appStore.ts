@@ -270,6 +270,7 @@ export interface AppStore {
   currentUsageAgent: AgentId;
   /** Whether the full usage sheet is currently open. */
   usageSheetOpen: boolean;
+  activitySheetOpen: boolean;
   /** Soft keyboard visible (visualViewport heuristic) — hides the tab bar. */
   keyboardOpen: boolean;
   /** Number of currently open Sheets — any open sheet hides the tab bar. */
@@ -330,6 +331,7 @@ export interface AppStore {
   setCurrentUsageAgent(agentId: AgentId): void;
   /** Open or close the full usage details sheet. */
   setUsageSheetOpen(open: boolean): void;
+  setActivitySheetOpen(open: boolean): void;
   /** One-shot fetch of GET /api/admin/jobs (settings screen). */
   refreshAdminJobs(): Promise<void>;
   /** Start an update/install/login job (409 → toast when one already runs). */
@@ -829,6 +831,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     usage: null,
     currentUsageAgent: 'claude',
     usageSheetOpen: false,
+    activitySheetOpen: false,
     keyboardOpen: false,
     overlayDepth: 0,
     filesVersion: {},
@@ -1085,6 +1088,10 @@ export const useAppStore = create<AppStore>()((set, get) => {
       set({ currentUsageAgent });
     },
 
+    setActivitySheetOpen(activitySheetOpen) {
+      set({ activitySheetOpen });
+    },
+
     setUsageSheetOpen(usageSheetOpen) {
       set({ usageSheetOpen });
     },
@@ -1285,7 +1292,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
         drop();
       } catch (err) {
         // Answered elsewhere or the run is over: the card has nothing left to ask.
-        if (err instanceof ApiError && err.code === 'PERMISSION_GONE') drop();
+        if (err instanceof ApiError && err.status === 409) drop();
         get().toast('error', errorMessage(err));
       }
     },

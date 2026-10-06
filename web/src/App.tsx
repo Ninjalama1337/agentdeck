@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAppStore } from './store/appStore';
 import { usePrefs } from './store/prefs';
@@ -19,6 +19,7 @@ import { installExternalLinkHandler } from './util/openExternal';
 import { disableFcm, enableFcm, listenForNativeTaps, prepareNativeNotifications, syncActionCredentials } from './util/notify';
 import { backgroundServiceSupported, syncBackgroundService } from './util/backgroundService';
 import { UsageSheet } from './features/settings/UsageSheet';
+import { ActivitySheet } from './features/activity/ActivitySheet';
 import { useUsageTracking } from './hooks/useUsageTracking';
 import { Spinner } from './components/ui/Spinner';
 
@@ -310,9 +311,18 @@ export default function App() {
       </div>
       <TabBar />
       <UsageSheet />
+      <ActivityHost />
       <Lightbox />
       <PairApproval />
       <ToastStack />
     </>
   );
+}
+
+/** The Activity sheet, opened from Home and from the usage sheet. */
+function ActivityHost() {
+  const open = useAppStore((s) => s.activitySheetOpen);
+  const setOpen = useAppStore((s) => s.setActivitySheetOpen);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  return <ActivitySheet open={open} onClose={close} />;
 }

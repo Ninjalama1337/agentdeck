@@ -180,6 +180,7 @@ Alles liegt unter `dataDir` (Standard `~/.local/share/agentdeck`, siehe
 ├── bridge-token                      # Token für /api/bridge/run (0600)
 ├── pairing-code.txt                  # aktueller Pairing-Code
 ├── projects/                         # Standard-projectsRoot (Sandbox)
+├── stats.sqlite                      # Aktivität: jeder Agent-Lauf + Abo-Limits im Zeitverlauf (node:sqlite)
 ├── sessions/<id>/meta.json           # Session-Metadaten
 ├── sessions/<id>/messages.jsonl      # Chat-Verlauf (append-only)
 └── attachments/<sessionId>/<fileId>__<safe-name>
