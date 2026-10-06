@@ -305,7 +305,8 @@ Real PTY shells on the server, one per open tab, project-scoped.
 
 - `node-pty` (server-only dep, compiles on this machine) behind
   `server/src/term/manager.ts`.
-- REST: `POST /api/terminals {projectId, cols?, rows?}` → `TerminalInfo`;
+- REST: `POST /api/terminals {projectId, cols?, rows?, timeZone?}` → `TerminalInfo`
+  (`timeZone`: IANA zone of the device, set as `TZ` in the terminal);
   `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
 - WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`.
 - WS server→clients: `terminal:data {id, data}` (UTF-8 chunk),

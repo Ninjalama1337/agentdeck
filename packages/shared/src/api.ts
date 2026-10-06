@@ -485,6 +485,8 @@ export interface CreateTerminalRequest {
   /** Free-form command typed into the shell after spawn (overrides preset). */
   command?: string;
   title?: string;
+  /** IANA zone of the device ("Europe/Berlin") — clock times in the terminal follow it, not the server's zone. */
+  timeZone?: string;
 }
 
 export interface TerminalPresetVariant {

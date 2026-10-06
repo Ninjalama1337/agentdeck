@@ -118,6 +118,20 @@ describe('TerminalManager (real PTY)', () => {
     manager.killAll();
   });
 
+  it("runs the terminal in the device's timezone", async () => {
+    const manager = new TerminalManager(quietLogger);
+    let out = '';
+    const broadcasts = { onData: (_id: string, d: string) => (out += d), onExit: () => undefined, onList: () => undefined };
+    manager.spawn('/tmp', 'p1', 80, 24, broadcasts, {
+      presetId: 'custom',
+      command: 'echo ZONE_$TZ; date -d @0 +HOUR_%H',
+      timeZone: 'Europe/Berlin',
+    });
+    // The epoch is 01:00 in Berlin, 00:00 in UTC.
+    await waitsFor(() => out.includes('ZONE_Europe/Berlin') && out.includes('HOUR_01'));
+    manager.killAll();
+  });
+
   it('caps concurrency by reaping the oldest terminal', async () => {
     const manager = new TerminalManager(quietLogger);
     const broadcasts = { onData: () => undefined, onExit: () => undefined, onList: () => undefined };

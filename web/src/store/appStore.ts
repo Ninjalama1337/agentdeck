@@ -1334,7 +1334,8 @@ export const useAppStore = create<AppStore>()((set, get) => {
     /* --- BridgeMind ports ------------------------------------------------- */
 
     async createTerminal(projectId, cols, rows, launch) {
-      const { terminal } = await api.createTerminal({ projectId, cols, rows, ...(launch ?? {}) });
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const { terminal } = await api.createTerminal({ projectId, cols, rows, ...(launch ?? {}), ...(timeZone ? { timeZone } : {}) });
       set((st) => ({
         // The server's terminal:list WS broadcast usually beats the POST
         // response — append only when the list event hasn't landed yet.
