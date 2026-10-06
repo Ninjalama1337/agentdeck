@@ -352,6 +352,17 @@ Real PTY shells on the server, one per open tab, project-scoped.
 - REST: `GET/POST /api/routines`, `PATCH /api/routines/:id`,
   `DELETE /api/routines/:id`, `POST /api/routines/:id/run` (fire now).
 - WS: `routine:update {routine}` on every change/fire.
+- Event schedules: `{kind:'commit'}` fires when the project's HEAD moved,
+  `{kind:'ci-failed'}` when the newest finished GitHub Actions run failed
+  (`gh run list`, asked every 2 min), `{kind:'webhook'}` on
+  `POST /api/hooks/routine/:id/:token` (no device login — the routine's
+  `hookToken` in the URL is the key; `202`, body is appended to the prompt;
+  30 calls/min per caller). The first look only remembers what is there
+  (`triggerState`); what set a run off is appended to the prompt.
+  `POST /api/routines/:id/hook-token` issues a new token.
+- `freshContext: true` — every run starts a new agent conversation.
+- `GET /api/routines/:id/runs?limit=&before=` → `RunListResponse` (history,
+  from the activity database).
 
 ### Multi-accounts (usage limit becomes a choice)
 

@@ -70,6 +70,12 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   Projekt und Modell, dazu die Abo-Limits im Zeitverlauf und die einzelnen
   Läufe. Kosten sind der API-Gegenwert, wie ihn die CLI meldet; für
   Terminal-Turns liefert nur Claude Code Tokens (aus seinem Transkript).
+- **Routinen** — Agents auf wiederkehrende Aufgaben setzen: nach Zeitplan
+  (Intervall, täglich, wöchentlich) oder ereignisgesteuert — bei jedem neuen
+  Commit im Projekt, wenn die GitHub-Actions-CI fehlschlägt oder per Webhook
+  (eigene geheime Adresse je Routine, z. B. für Deploy-Skripte). Jede Routine
+  zeigt ihre Lauf-Historie mit Ergebnis, Dauer, Tokens und Kosten; optional
+  startet jeder Lauf mit frischem Kontext.
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit
   Presets pro Agent.
 - **Projekte & GitHub** — Projekte registrieren, aus GitHub klonen (`gh`),
