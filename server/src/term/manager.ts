@@ -19,7 +19,7 @@ import type { TerminalInfo } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
 import { augmentedPath } from './presets.js';
-import { AttentionDetector, type AttentionReason } from './attention.js';
+import { AttentionDetector, isTyped, type AttentionReason } from './attention.js';
 import { classifyScreen, type PromptKind, type Verdict } from '../notify/classify.js';
 import type { DeckNotificationState } from '@agentdeck/shared';
 import { interpretClaudeHook, removeClaudeHookSettings, withClaudeHooks, writeClaudeHookSettings } from './claudeHooks.js';
@@ -504,6 +504,8 @@ export class TerminalManager {
       idleTimer: this.armIdleTimer(id, broadcast),
       attention: new AttentionDetector({
         idleNotify: info.presetId !== 'shell',
+        // It may have been given work before the restart.
+        prompted: true,
         onAttention: (reason, text) => this.raiseAttention(id, term, broadcast, reason, text),
       }),
     };
@@ -541,7 +543,7 @@ export class TerminalManager {
     if (!term) return false;
     try {
       term.proc.write(data);
-      term.attention.input();
+      term.attention.input(isTyped(data));
       // Answered before it was reported — nothing left to announce.
       clearTimeout(term.askTimer);
       return true;
@@ -558,6 +560,8 @@ export class TerminalManager {
     try {
       term.proc.resize(c, r);
       term.screen.resize(c, r);
+      // The redraw that follows is not work.
+      term.attention.input();
       term.info.cols = c;
       term.info.rows = r;
       if (term.tmuxSession) {
@@ -601,6 +605,7 @@ export class TerminalManager {
       const changed = !term.info.attention || term.info.attentionState !== verdict.state;
       term.info.attention = true;
       term.info.attentionState = verdict.state;
+      this.log.info({ terminal: id, reason, state: verdict.state }, 'terminal attention');
       broadcast.onAttention?.(term.info, reason, verdict);
       if (changed) broadcast.onList();
     });
