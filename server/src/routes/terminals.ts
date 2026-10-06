@@ -19,7 +19,19 @@ const CreateSchema = z.object({
   variantId: z.string().max(40).optional(),
   command: z.string().max(1000).optional(),
   title: z.string().max(80).optional(),
+  timeZone: z.string().max(64).optional(),
 });
+
+/** A zone name this machine knows — it ends up in the terminal's environment. */
+function knownTimeZone(zone: string | undefined): string | undefined {
+  if (!zone || !/^[A-Za-z0-9_+\-/]+$/.test(zone)) return undefined;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Body when the screen offers nothing more specific. */
 const ATTENTION_TEXT = {
@@ -77,6 +89,7 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     } catch (err) {
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }
+    const timeZone = knownTimeZone(body.timeZone);
     const info = deps.terminals.spawn(
       project.path,
       project.id,
@@ -89,6 +102,7 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
         ...(launch.variantId ? { variantId: launch.variantId } : {}),
         idleNotify: launch.agent,
         ...(launch.command ? { command: launch.command } : {}),
+        ...(timeZone ? { timeZone } : {}),
       },
     );
     reply.code(201).send({ terminal: info });
