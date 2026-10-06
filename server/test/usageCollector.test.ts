@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  claudeResetIso,
   parseAntigravityUsage,
   parseClaudeUsage,
   parseOpenCodeUsage,
@@ -55,15 +56,31 @@ const OPENCODE_SAMPLE = `┌─────────────────�
 
 describe('parseClaudeUsage', () => {
   it('parses the recorded sample completely', () => {
-    const parsed = parseClaudeUsage(CLAUDE_SAMPLE);
+    const parsed = parseClaudeUsage(CLAUDE_SAMPLE, Date.UTC(2026, 8, 30, 8));
     expect(parsed.available).toBe(true);
     expect(parsed.plan).toBe('Claude subscription');
     expect(parsed.session?.pct).toBe(1);
-    expect(parsed.session?.resetsAt).toBe('Sep 30, 13:19');
+    // Wall-clock text in the CLI's zone becomes an instant (Berlin is UTC+2 in summer).
+    expect(parsed.session?.resetsAt).toBe('2026-09-30T11:19:00.000Z');
     expect(parsed.week?.pct).toBe(24);
-    expect(parsed.week?.resetsAt).toBe('Oct 5, 20:59');
+    expect(parsed.week?.resetsAt).toBe('2026-10-05T18:59:00.000Z');
     expect(parsed.last24h).toEqual({ requests: 349, sessions: 6 });
     expect(parsed.last7d).toEqual({ requests: 503, sessions: 9 });
+  });
+
+  it('reads reset times in the zone the CLI names', () => {
+    const now = Date.UTC(2026, 9, 6, 6);
+    const utc = parseClaudeUsage('Current week (all models): 7% used · resets Oct 12, 7pm (UTC)', now);
+    expect(utc.week?.resetsAt).toBe('2026-10-12T19:00:00.000Z');
+    // After the switch to winter time Berlin is UTC+1.
+    expect(claudeResetIso('Nov 1, 9:00am', 'Europe/Berlin', now)).toBe('2026-11-01T08:00:00.000Z');
+    // No date: the next time the clock shows it; a date already past: next year.
+    expect(claudeResetIso('3am', 'UTC', now)).toBe('2026-10-07T03:00:00.000Z');
+    expect(claudeResetIso('9pm', 'UTC', now)).toBe('2026-10-06T21:00:00.000Z');
+    expect(claudeResetIso('Jan 2, 1pm', 'UTC', Date.UTC(2026, 11, 30))).toBe('2027-01-02T13:00:00.000Z');
+    // Unknown zone or wording: the text is kept.
+    const odd = parseClaudeUsage('Current session: 3% used · resets Oct 12, 7pm (Mars/Olympus)', now);
+    expect(odd.session?.resetsAt).toBe('Oct 12, 19');
   });
 
   it('parses partial output without throwing', () => {

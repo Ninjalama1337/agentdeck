@@ -169,6 +169,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     dataDir: config.dataDir,
     serverPort: config.port,
     serverPid: process.pid,
+    hookToken: bridgeToken,
   });
   const routines = new RoutineScheduler({ store, manager, log });
   const io = attachGateway({

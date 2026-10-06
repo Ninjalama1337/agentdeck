@@ -26,6 +26,7 @@ const ATTENTION_TEXT = {
   done: 'Finished — tap to see the result.',
   waiting: 'Stopped to ask you something — tap to answer.',
   limit: 'No usage left — it continues once the limit resets.',
+  error: 'Stopped with an error — tap to look.',
 } as const;
 
 export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
@@ -122,6 +123,17 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     if (!deps.terminals.write(id, keys)) throw httpError(409, 'TERMINAL_GONE', 'Terminal has exited.');
     return { ok: true };
   });
+
+  // Claude Code hooks of a terminal (same machine, bridge token). The empty
+  // answer leaves every decision with Claude and the user.
+  fastify.post(
+    '/bridge/terminal-hook/:id',
+    { preHandler: deps.bridgeGuard, bodyLimit: 16 * 1024 * 1024 },
+    async (req) => {
+      deps.terminals.hookEvent((req.params as { id: string }).id, req.body, terminalBroadcasts(deps));
+      return {};
+    },
+  );
 
   // Input/resize go over the WS gateway; a REST fallback exists for the MCP
   // bridge and simple scripting.

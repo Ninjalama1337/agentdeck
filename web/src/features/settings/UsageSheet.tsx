@@ -418,15 +418,14 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
 
   const newest = usage?.reduce((acc, u) => Math.max(acc, u.fetchedAt ?? 0), 0);
 
-  // Preferred order: agy, opencode, claude, codex, zcode
+  // The agent in use leads; the rest keeps a fixed order: agy, opencode, claude, codex, zcode
   const PREFERRED_ORDER: AgentId[] = ['antigravity', 'opencode', 'claude', 'codex', 'zcode'];
-  const sortedUsage = usage
-    ? [...usage].sort((a, b) => {
-        const idxA = PREFERRED_ORDER.indexOf(a.agentId);
-        const idxB = PREFERRED_ORDER.indexOf(b.agentId);
-        return (idxA !== -1 ? idxA : 99) - (idxB !== -1 ? idxB : 99);
-      })
-    : [];
+  const rank = (id: AgentId) => {
+    if (id === currentUsageAgent) return -1;
+    const idx = PREFERRED_ORDER.indexOf(id);
+    return idx !== -1 ? idx : 99;
+  };
+  const sortedUsage = usage ? [...usage].sort((a, b) => rank(a.agentId) - rank(b.agentId)) : [];
 
   return (
     <Sheet open={isOpen} onClose={handleClose} title="Agent Usages" subtitle="Plan limits & quota of your coding tools">

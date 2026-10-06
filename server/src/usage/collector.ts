@@ -112,28 +112,91 @@ export interface ClaudeUsageParse {
   last7d?: UsageWindow;
 }
 
-/** `resets <anything up to end-of-line or opening parenthesis>` — locale-tolerant. */
-const RESETS = /\bresets\s+([^(\n]+)/;
+/** `resets <when> (<IANA zone>)` — the zone is absent on older CLI versions. */
+const RESETS = /\bresets\s+([^(\n]+)(?:\(([^)\n]+)\))?/;
 
-function pctWindow(line: RegExpExecArray | null): UsageWindow | undefined {
+/** "Oct 12, 7pm" / "1:19pm" as Claude prints it; the date is left out for a reset later today. */
+const CLAUDE_RESET = /^(?:([A-Za-z]{3})[a-z]*\.? (\d{1,2}),? )?(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])m$/i;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** Milliseconds `timeZone` is ahead of UTC at instant `ts`. Throws on an unknown zone. */
+function zoneOffsetMs(ts: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(ts);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const wall = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
+  return wall - Math.floor(ts / 1000) * 1000;
+}
+
+/** Instant of a wall-clock time in `timeZone`. */
+function zonedInstant(timeZone: string, year: number, month: number, day: number, hour: number, minute: number): number {
+  const wall = Date.UTC(year, month, day, hour, minute);
+  // Second pass: the offset at the first guess may sit on the other side of a DST switch.
+  const guess = wall - zoneOffsetMs(wall, timeZone);
+  return wall - zoneOffsetMs(guess, timeZone);
+}
+
+/**
+ * Claude prints reset times as wall-clock text in the timezone of the process
+ * that asked (the server, often UTC). Turned into an ISO instant so the app
+ * shows it in the device's timezone; unreadable text is passed on as it is.
+ */
+export function claudeResetIso(when: string, timeZone: string, now = Date.now()): string | undefined {
+  const m = CLAUDE_RESET.exec(when.trim());
+  if (!m) return undefined;
+  const hour = (Number(m[3]) % 12) + (m[5].toLowerCase() === 'p' ? 12 : 0);
+  const minute = m[4] ? Number(m[4]) : 0;
+  try {
+    const today = new Date(now + zoneOffsetMs(now, timeZone));
+    let ts: number;
+    if (m[1]) {
+      const month = MONTHS.indexOf(m[1].toLowerCase());
+      if (month < 0) return undefined;
+      const year = today.getUTCFullYear();
+      ts = zonedInstant(timeZone, year, month, Number(m[2]), hour, minute);
+      // A reset lies ahead: "Jan 2" read in December means next year.
+      if (ts < now - 24 * 60 * 60_000) ts = zonedInstant(timeZone, year + 1, month, Number(m[2]), hour, minute);
+    } else {
+      const [y, mo, d] = [today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()];
+      ts = zonedInstant(timeZone, y, mo, d, hour, minute);
+      if (ts < now - 60_000) ts = zonedInstant(timeZone, y, mo, d + 1, hour, minute);
+    }
+    return new Date(ts).toISOString();
+  } catch {
+    return undefined; // zone name this runtime does not know
+  }
+}
+
+function pctWindow(line: RegExpExecArray | null, now: number): UsageWindow | undefined {
   if (!line) return undefined;
   const win: UsageWindow = { pct: Number(line[1]) };
   const resets = RESETS.exec(line[0]);
   if (resets) {
-    win.resetsAt = resets[1].trim().replace(
-      /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])m\b/gi,
-      (_match, hour: string, minute: string | undefined, period: string) => {
-        const hour24 = (Number(hour) % 12) + (period.toLowerCase() === 'p' ? 12 : 0);
-        return `${String(hour24).padStart(2, '0')}${minute === undefined ? '' : `:${minute}`}`;
-      },
-    );
+    const when = resets[1].trim();
+    win.resetsAt =
+      (resets[2] ? claudeResetIso(when, resets[2].trim(), now) : undefined) ??
+      when.replace(
+        /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])m\b/gi,
+        (_match, hour: string, minute: string | undefined, period: string) => {
+          const hour24 = (Number(hour) % 12) + (period.toLowerCase() === 'p' ? 12 : 0);
+          return `${String(hour24).padStart(2, '0')}${minute === undefined ? '' : `:${minute}`}`;
+        },
+      );
   }
   return win;
 }
 
-export function parseClaudeUsage(stdout: string): ClaudeUsageParse {
-  const session = pctWindow(/Current session:\s*(\d+)%\s*used[^\n]*/.exec(stdout));
-  const week = pctWindow(/Current week \(all models\):\s*(\d+)%\s*used[^\n]*/.exec(stdout));
+export function parseClaudeUsage(stdout: string, now = Date.now()): ClaudeUsageParse {
+  const session = pctWindow(/Current session:\s*(\d+)%\s*used[^\n]*/.exec(stdout), now);
+  const week = pctWindow(/Current week \(all models\):\s*(\d+)%\s*used[^\n]*/.exec(stdout), now);
   const l24 = /Last 24h\s*·\s*(\d+)\s+requests?\s*·\s*(\d+)\s+sessions?/.exec(stdout);
   const l7 = /Last 7d\s*·\s*(\d+)\s+requests?\s*·\s*(\d+)\s+sessions?/.exec(stdout);
 
