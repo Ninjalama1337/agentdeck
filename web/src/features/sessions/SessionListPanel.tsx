@@ -19,15 +19,26 @@ const STATUS_DOT: Record<Session['status'], string> = {
 
 /**
  * Shown on the Chat tab when no session is open: project sessions + team runs
- * + entry points to create both.
+ * + entry points to create both. `embedded` (desktop): the list is the left
+ * column next to the conversation — the open session is marked, the inbox
+ * button lives in the sidebar.
  */
-export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: () => void; onTeamRun: () => void }) {
+export function SessionListPanel({
+  onNewSession,
+  onTeamRun,
+  embedded = false,
+}: {
+  onNewSession: () => void;
+  onTeamRun: () => void;
+  embedded?: boolean;
+}) {
   const projects = useAppStore((s) => s.projects);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const sessionsByProject = useAppStore((s) => s.sessionsByProject);
   const teamRuns = useAppStore((s) => s.teamRuns);
   const agents = useAppStore((s) => s.agents);
   const openSession = useAppStore((s) => s.openSession);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
   const navigate = useAppStore((s) => s.navigate);
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -65,7 +76,7 @@ export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: ()
     <div className="flex min-h-full flex-col px-4 pb-8">
       <header className="flex items-center gap-1 py-2">
         <ProjectSwitcher className="min-w-0 flex-1" subtitle={`${sessions.length} ${sessions.length === 1 ? 'chat' : 'chats'}`} />
-        <InboxButton />
+        {!embedded && <InboxButton />}
       </header>
 
       <div className="mb-4 flex gap-2">
@@ -99,12 +110,17 @@ export function SessionListPanel({ onNewSession, onTeamRun }: { onNewSession: ()
             const agent = agents[session.agentId];
             const active = session.status === 'running' || session.status === 'queued';
             const statusColor = STATUS_DOT[session.status];
+            const selected = embedded && session.id === activeSessionId;
             return (
               <button
                 key={session.id}
                 type="button"
+                aria-current={selected ? 'true' : undefined}
                 onClick={() => void open(session)}
-                className="press tap glass flex items-center gap-3.5 p-3.5 text-left active:bg-surface-2"
+                className={clsx(
+                  'press tap glass flex items-center gap-3.5 p-3.5 text-left active:bg-surface-2 hover:bg-surface-2',
+                  selected && '!border-accent/45 !bg-accent/10',
+                )}
               >
                 <AgentAvatar agent={agent} agentId={session.agentId} size="md" glow={active} />
                 <span className="min-w-0 flex-1">

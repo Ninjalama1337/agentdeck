@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ExternalLink,
+  MessageSquare,
   Monitor,
   MoreVertical,
   Plus,
@@ -26,8 +27,39 @@ import { TeamComposer } from './TeamComposer';
 import { UsageSheet } from '../settings/UsageSheet';
 import { ChatSearch, messageMatches } from './ChatSearch';
 import { SessionListPanel } from '../sessions/SessionListPanel';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 
+/** Phones: the session list, or the open conversation. Desktop: both side by side. */
 export function ChatScreen() {
+  const desktop = useDesktopLayout();
+  return desktop ? <ChatSplit /> : <ChatPane />;
+}
+
+/** Desktop Chats: sessions on the left, the conversation of the selected one on the right. */
+function ChatSplit() {
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  return (
+    <div className="flex h-full">
+      <aside aria-label="Sessions" className="w-[340px] shrink-0 overflow-y-auto overscroll-contain border-r border-line">
+        <SessionListPanel embedded onNewSession={() => setNewSessionOpen(true)} onTeamRun={() => setTeamOpen(true)} />
+      </aside>
+      <section aria-label="Conversation" className="min-w-0 flex-1">
+        <ChatPane embedded />
+      </section>
+      {activeProjectId && (
+        <>
+          <NewSessionSheet open={newSessionOpen} onClose={() => setNewSessionOpen(false)} projectId={activeProjectId} />
+          <TeamComposer open={teamOpen} onClose={() => setTeamOpen(false)} projectId={activeProjectId} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChatPane({ embedded = false }: { embedded?: boolean }) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const loadedSessions = useAppStore((s) => s.loadedSessions);
@@ -92,6 +124,14 @@ export function ChatScreen() {
     [allMessages, searchOpen, query],
   );
 
+  if (!session && embedded) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <EmptyState icon={MessageSquare} title="No conversation open" hint="Pick a session on the left, or start a new one." />
+      </div>
+    );
+  }
+
   if (!session) {
     return (
       <div className="flex min-h-full flex-col">
@@ -109,6 +149,8 @@ export function ChatScreen() {
   }
 
   const running = session.status === 'running' || session.status === 'queued';
+  const modeBar = <ModeBar session={session} agent={agent} />;
+  const composer = <Composer key={`composer:${session.id}`} session={session} agent={agent} />;
 
   return (
     <div className="flex h-full flex-col">
@@ -121,9 +163,13 @@ export function ChatScreen() {
           backdropFilter: 'blur(20px) saturate(130%)',
         }}
       >
-        <IconButton label="Back to sessions" onClick={closeSession}>
-          <ArrowLeft size={20} />
-        </IconButton>
+        {embedded ? (
+          <span className="w-1.5 shrink-0" aria-hidden />
+        ) : (
+          <IconButton label="Back to sessions" onClick={closeSession}>
+            <ArrowLeft size={20} />
+          </IconButton>
+        )}
         <button type="button" className="flex min-w-0 flex-1 cursor-default items-center gap-2.5 rounded-xl py-1 text-left">
           <AgentAvatar agent={agent} agentId={session.agentId} size="md" showDot glow={running} />
           <span className="min-w-0 flex-1">
@@ -178,8 +224,17 @@ export function ChatScreen() {
       />
 
       {/* composer — keyed: each session has its own unsent input */}
-      <ModeBar session={session} agent={agent} />
-      <Composer key={`composer:${session.id}`} session={session} agent={agent} />
+      {embedded ? (
+        <div className="mx-auto w-full max-w-3xl">
+          {modeBar}
+          {composer}
+        </div>
+      ) : (
+        <>
+          {modeBar}
+          {composer}
+        </>
+      )}
 
       {/* sheets */}
       <Sheet open={modelSheetOpen} onClose={() => setModelSheetOpen(false)} title="Model" subtitle={`${agent?.label ?? session.agentId} · applies from your next message`}>

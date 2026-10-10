@@ -30,13 +30,17 @@ const LEGACY_SERVER_KEY = 'agentdeck:server';
 /** The migrated/first profile; its per-server keys stay unsuffixed (see scopedKey). */
 const DEFAULT_ID = 'default';
 
-/** localStorage keys whose content belongs to one server (project ids, inbox). */
+/** localStorage keys whose content belongs to one server (project ids, inbox, where the user left off). */
 export const PER_SERVER_KEYS = [
   'agentdeck:project',
   'agentdeck:inbox',
   'agentdeck:inbox-seen',
   'agentdeck:inbox-cleared',
   'agentdeck:update-notified',
+  /** Last screen (hash route), open chat session and terminal panes — restored on the next start. */
+  'agentdeck:route',
+  'agentdeck:session',
+  'agentdeck:panes',
 ] as const;
 
 export function cleanBase(base: string): string {

@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand';
 import type { DeckNotificationKind } from '@agentdeck/shared';
+import { desktopLayoutNow } from '../hooks/useDesktopLayout';
 
 export type DictationEngine = 'auto' | 'device' | 'server';
 
@@ -51,18 +52,20 @@ export const DEFAULT_PREFS: Prefs = {
 };
 
 function load(): Prefs {
+  // A hardware keyboard is the norm on the desktop layout: Enter sends there until the user says otherwise.
+  const defaults: Prefs = { ...DEFAULT_PREFS, enterToSend: desktopLayoutNow() };
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return DEFAULT_PREFS;
+    if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
-      ...DEFAULT_PREFS,
+      ...defaults,
       ...parsed,
       notifyKinds: { ...DEFAULT_PREFS.notifyKinds, ...(parsed.notifyKinds ?? {}) },
       quietHours: { ...DEFAULT_PREFS.quietHours, ...(parsed.quietHours ?? {}) },
     };
   } catch {
-    return DEFAULT_PREFS;
+    return defaults;
   }
 }
 

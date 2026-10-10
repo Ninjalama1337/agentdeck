@@ -1,0 +1,47 @@
+import type { ReactNode } from 'react';
+import { Folder, GitBranch, LayoutGrid, MessageSquare, SquareTerminal } from 'lucide-react';
+import { useAppStore } from '../store/appStore';
+import type { Route } from '../store/appStore';
+import { TAB_ROUTES } from '../util/shortcuts';
+
+const TAB_LOOK: Partial<Record<Route['name'], { label: string; icon: typeof MessageSquare }>> = {
+  home: { label: 'Home', icon: LayoutGrid },
+  chat: { label: 'Chats', icon: MessageSquare },
+  code: { label: 'Code', icon: SquareTerminal },
+  git: { label: 'Git', icon: GitBranch },
+  files: { label: 'Files', icon: Folder },
+};
+
+/** The main tabs — bottom bar on phones, sidebar on the desktop (same order as Ctrl/Cmd+1…5). */
+export const TABS: { route: Route; label: string; icon: typeof MessageSquare }[] = TAB_ROUTES.map((route) => ({
+  route,
+  label: TAB_LOOK[route.name]?.label ?? route.name,
+  icon: TAB_LOOK[route.name]?.icon ?? LayoutGrid,
+}));
+
+/** The tab a route belongs to (team runs live under Chats, Settings under Home). */
+export function activeTabName(route: Route): Route['name'] {
+  return route.name === 'team' ? 'chat' : route.name === 'settings' ? 'home' : route.name;
+}
+
+/** Live badge for a tab: running chats, terminals waiting for the user, uncommitted changes. */
+export function useTabIndicators(): (name: Route['name']) => ReactNode {
+  const sessionsByProject = useAppStore((s) => s.sessionsByProject);
+  const terminals = useAppStore((s) => s.terminals);
+  const projects = useAppStore((s) => s.projects);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+
+  const running = Object.values(sessionsByProject)
+    .flat()
+    .filter((s) => s.status === 'running' || s.status === 'queued').length;
+  const waiting = terminals.filter((t) => t.attention).length;
+  const dirty = projects.find((p) => p.id === activeProjectId)?.git?.dirty ?? 0;
+
+  return (name) => {
+    if (name === 'chat' && running > 0) return <span className="block h-2.5 w-2.5 rounded-full bg-accent pulse-dot" />;
+    if (name === 'code' && waiting > 0) return <span className="badge !bg-warn !text-black">{waiting}</span>;
+    if (name === 'code' && terminals.length > 0) return <span className="block h-2 w-2 rounded-full bg-ok" />;
+    if (name === 'git' && dirty > 0) return <span className="badge !bg-surface-3 !text-ink">{dirty > 99 ? '99+' : dirty}</span>;
+    return null;
+  };
+}

@@ -7,6 +7,7 @@ import { errorMessage, useAppStore } from '../../store/appStore';
 import { guessDeviceName } from '../../util/format';
 import { isNativePlatform } from '../../util/platform';
 import { ApkCard } from '../../components/ApkCard';
+import { isDesktopApp } from '../../util/desktop';
 import { OtherServers } from '../../components/SavedServers';
 
 const CODE_LENGTH = 6;
@@ -225,8 +226,8 @@ export function PairScreen() {
             autoComplete="off"
           />
 
-          {/* Android app: direct APK download (public route, no pairing needed) */}
-          {apkInfo && <ApkCard info={apkInfo} className="mb-4" />}
+          {/* Android app: direct APK download (public route, no pairing needed) — for phones, not the desktop window */}
+          {apkInfo && !isDesktopApp() && <ApkCard info={apkInfo} className="mb-4" />}
 
           {error && (
             <div

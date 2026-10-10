@@ -29,6 +29,7 @@ import { Button, IconButton } from '../../components/ui/Button';
 import { MenuRow } from '../../components/ui/MenuRow';
 import { Modal } from '../../components/ui/Modal';
 import { ProjectSwitcher } from '../../components/ProjectSwitcher';
+import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 import { Sheet } from '../../components/ui/Sheet';
 import { FileEditorSheet } from './FileEditorSheet';
 import { bytes, fileVisualKind, relTime, type FileVisualKind } from '../../util/format';
@@ -72,6 +73,7 @@ export function FilesScreen() {
 }
 
 function FilesScreenInner({ projectId }: { projectId: string }) {
+  const desktop = useDesktopLayout();
   const toast = useAppStore((s) => s.toast);
   const setLightbox = useAppStore((s) => s.setLightbox);
   const filesVersion = useAppStore((s) => s.filesVersion[projectId] ?? 0);
@@ -291,7 +293,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
           />
         </div>
       ) : loading && entries === null ? (
-        <div className="flex flex-col gap-2">
+        <div className={clsx(desktop ? 'grid grid-cols-2 gap-2' : 'flex flex-col gap-2')}>
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="skeleton h-14" />
           ))}
@@ -301,7 +303,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
           <EmptyState icon={FolderOpen} title="Empty folder" hint="Nothing here yet — upload a file, create one, or let an agent do it." />
         </div>
       ) : entries !== null ? (
-        <div className="flex flex-col gap-1.5">
+        <div className={clsx(desktop ? 'grid grid-cols-2 gap-1.5' : 'flex flex-col gap-1.5')}>
           {entries.map((entry) => {
             const kind = entry.kind === 'dir' ? 'dir' : fileVisualKind(entry.name, 'file');
             const Icon = kind === 'dir' ? Folder : KIND_ICONS[kind];

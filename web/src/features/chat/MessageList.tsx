@@ -49,7 +49,7 @@ export function MessageList({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} data-chat-scroll className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
-        <div ref={contentRef}>
+        <div ref={contentRef} className="mx-auto w-full max-w-3xl">
           {loading && (
             <div className="flex justify-center py-8">
               <Spinner />

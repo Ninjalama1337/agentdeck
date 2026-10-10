@@ -72,39 +72,15 @@ import {
 import { haptic } from '../util/haptics';
 import type { IncomingShare } from '../util/shareTarget';
 import { currentPushSubscription, fcmRegistered, showSystemNotification, stateOf } from '../util/notify';
+import { desktopLayoutNow } from '../hooks/useDesktopLayout';
+import { usePanes } from '../features/code/paneStore';
+import { parseHash, routeToHash, startHash, validRoute, validSessionId, type Route } from './route';
 
 /* ------------------------------------------------------------------ router */
 
-export type Route =
-  | { name: 'home' }
-  | { name: 'chat' }
-  | { name: 'code' }
-  | { name: 'files' }
-  | { name: 'git' }
-  | { name: 'settings' }
-  | { name: 'team'; runId: string };
-
-export function parseHash(hash: string): Route {
-  const h = hash.replace(/^#\/?/, '').split('?')[0] ?? '';
-  if (h === 'chat') return { name: 'chat' };
-  if (h === 'code') return { name: 'code' };
-  if (h === 'files') return { name: 'files' };
-  if (h === 'git' || h === 'github') return { name: 'git' };
-  if (h === 'settings') return { name: 'settings' };
-  if (h.startsWith('team/')) return { name: 'team', runId: h.slice('team/'.length) };
-  return { name: 'home' };
-}
-
-export function routeToHash(route: Route): string {
-  switch (route.name) {
-    case 'home':
-      return '#/';
-    case 'team':
-      return `#/team/${encodeURIComponent(route.runId)}`;
-    default:
-      return `#/${route.name}`;
-  }
-}
+// Route parsing and the restore rules live in route.ts (pure, tested).
+export { parseHash, routeToHash };
+export type { Route };
 
 /* ------------------------------------------------------------------- types */
 
@@ -135,6 +111,9 @@ export interface FileEventRecord {
 // Per-server data: keyed by the active saved server. Resolved once per page
 // load — changing the server reloads the app (see reloadApp).
 const PROJECT_KEY = scopedKey('agentdeck:project');
+/** Where the user left off: last screen (hash) and open chat session. */
+const ROUTE_KEY = scopedKey('agentdeck:route');
+const SESSION_KEY = scopedKey('agentdeck:session');
 const INBOX_KEY = scopedKey('agentdeck:inbox');
 const INBOX_SEEN_KEY = scopedKey('agentdeck:inbox-seen');
 const INBOX_CLEARED_KEY = scopedKey('agentdeck:inbox-cleared');
@@ -162,10 +141,13 @@ export function serverLabel(server: Pick<SavedServer, 'name' | 'base'>): string 
   return server.name || server.base.replace(/^https?:\/\//i, '') || 'This server';
 }
 
-/** Full reload onto the home route — the one clean way to change servers. */
+/**
+ * Full reload — the one clean way to change servers. The URL loses its hash,
+ * so the app opens on the screen the (new) server was last left on, else home.
+ */
 function reloadApp(): void {
   disconnectSocket();
-  window.history.replaceState(null, '', `${window.location.pathname}#/`);
+  window.history.replaceState(null, '', window.location.pathname);
   window.location.reload();
 }
 
@@ -193,6 +175,30 @@ function persistActiveProject(id: string | null): void {
   } catch {
     /* storage unavailable */
   }
+}
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string | null): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** The hash this page load starts on (see startHash); puts it in the URL before anything renders. */
+function resolveStartHash(): string {
+  const hash = startHash(window.location.hash, readStored(ROUTE_KEY));
+  if (hash !== window.location.hash) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+  return hash;
 }
 
 export function selectSession(state: { sessionsByProject: Record<string, Session[]> }, id: string | null | undefined): Session | undefined {
@@ -288,6 +294,8 @@ export interface AppStore {
   /* BridgeMind ports (0.9) */
   /** Live PTY terminals (Code tab). Output itself streams via xterm bridges. */
   terminals: TerminalInfo[];
+  /** The terminal list came from the server at least once (before that, `terminals` is just empty). */
+  terminalsLoaded: boolean;
   activeTerminalId: string | null;
   /** Routines (agents on recurring jobs) keyed by id. */
   routines: Record<string, Routine & { nextRunAt: number | null }>;
@@ -431,6 +439,11 @@ const syncing = new Map<string, { queue: SessionEventPayload[]; promise: Promise
 let toastSeq = 0;
 /** Admin job ids we already toasted a done/error for (WS replays the full job). */
 const toastedAdminJobs = new Set<string>();
+/** On the desktop Code tab every pane is in view, not only the active terminal. */
+function terminalInView(activeId: string | null, id: string): boolean {
+  return activeId === id || (desktopLayoutNow() && usePanes.getState().slots.includes(id));
+}
+
 function loadInbox(): DeckNotification[] {
   return readJson<DeckNotification[]>(INBOX_KEY, []).slice(0, INBOX_LIMIT);
 }
@@ -459,7 +472,7 @@ export function routineNextRunAt(routine: Routine, now = Date.now()): number | n
   return candidate + 7 * 86_400_000;
 }
 
-export const useAppStore = create<AppStore>()((set, get) => {
+export const useAppStore = create<AppStore>()((set, get, store) => {
   /* --- socket wiring --------------------------------------------------- */
 
   function attachSocket(): void {
@@ -558,7 +571,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     });
 
     socket.on('terminal:list', ({ terminals }) => {
-      set({ terminals });
+      set({ terminals, terminalsLoaded: true });
     });
 
     // Live admin job progress — the server throttles broadcasts (~4/s) and we
@@ -659,7 +672,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     const looking =
       document.visibilityState === 'visible' &&
       ((n.sessionId && st.route.name === 'chat' && st.activeSessionId === n.sessionId) ||
-        (n.terminalId && st.route.name === 'code' && st.activeTerminalId === n.terminalId));
+        (n.terminalId && st.route.name === 'code' && terminalInView(st.activeTerminalId, n.terminalId)));
     if (looking) {
       if (n.terminalId) get().markTerminalSeen(n.terminalId);
       return;
@@ -803,6 +816,32 @@ export const useAppStore = create<AppStore>()((set, get) => {
     });
   }
 
+  /**
+   * Once per page load, after the first sessions and team runs arrived: put
+   * back the chat session the user left open, and send a remembered screen
+   * whose subject is gone (a deleted team run) to the list it belongs to.
+   * A session that no longer exists is forgotten, never opened.
+   */
+  let viewRestored = false;
+  function restoreView(): void {
+    if (viewRestored) return;
+    viewRestored = true;
+    const st = get();
+    const sessions = st.activeProjectId ? (st.sessionsByProject[st.activeProjectId] ?? []) : [];
+    const stored = readStored(SESSION_KEY);
+    const open = validSessionId(stored, sessions.map((s) => s.id));
+    if (open && !st.activeSessionId) {
+      set({ activeSessionId: open, currentUsageAgent: sessions.find((s) => s.id === open)?.agentId ?? st.currentUsageAgent });
+    } else if (stored && !open) {
+      writeStored(SESSION_KEY, null);
+    }
+    const route = validRoute(st.route, { teamRunIds: st.teamRuns.map((r) => r.id) });
+    if (route !== st.route) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${routeToHash(route)}`);
+      set({ route });
+    }
+  }
+
   /* --- store ------------------------------------------------------------ */
 
   return {
@@ -814,7 +853,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     connection: 'online',
     socketEpoch: 0,
     booted: false,
-    route: parseHash(window.location.hash),
+    route: parseHash(resolveStartHash()),
     agents: {},
     agentOrder: [],
     projects: [],
@@ -849,6 +888,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
     filesVersion: {},
     fileEvents: [],
     terminals: [],
+    terminalsLoaded: false,
     activeTerminalId: null,
     routines: {},
     routinesLoaded: false,
@@ -868,6 +908,13 @@ export const useAppStore = create<AppStore>()((set, get) => {
       set({ route: parseHash(window.location.hash) });
       window.addEventListener('hashchange', () => {
         set({ route: parseHash(window.location.hash) });
+      });
+      // Remember where the user is, per server: the screen and the open chat
+      // come back on the next start (see restoreView).
+      writeStored(ROUTE_KEY, routeToHash(get().route));
+      store.subscribe((st, prev) => {
+        if (st.route !== prev.route) writeStored(ROUTE_KEY, routeToHash(get().route));
+        if (st.activeSessionId !== prev.activeSessionId) writeStored(SESSION_KEY, get().activeSessionId);
       });
       window.addEventListener('agentdeck:unauthorized', () => {
         if (get().token) {
@@ -922,6 +969,10 @@ export const useAppStore = create<AppStore>()((set, get) => {
         set({ agents: map, agentOrder: order, projects, activeProjectId: active, booted: true, connection: 'online' });
         persistActiveProject(active);
 
+        // The restore below needs to know these two arrived, not just that they were asked for.
+        const ok = (job: Promise<unknown>) => job.then(() => true, () => false);
+        const teamsLoaded = ok(get().fetchTeamRuns());
+        const sessionsLoaded = active ? ok(get().refreshSessions(active)) : Promise.resolve(true);
         const jobs: Promise<unknown>[] = [
           // Server identity: a login from before saved servers has no name yet,
           // and after a reload nothing else carries it. Older servers 404 here.
@@ -936,13 +987,14 @@ export const useAppStore = create<AppStore>()((set, get) => {
           get().refreshUpdate(),
           get().refreshDevices(),
           get().refreshPairRequests(),
-          get().fetchTeamRuns(),
+          teamsLoaded,
           get().refreshTerminals(),
           get().refreshRoutines(),
           get().refreshAccounts(),
+          sessionsLoaded,
         ];
-        if (active) jobs.push(get().refreshSessions(active));
         await Promise.allSettled(jobs);
+        if ((await teamsLoaded) && (await sessionsLoaded)) restoreView();
       } catch (err) {
         if (!silent) get().toast('error', errorMessage(err));
       }
@@ -998,6 +1050,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
         filesVersion: {},
         fileEvents: [],
         terminals: [],
+        terminalsLoaded: false,
         activeTerminalId: null,
       });
       toastedAdminJobs.clear();
@@ -1197,7 +1250,9 @@ export const useAppStore = create<AppStore>()((set, get) => {
         const projects = st.projects.filter((p) => p.id !== id);
         const activeProjectId = st.activeProjectId === id ? (projects[0]?.id ?? null) : st.activeProjectId;
         persistActiveProject(activeProjectId);
-        return { projects, activeProjectId };
+        // A chat of the removed project is not open any more.
+        const sessionGone = selectSession(st, st.activeSessionId)?.projectId === id;
+        return sessionGone ? { projects, activeProjectId, activeSessionId: null } : { projects, activeProjectId };
       });
       get().toast('info', 'Project removed from deck (files kept on server)');
     },
@@ -1492,6 +1547,7 @@ export const useAppStore = create<AppStore>()((set, get) => {
       const terminals = await api.terminals();
       set((st) => ({
         terminals,
+        terminalsLoaded: true,
         activeTerminalId: terminals.some((t) => t.id === st.activeTerminalId) ? st.activeTerminalId : (terminals[0]?.id ?? null),
       }));
     },
