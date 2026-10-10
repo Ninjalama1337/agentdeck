@@ -30,12 +30,7 @@ export interface PanePort {
 export function attachPaneSync(app: AppPort, panes: PanePort): () => void {
   let ready = false;
 
-  const reconcile = () =>
-    panes.getState().reconcile(
-      app
-        .getState()
-        .terminals.map((t) => t.id),
-    );
+  const reconcile = () => panes.getState().reconcile(app.getState().terminals.map((t) => t.id));
   const activateFocused = () => {
     const id = focusedTerminal(panes.getState());
     if (id && id !== app.getState().activeTerminalId) app.getState().setActiveTerminal(id);
