@@ -39,7 +39,9 @@ test/           vitest; test/fixtures/fake-agentdeck-server.mjs ersetzt den echt
   (`service install`), ohne systemd oder bei „Nein“ den Server losgelöst starten
   (Log: `~/.local/state/agentdeck/server.log`). Der **Port ist fest** – belegt ihn
   etwas anderes, gibt es eine Fehlermeldung statt eines anderen Ports (die
-  Anmeldung im Fenster hängt am Origin).
+  Anmeldung im Fenster hängt am Origin). Antwortet dort ein anderes Programm, bekommt es
+  weder die Bridge noch den Pairing-Code noch das Login der App: beides gibt es nur
+  nach einer frischen Prüfung, dass `GET /api/health` von AgentDeck kommt.
 - **Dienst aktuell halten:** Bringt die App einen neueren Server mit als der
   installierte Dienst, wird er beim Start per `service install` aktualisiert.
 - **Pairing:** Fehlt dem Fenster das Login (oder kommt `agentdeck:unauthorized`),
@@ -54,7 +56,12 @@ test/           vitest; test/fixtures/fake-agentdeck-server.mjs ersetzt den echt
   (`window-state.json`); Mindestbreite 1024 px (darunter schaltet die Web-UI auf
   das Handy-Layout). Route, Tab und Chat stellt die Web-UI selbst wieder her.
 - **Autostart:** „Beim Anmelden starten“ legt `~/.config/autostart/agentdeck.desktop`
-  an (`--hidden`: Server sicherstellen, kein Fenster, App beendet sich wieder).
+  an (`--hidden`: Server sicherstellen, kein Fenster, App beendet sich wieder). Schaltet
+  der Desktop den Eintrag aus (GNOME Tweaks, KDE), bleibt er aus; beim Start wird nur sein
+  `Exec=` angepasst (verschobenes AppImage), nie das Ein/Aus.
+- **Handy-Zugriff:** Standard ist nur dieser Rechner (`127.0.0.1`). Die Statusanzeige
+  (`host`) zeigt die tatsächliche Bindung, nicht die Config; der Schließen-Dialog sagt nur
+  dann „das Handy bleibt verbunden“, wenn „Handy-Zugriff im LAN“ an ist.
 - **Sicherheit:** `contextIsolation` und `sandbox` an, kein `nodeIntegration`;
   Navigation nur im Server-Origin, Web-Links öffnen im System-Browser; IPC nur von
   Seiten dieses Origins.
@@ -109,6 +116,21 @@ standardmäßig unter `../dist-bundle/agentdeck-server` (`AGENTDECK_SERVER_BUNDL
 CI: [`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) – Tests, Bundle,
 Pakete, Smoke-Tests; auf Tags wartet der Job auf das Release von `android.yml` und
 hängt AppImage, deb und `latest-linux.yml` an (`--clobber`). Ein Release legt er nicht an.
+
+## Bekannte Eigenheiten
+
+- **Der Pairing-Code rotiert bei jedem Desktop-Pairing.** Ein dem Handy gerade gezeigter Code
+  wird dadurch ungültig (der Server rotiert den Code nach jeder Nutzung); auf dem Handy den
+  aktuellen Code neu holen.
+- **Ein App-Update startet den Dienst ohne Rückfrage neu**, sobald die neue App zum ersten Mal
+  läuft und ihr Server neuer ist als der des Dienstes. Terminals bleiben in tmux erhalten,
+  laufende Agent-Läufe werden unterbrochen. Eine ältere App ersetzt nie einen neueren Dienst.
+- **Fremde Server werden nur verbunden, nie gestoppt:** ein Checkout-Server oder ein manuell
+  gestarteter Server. Eine laufende `agentdeck.service` ohne AgentDeck-Marker (z. B. aus `docs/`)
+  zählt als Dienst: die App kann sie stoppen und neu starten, aber nicht neu installieren,
+  deinstallieren oder in ihrer Netzwerk-Einstellung ändern.
+- **Status:** Die Health-Prüfung läuft alle 5 s, solange das Fenster sichtbar ist; der
+  Dienststatus (`systemctl` über das CLI) höchstens alle 30 s oder bei einer Änderung.
 
 ## Ubuntu 24.04: Chromium-Sandbox
 
