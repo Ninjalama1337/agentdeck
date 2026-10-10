@@ -75,7 +75,16 @@ describe('agentdeck-server as a process', () => {
   const cli = (args: string[], extra: Record<string, string> = {}) =>
     run(process.execPath, ['--import', 'tsx', path.join(SERVER_DIR, 'src/cli.ts'), ...args], {
       cwd: SERVER_DIR,
-      env: { ...process.env, ...env(extra), HOME: tmp, XDG_RUNTIME_DIR: path.join(tmp, 'run') },
+      env: {
+        ...process.env,
+        ...env(extra),
+        HOME: tmp,
+        // CI runners export XDG_*; they would win over HOME.
+        XDG_CONFIG_HOME: path.join(tmp, '.config'),
+        XDG_DATA_HOME: path.join(tmp, '.local/share'),
+        XDG_STATE_HOME: path.join(tmp, '.local/state'),
+        XDG_RUNTIME_DIR: path.join(tmp, 'run'),
+      },
       timeout: 30_000,
     });
 
