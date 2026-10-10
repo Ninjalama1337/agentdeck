@@ -3,12 +3,12 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Page the window shows while the server is starting or unreachable. It keeps
- * asking `/api/health` and moves on to the app as soon as something answers —
- * no help from the main process needed (no preload, no IPC).
+ * Page the window shows while the server is starting or unreachable. It only reports: it never
+ * navigates by itself and contacts nothing. The main process loads the app once it has found
+ * an AgentDeck server on the port — a page that moved on at the first answer would also move
+ * on to a foreign program that holds the port.
  */
 export function statusPageHtml(options: { origin: string; title: string; detail?: string }): string {
-  const target = `${options.origin}/`;
   return `<!doctype html>
 <html lang="de">
 <head>
@@ -29,18 +29,6 @@ export function statusPageHtml(options: { origin: string; title: string; detail?
   <h1>${escapeHtml(options.title)}</h1>
   ${options.detail ? `<p>${escapeHtml(options.detail)}</p>` : ''}
 </main>
-<script>
-  const target = ${JSON.stringify(target).replace(/</g, '\\u003c')};
-  async function tick() {
-    try {
-      await fetch(target + 'api/health', { mode: 'no-cors', cache: 'no-store' });
-      location.replace(target);
-    } catch {
-      setTimeout(tick, 1500);
-    }
-  }
-  setTimeout(tick, 600);
-</script>
 </body>
 </html>
 `;

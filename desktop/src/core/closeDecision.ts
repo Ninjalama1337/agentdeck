@@ -5,6 +5,8 @@ export interface CloseContext {
   mode: DesktopServerMode;
   /** The app may stop this server (service or detached). */
   controllable: boolean;
+  /** The server is reachable from other machines — only then does the phone stay connected. */
+  lan: boolean;
 }
 
 export type CloseDecision =
@@ -65,15 +67,17 @@ function activityLine(activity: Activity | null): string {
 }
 
 /** The German close dialog: three buttons plus "don't ask again" — or two for a server the app cannot stop. */
-export function buildCloseDialog(options: { canStop: boolean; activity: Activity | null }): CloseDialogModel {
-  const { canStop, activity } = options;
+export function buildCloseDialog(options: { canStop: boolean; activity: Activity | null; lan: boolean }): CloseDialogModel {
+  const { canStop, activity, lan } = options;
   const lines: string[] = [];
   const status = activityLine(activity);
   if (status) lines.push(status, '');
 
   if (canStop) {
     lines.push(
-      'Im Hintergrund weiterlaufen: Der Dienst bleibt aktiv. Agenten, Routinen und Benachrichtigungen laufen weiter, das Handy bleibt verbunden.',
+      `Im Hintergrund weiterlaufen: Der Dienst bleibt aktiv. Agenten, Routinen und Benachrichtigungen laufen weiter${
+        lan ? ', das Handy bleibt verbunden' : ''
+      }.`,
       '',
       'Dienst stoppen und beenden: Der Server hält an, laufende Agent-Läufe werden unterbrochen.',
       '',

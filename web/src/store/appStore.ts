@@ -911,8 +911,11 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       });
       // Remember where the user is, per server: the screen and the open chat
       // come back on the next start (see restoreView).
-      writeStored(ROUTE_KEY, routeToHash(get().route));
+      // Only while logged in: the screen of a pairing page (or of a login that was
+      // just dropped) is not where the user wants to be put back.
+      if (get().token) writeStored(ROUTE_KEY, routeToHash(get().route));
       store.subscribe((st, prev) => {
+        if (!get().token) return;
         if (st.route !== prev.route) writeStored(ROUTE_KEY, routeToHash(get().route));
         if (st.activeSessionId !== prev.activeSessionId) writeStored(SESSION_KEY, get().activeSessionId);
       });
@@ -1027,7 +1030,14 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       disconnectSocket();
       socketAttached = false;
       persistToken(null);
-      persistActiveProject(null);
+      // Leaving on purpose forgets where the user was. A login the server turned
+      // down (silent, 401) is no leave: project, chat and screen stay as they
+      // were and come back once the device is paired again.
+      if (!silent) {
+        persistActiveProject(null);
+        writeStored(ROUTE_KEY, null);
+        writeStored(SESSION_KEY, null);
+      }
       set({
         token: null,
         servers: savedServers(),
@@ -1036,8 +1046,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         agents: {},
         agentOrder: [],
         projects: [],
-        activeProjectId: null,
-        activeSessionId: null,
+        ...(silent ? {} : { activeProjectId: null, activeSessionId: null }),
         sessionsByProject: {},
         loadedSessions: {},
         messagesBySession: {},
@@ -1054,8 +1063,10 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         activeTerminalId: null,
       });
       toastedAdminJobs.clear();
-      get().navigate({ name: 'home' });
-      if (!silent) get().toast('info', 'Unpaired from server');
+      if (!silent) {
+        get().navigate({ name: 'home' });
+        get().toast('info', 'Unpaired from server');
+      }
     },
 
     setServerBase(base) {

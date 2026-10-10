@@ -19,7 +19,7 @@ function Toast({ toast }: { toast: ToastItem }) {
   return (
     <div
       role="status"
-      className="msg-in pointer-events-auto flex w-full max-w-xl items-start gap-2.5 rounded-2xl border p-3 pr-2 shadow-glass"
+      className="toast-card msg-in pointer-events-auto flex w-full items-start gap-2.5 rounded-2xl border p-3 pr-2 shadow-glass"
       style={{
         background: 'rgba(18, 22, 32, 0.92)',
         borderColor: `${accent}44`,

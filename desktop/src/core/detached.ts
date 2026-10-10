@@ -1,11 +1,14 @@
 import path from 'node:path';
 import { readJsonFile, writeFileAtomic, type FileSystem } from './fs';
+import { isServerProcess, type ProcessProbe } from './pidfile';
 
 /** Written when the app starts a server itself — tells "ours" from a checkout started by hand. */
 export interface DetachedMarker {
   pid: number;
   startedAt: number;
   bin: string;
+  /** Bind address the server was started with (0.0.0.0 = reachable from the LAN). */
+  host: string;
 }
 
 /** The slice of a `ChildProcess` the starter needs. */
@@ -30,9 +33,8 @@ export interface DetachedDeps {
   /** Opens the log for appending and returns its descriptor. */
   openLog(file: string): number;
   closeFd(fd: number): void;
-  isAlive(pid: number): boolean;
-  /** True when `pid` still looks like an AgentDeck server (guards against a recycled pid). */
-  looksLikeServer(pid: number): Promise<boolean>;
+  /** Looks at processes: is `pid` alive, and is it an AgentDeck server (guards against a recycled pid)? */
+  probe: ProcessProbe;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -59,6 +61,7 @@ export function normalizeMarker(raw: unknown): DetachedMarker | null {
     pid: r.pid,
     startedAt: typeof r.startedAt === 'number' ? r.startedAt : 0,
     bin: typeof r.bin === 'string' ? r.bin : '',
+    host: typeof r.host === 'string' && r.host ? r.host : '127.0.0.1',
   };
 }
 
@@ -70,21 +73,25 @@ export class DetachedServer {
   }
 
   /**
-   * True when the server whose pid file is `pidFile` is the one this app started:
-   * same pid as the marker, still alive.
+   * The marker when the server whose pid file is `pidFile` is the one this app started:
+   * same pid as the marker, still alive, and still an AgentDeck server process.
    */
-  async isOurs(pidFile: string): Promise<boolean> {
+  async inspect(pidFile: string): Promise<DetachedMarker | null> {
     const marker = await this.readMarker();
-    if (!marker) return false;
+    if (!marker) return null;
     const pid = await readPidFile(this.deps.fs, pidFile);
-    return pid === marker.pid && this.deps.isAlive(pid);
+    return pid === marker.pid && isServerProcess(pid, this.deps.probe) ? marker : null;
+  }
+
+  async isOurs(pidFile: string): Promise<boolean> {
+    return (await this.inspect(pidFile)) !== null;
   }
 
   /**
    * Starts `bin` (the CLI without arguments = the server in the foreground) in
    * its own session with stdout/stderr in the log file, so it outlives the app.
    */
-  async start(options: { bin: string; env: NodeJS.ProcessEnv; cwd?: string }): Promise<number> {
+  async start(options: { bin: string; env: NodeJS.ProcessEnv; host: string; cwd?: string }): Promise<number> {
     const { fs, logFile } = this.deps;
     await fs.mkdirp(path.dirname(logFile));
     const size = await fs.size(logFile);
@@ -104,7 +111,7 @@ export class DetachedServer {
       child.unref();
       const pid = child.pid;
       if (pid === undefined) throw new Error('the server process has no pid');
-      const marker: DetachedMarker = { pid, startedAt: this.deps.now(), bin: options.bin };
+      const marker: DetachedMarker = { pid, startedAt: this.deps.now(), bin: options.bin, host: options.host };
       await writeFileAtomic(fs, this.deps.markerFile, `${JSON.stringify(marker)}\n`);
       return pid;
     } finally {
@@ -124,7 +131,7 @@ export class DetachedServer {
     if (!marker || pid === null || pid !== marker.pid) {
       throw new Error('This server was not started by the app — stop it where you started it.');
     }
-    if (this.deps.isAlive(pid) && (await this.deps.looksLikeServer(pid))) {
+    if (isServerProcess(pid, this.deps.probe)) {
       this.deps.kill(pid, 'SIGTERM');
       if (!(await this.waitForExit(pid, options.graceMs ?? 10_000))) {
         this.deps.kill(pid, 'SIGKILL');
@@ -136,7 +143,7 @@ export class DetachedServer {
 
   private async waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
     const deadline = this.deps.now() + timeoutMs;
-    while (this.deps.isAlive(pid)) {
+    while (this.deps.probe.alive(pid)) {
       if (this.deps.now() >= deadline) return false;
       await this.deps.sleep(150);
     }

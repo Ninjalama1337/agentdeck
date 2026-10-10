@@ -36,6 +36,7 @@ export async function stageRuntime(options: {
   const partial = path.join(runtimeDir, `.staging-${version}-${options.pid}`);
   await fs.remove(partial);
   await fs.copyDir(bundleRoot, partial);
+  await fs.makeUserWritable(partial);
   await fs.rename(partial, target);
   return bin;
 }

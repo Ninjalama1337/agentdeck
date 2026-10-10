@@ -3,7 +3,7 @@ import type { ServerBinSource, ServerCli } from './cli';
 import type { DesktopState } from './settings';
 import type { HealthProbe } from './health';
 import { originOf, waitForHealth } from './health';
-import { buildState, type ServerState } from './serverStatus';
+import { buildState, holderOf, type ServerHolder, type ServerState } from './serverStatus';
 import { runtimeNeedsUpdate } from './versions';
 
 export interface ControllerDeps {
@@ -12,8 +12,9 @@ export interface ControllerDeps {
   /** Probes `<origin>/api/health`. */
   probe(baseUrl: string): Promise<HealthProbe>;
   detached: {
-    isOurs(pidFile: string): Promise<boolean>;
-    start(options: { bin: string; env: NodeJS.ProcessEnv }): Promise<number>;
+    /** The marker of the server this app started, when it is the one that runs (pid file, process). */
+    inspect(pidFile: string): Promise<{ host: string } | null>;
+    start(options: { bin: string; env: NodeJS.ProcessEnv; host: string }): Promise<number>;
     stop(pidFile: string): Promise<void>;
   };
   settings: { get(): DesktopSettings };
@@ -35,14 +36,18 @@ export interface ControllerDeps {
 
 export interface StartFailure {
   ok: false;
-  kind: 'port-busy' | 'failed';
+  /** `port-busy`: another program holds the port; `unresponsive`: something holds it and does not answer. */
+  kind: 'port-busy' | 'unresponsive' | 'failed';
   message: string;
   state?: ServerState;
 }
 
 export type StartResult = { ok: true; state: ServerState } | StartFailure;
 
-const SERVICE_STATUS_TTL_MS = 10_000;
+/** `systemctl` + the bundle CLI are spawned for it — the cheap health probe runs far more often. */
+const SERVICE_STATUS_TTL_MS = 30_000;
+/** An answer to `GET /api/health` is allowed to be this late before the server counts as busy. */
+const RETRY_PAUSE_MS = 400;
 
 /**
  * Brings the server up and keeps track of how it runs. All decisions live here,
@@ -52,6 +57,9 @@ export class ServerController {
   private cachedInfo: ServerCliInfo | null = null;
   private cachedService: { value: ServiceCliStatus | null; at: number } | null = null;
   private current: ServerState | null = null;
+  private currentAt = 0;
+  /** The last time an AgentDeck server answered — what a close decision falls back to while it is busy. */
+  private lastKnown: ServerState | null = null;
   private readonly listeners = new Set<(state: ServerState) => void>();
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -77,17 +85,55 @@ export class ServerController {
     return originOf(info.host, info.port);
   }
 
-  /** Current facts about the server. `fresh` skips the short-lived service status cache. */
+  /**
+   * Current facts about the server. `fresh` skips the service status cache. A server that does not
+   * answer in time is asked once more after a short pause before it counts as busy.
+   */
   async refresh(fresh = false): Promise<ServerState> {
     const info = await this.info();
-    const probe = await this.deps.probe(originOf(info.host, info.port));
-    const service = await this.serviceStatus(fresh);
-    const detachedOurs = probe.state === 'agentdeck' && !service?.active && (await this.deps.detached.isOurs(info.pidFile));
-    const state = buildState(info, { probe, service, detachedOurs });
+    const base = originOf(info.host, info.port);
+    let probe = await this.deps.probe(base);
+    if (probe.state === 'unresponsive') {
+      await this.deps.sleep(RETRY_PAUSE_MS);
+      probe = await this.deps.probe(base);
+    }
+    // A change in who holds the port is worth a fresh look at the unit, too.
+    const changedHolder = this.current === null || this.current.holder !== holderOf(probe);
+    const service = await this.serviceStatus(fresh || changedHolder);
+    const detached =
+      !service?.active && (probe.state === 'agentdeck' || probe.state === 'unresponsive')
+        ? await this.deps.detached.inspect(info.pidFile)
+        : null;
+    const state = buildState(info, { probe, service, detached, intendedLan: this.deps.settings.get().lanAccess });
     const changed = JSON.stringify(state) !== JSON.stringify(this.current);
     this.current = state;
+    this.currentAt = this.deps.now();
+    if (state.holder === 'agentdeck') this.lastKnown = state;
     if (changed) for (const listener of this.listeners) listener(state);
     return state;
+  }
+
+  /**
+   * Who holds the port — from the last look when it is younger than `maxAgeMs`, else from a new one.
+   * The pairing code and the bridge only go to pages of an AgentDeck server (src/ipc.ts).
+   */
+  async identify(maxAgeMs = 5000): Promise<ServerHolder> {
+    if (this.current && this.deps.now() - this.currentAt <= maxAgeMs) return this.current.holder;
+    try {
+      return (await this.refresh()).holder;
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * The state to decide on when the window closes. A server that does not answer right now
+   * (but did before) keeps its last known state — a busy service must not look "stopped".
+   */
+  async stateForDecision(): Promise<ServerState | null> {
+    const state = await this.refresh(true).catch(() => null);
+    if (state && state.holder !== 'unresponsive') return state;
+    return this.lastKnown ?? state ?? this.current;
   }
 
   private async serviceStatus(fresh: boolean): Promise<ServiceCliStatus | null> {
@@ -126,13 +172,15 @@ export class ServerController {
     } catch (err) {
       return { ok: false, kind: 'failed', message: err instanceof Error ? err.message : String(err) };
     }
-    if (state.portConflict) return this.portBusy(state);
+    if (state.portConflict) return this.portProblem(state);
 
     try {
       if (state.reachable) {
         await this.updateRuntimeIfNeeded(state);
         return { ok: true, state: await this.refresh(true) };
       }
+      // The server this app started a moment ago is still coming up (or busy): wait, never start a second one.
+      if (state.mode === 'detached') return await this.waitUntilUp();
 
       const service = state.service;
       if (service?.systemd && service.installed && service.managed) {
@@ -156,7 +204,10 @@ export class ServerController {
     }
   }
 
-  private portBusy(state: ServerState): StartFailure {
+  private portProblem(state: ServerState): StartFailure {
+    if (state.holder === 'unresponsive') {
+      return { ok: false, kind: 'unresponsive', message: `Port ${state.port} is taken by a program that does not answer`, state };
+    }
     return { ok: false, kind: 'port-busy', message: `Port ${state.port} is used by another program`, state };
   }
 
@@ -183,7 +234,7 @@ export class ServerController {
   /** The CLI refuses install/start while a server outside the unit runs (server.pid) — ours goes first. */
   private async freeServerForService(): Promise<void> {
     const info = await this.info();
-    if (await this.deps.detached.isOurs(info.pidFile)) {
+    if ((await this.deps.detached.inspect(info.pidFile)) !== null) {
       this.deps.log('stopping the detached server before the service takes over');
       await this.stopDetached();
     }
@@ -210,6 +261,7 @@ export class ServerController {
     // Bind address and port are set explicitly: what the app connects to is what the server listens on.
     await this.deps.detached.start({
       bin,
+      host,
       env: { ...this.deps.env, AGENTDECK_HOST: host, AGENTDECK_PORT: String(info.port) },
     });
   }
@@ -232,7 +284,7 @@ export class ServerController {
     const up = await this.waitFor((p) => p.state === 'agentdeck', timeout);
     const state = await this.refresh(true);
     if (up && state.reachable) return { ok: true, state };
-    if (state.portConflict) return this.portBusy(state);
+    if (state.portConflict) return this.portProblem(state);
     const where = state.mode === 'service' ? 'journalctl --user -u agentdeck' : this.deps.serverLogFile;
     return { ok: false, kind: 'failed', message: `The server did not come up within ${Math.round(timeout / 1000)} s (log: ${where})`, state };
   }
@@ -266,7 +318,11 @@ export class ServerController {
       }
       case 'start': {
         if (state.reachable) return;
-        if (state.portConflict) throw new Error(this.portBusy(state).message);
+        if (state.portConflict) throw new Error(this.portProblem(state).message);
+        if (state.mode === 'detached') {
+          await this.expectUp();
+          return;
+        }
         if (managed) await this.startUnit();
         else await this.startDetached();
         await this.expectUp();
@@ -278,7 +334,7 @@ export class ServerController {
         return;
       }
       case 'restart': {
-        if (state.portConflict) throw new Error(this.portBusy(state).message);
+        if (state.portConflict) throw new Error(this.portProblem(state).message);
         if (state.reachable) this.requireControllable(state);
         if (state.mode === 'service' || (!state.reachable && managed)) {
           if (state.mode === 'service' && service?.active) await cli.serviceRestart();
@@ -312,30 +368,56 @@ export class ServerController {
   /** Stops the server on quit — only what the app may stop; an external server is left alone. */
   stopForQuit(): Promise<void> {
     return this.exclusive(async () => {
-      const state = await this.refresh(true);
-      if (!state.reachable && state.mode !== 'service') return;
+      const state = await this.stateForDecision();
+      if (!state) return;
+      if (!state.reachable && state.mode !== 'service' && state.mode !== 'detached') return;
       if (state.mode === 'service' || state.mode === 'detached') await this.stopRunning(state);
     });
   }
 
-  /** `--lan` changed: rewrite the unit / restart the detached server with the new bind address. */
+  /**
+   * "Phone access" changed: rewrite the unit (the CLI restarts a running one when its unit
+   * changed) or restart the detached server with the new bind address. A server the app does
+   * not control cannot be changed — that is an error, not a silently stored setting.
+   */
   applyLanAccess(lan: boolean): Promise<void> {
     return this.exclusive(async () => {
       const state = await this.refresh(true);
       const service = state.service;
+      if (service?.installed && !service.managed) {
+        throw new Error('The service was not set up by AgentDeck — change its network setting where you installed it.');
+      }
       if (service?.systemd && service.installed && service.managed) {
         if (service.lan === lan) return;
         await this.installUnit(lan);
-        if (service.active) await this.deps.cli.serviceRestart();
         await this.expectUp();
       } else if (state.mode === 'detached') {
-        await this.stopDetached();
-        await this.startDetached(lan);
-        await this.expectUp();
+        await this.restartDetached(lan, state.lan);
+      } else if (state.mode === 'external') {
+        throw new Error('This server was not started by AgentDeck — change its network setting where you started it.');
       }
+      // (stopped, no unit: the setting is stored and applies at the next start.)
       // Tell the window: the binding is part of the status it shows.
       await this.refresh(true);
     });
+  }
+
+  /** Restarts the detached server with a new bind address; when that fails, the old binding comes back. */
+  private async restartDetached(lan: boolean, previousLan: boolean): Promise<void> {
+    await this.stopDetached();
+    try {
+      await this.startDetached(lan);
+      await this.expectUp();
+    } catch (err) {
+      this.deps.log(`restart with lan=${lan} failed, going back to lan=${previousLan}: ${String(err)}`);
+      try {
+        await this.startDetached(previousLan);
+        await this.expectUp();
+      } catch (rollbackError) {
+        this.deps.log(`rollback failed too: ${String(rollbackError)}`);
+      }
+      throw err;
+    }
   }
 
   private async expectUp(): Promise<void> {

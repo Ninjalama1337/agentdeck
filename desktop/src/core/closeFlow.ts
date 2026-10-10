@@ -18,23 +18,32 @@ export interface CloseFlowDeps {
   /** "Don't ask again" ticked: store the choice as the new close behaviour. */
   remember(action: Exclude<DesktopCloseAction, 'ask'>): Promise<void>;
   stopServer(): Promise<void>;
-  /** Stopping failed — tell the user; the window stays open. */
-  reportStopFailure(message: string): Promise<void>;
+  /** Stopping failed — tell the user and ask: quit anyway (the server keeps running) or stay. */
+  stopFailed(message: string): Promise<'quit-anyway' | 'cancel'>;
   /** Flush storage and exit the app. */
   quit(): Promise<void>;
 }
 
 export type CloseOutcome = 'quit' | 'cancelled' | 'failed';
 
-async function stopThenQuit(deps: CloseFlowDeps, stop: boolean): Promise<CloseOutcome> {
+async function stopThenQuit(
+  deps: CloseFlowDeps,
+  stop: boolean,
+  remember: Exclude<DesktopCloseAction, 'ask'> | null = null,
+): Promise<CloseOutcome> {
   if (stop) {
     try {
       await deps.stopServer();
     } catch (err) {
-      await deps.reportStopFailure(err instanceof Error ? err.message : String(err));
-      return 'failed';
+      const choice = await deps.stopFailed(err instanceof Error ? err.message : String(err));
+      if (choice !== 'quit-anyway') return 'failed';
+      // The choice that just failed is not remembered; the server keeps running.
+      await deps.quit();
+      return 'quit';
     }
   }
+  // "Don't ask again" counts only for a choice that worked.
+  if (remember) await deps.remember(remember);
   await deps.quit();
   return 'quit';
 }
@@ -45,12 +54,11 @@ export async function runCloseFlow(deps: CloseFlowDeps): Promise<CloseOutcome> {
   const decision = decideClose(ctx);
   if (decision.kind === 'quit') return stopThenQuit(deps, decision.stopService);
 
-  const model = buildCloseDialog({ canStop: canStopServer(ctx), activity: await deps.activity() });
+  const model = buildCloseDialog({ canStop: canStopServer(ctx), activity: await deps.activity(), lan: ctx.lan });
   const { response, checkboxChecked } = await deps.showDialog(model);
   const answer = resolveCloseDialog(model, response, checkboxChecked);
   if (answer.choice === 'cancel') return 'cancelled';
-  if (answer.remember) await deps.remember(answer.remember);
-  return stopThenQuit(deps, answer.choice === 'stop');
+  return stopThenQuit(deps, answer.choice === 'stop', answer.remember);
 }
 
 /** `DesktopBridge.quit()` — the web UI decided; no dialog. */

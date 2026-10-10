@@ -23,6 +23,8 @@ import { nodeFs } from './core/fs';
 import { createHealthProbe, type FetchLike } from './core/health';
 import { createPairingCoordinator, deviceName, pairWithLocalServer } from './core/pairing';
 import { desktopPaths, xdgPaths } from './core/paths';
+import { systemProcessProbe } from './core/pidfile';
+import { createRestartLimiter } from './core/restartLimit';
 import { isVolatilePath, stageRuntime } from './core/runtimeStage';
 import { toPublicStatus } from './core/serverStatus';
 import { SettingsStore, StateStore } from './core/settings';
@@ -39,7 +41,7 @@ import { createMainWindow, PARTITION } from './window';
 
 const HIDDEN = process.argv.includes(HIDDEN_FLAG);
 const DEVTOOLS = process.env.AGENTDECK_DEVTOOLS === '1';
-const STATUS_POLL_MS = 3000;
+const STATUS_POLL_MS = 5000;
 
 // Where things live — fixed before anything else so the browser profile
 // (localStorage, keyed by origin) is the same on every start.
@@ -126,22 +128,7 @@ async function main(): Promise<void> {
     spawn: (file, args, options) => spawn(file, args, options),
     openLog: (file) => fs.openSync(file, 'a', 0o600),
     closeFd: (fd) => fs.closeSync(fd),
-    isAlive(pid) {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (err) {
-        return (err as NodeJS.ErrnoException).code === 'EPERM';
-      }
-    },
-    async looksLikeServer(pid) {
-      try {
-        const cmdline = (await fsp.readFile(`/proc/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ');
-        return /agentdeck|(dist|src)\/(index|cli)\.(js|ts)/i.test(cmdline);
-      } catch {
-        return false;
-      }
-    },
+    probe: systemProcessProbe,
     kill: (pid, signal) => process.kill(pid, signal),
     sleep,
     now: Date.now,
@@ -215,8 +202,8 @@ async function main(): Promise<void> {
       applyLanAccess: (lan) => controller.applyLanAccess(lan),
     },
   });
-  // The entry holds the app's path — rewrite it so a moved AppImage keeps working.
-  if (settingsStore.get().launchAtLogin || (await autostart.isEnabled())) await autostart.set(true).catch((e) => log(String(e)));
+  // The entry holds the app's path — fix only that line, so a moved AppImage keeps working and the desktop's own on/off switch stays.
+  await autostart.healExec().catch((e) => log(String(e)));
 
   // ---- closing and quitting
   async function windowToken(): Promise<string | null> {
@@ -237,6 +224,7 @@ async function main(): Promise<void> {
     if (quitting) return;
     quitting = true;
     if (poller) clearInterval(poller);
+    stopWaiting();
     try {
       await keeper?.saveNow();
       // Make sure localStorage (route, drafts, login) reaches the disk before the process ends.
@@ -252,14 +240,18 @@ async function main(): Promise<void> {
 
   const flow: CloseFlowDeps = {
     async context() {
-      const state = await controller.refresh(true).catch(() => controller.last());
+      // A server that is busy right now (but was fine) counts with its last known state.
+      const state = await controller.stateForDecision();
       return {
         closeAction: settingsStore.get().closeAction,
         mode: state?.mode ?? 'stopped',
         controllable: state?.controllable ?? false,
+        lan: state?.lan ?? false,
       };
     },
     async activity() {
+      // The login goes to the AgentDeck server only — never to another program on the port.
+      if ((await controller.identify()) !== 'agentdeck') return null;
       return fetchActivity({ baseUrl: origin, token: (await windowToken()) ?? coordinator.lastToken(), fetch: nodeFetch });
     },
     showDialog: (model) => dialogs.askClose(win, model),
@@ -267,7 +259,7 @@ async function main(): Promise<void> {
       await settingsStore.update({ closeAction: action });
     },
     stopServer: () => controller.stopForQuit(),
-    reportStopFailure: (message) => dialogs.showError(win, TEXTS.stopFailed, message),
+    stopFailed: (message) => dialogs.stopFailed(win, message),
     quit: finalQuit,
   };
 
@@ -284,6 +276,7 @@ async function main(): Promise<void> {
 
   registerIpc({
     origin,
+    identify: () => controller.identify(),
     appVersion: app.getVersion(),
     platform: process.platform,
     getStatus: () => controller.refresh(),
@@ -313,20 +306,51 @@ async function main(): Promise<void> {
   );
 
   // ---- window
+  let waitTimer: NodeJS.Timeout | null = null;
+  function stopWaiting(): void {
+    if (waitTimer) clearInterval(waitTimer);
+    waitTimer = null;
+  }
+
+  /**
+   * Shows the status page and loads the app as soon as an AgentDeck server answers. The page
+   * cannot navigate by itself — it would follow a foreign program on the port just as well.
+   */
+  function waitForServer(title: string, detail?: string): void {
+    const target = win;
+    if (!target || target.isDestroyed()) return;
+    void target.loadURL(statusPageUrl({ origin, title, ...(detail ? { detail } : {}) }));
+    if (waitTimer) return;
+    waitTimer = setInterval(() => {
+      void controller
+        .refresh()
+        .then(async (state) => {
+          if (!state.reachable || quitting) return;
+          stopWaiting();
+          if (win && !win.isDestroyed()) await win.loadURL(`${origin}/`);
+        })
+        .catch(() => undefined);
+    }, 1500);
+  }
+
   async function loadApp(): Promise<void> {
     for (;;) {
       const result = await controller.ensureRunning({ interactive: true });
       if (result.ok) break;
       log(`server start failed (${result.kind}): ${result.message}`);
+      const port = result.state?.port ?? 0;
       const text =
         result.kind === 'port-busy'
-          ? TEXTS.portBusy(result.state?.port ?? 0)
-          : { message: TEXTS.startFailed, detail: result.message };
+          ? TEXTS.portBusy(port)
+          : result.kind === 'unresponsive'
+            ? TEXTS.portUnresponsive(port)
+            : { message: TEXTS.startFailed, detail: result.message };
       if (!(await dialogs.startFailed(win, text.message, text.detail))) {
         await finalQuit();
         return;
       }
     }
+    stopWaiting();
     await win?.loadURL(`${origin}/`);
   }
 
@@ -356,28 +380,36 @@ async function main(): Promise<void> {
     });
     current.on('closed', () => {
       win = null;
+      stopWaiting();
     });
     // The server went away under a loaded page: wait for it instead of showing Chromium's error page.
     current.webContents.on('did-fail-load', (_event, code, _description, url, isMainFrame) => {
       if (!isMainFrame || code === -3 || !url.startsWith(origin)) return;
-      void current.loadURL(
-        statusPageUrl({
-          origin,
-          title: 'Der AgentDeck-Server ist nicht erreichbar',
-          detail: 'Die Verbindung wird erneut versucht, sobald er antwortet.',
-        }),
-      );
+      waitForServer('Der AgentDeck-Server ist nicht erreichbar', 'Die Verbindung wird erneut versucht, sobald er antwortet.');
     });
-    // A crashed renderer comes back by itself (the web app restores its route).
+    // A crashed renderer comes back by itself (the web app restores its route) — but not in a loop.
+    const reloads = createRestartLimiter(3, 60_000);
     current.webContents.on('render-process-gone', (_event, details) => {
       log(`renderer gone: ${details.reason}`);
-      if (details.reason !== 'clean-exit' && !quitting) setTimeout(() => !current.isDestroyed() && current.reload(), 1000);
+      if (details.reason === 'clean-exit' || quitting) return;
+      if (reloads.allow(Date.now())) {
+        setTimeout(() => !current.isDestroyed() && current.reload(), 1000);
+      } else {
+        void current.loadURL(statusPageUrl({ origin, title: TEXTS.renderCrash.title, detail: TEXTS.renderCrash.detail }));
+      }
     });
+    // Back in front: look at the server again right away.
+    for (const event of ['focus', 'restore', 'show'] as const) current.on(event, () => void controller.refresh().catch(() => undefined));
     void current.loadURL(statusPageUrl({ origin, title: 'AgentDeck startet …' }));
     await loadApp().catch((err: unknown) => log(`cannot load the app: ${String(err)}`));
 
     if (!poller) {
-      poller = setInterval(() => void controller.refresh().catch(() => undefined), STATUS_POLL_MS);
+      // The health probe is cheap; the bundle CLI and systemctl behind a full refresh are not — and a
+      // window nobody looks at needs no live status.
+      poller = setInterval(() => {
+        if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
+        void controller.refresh().catch(() => undefined);
+      }, STATUS_POLL_MS);
     }
     if (app.isPackaged && process.env.AGENTDECK_NO_UPDATE_CHECK !== '1') {
       setTimeout(

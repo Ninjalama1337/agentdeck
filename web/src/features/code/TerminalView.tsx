@@ -234,13 +234,15 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     }
   }, [fontSize, id]);
 
-  // Compose mode: tapping the terminal must not pop the soft keyboard.
+  // Compose mode: tapping the terminal must not pop the soft keyboard. (A desktop
+  // pane has no compose bar — it types into the terminal, and must keep the focus it was given.)
   useEffect(() => {
     const ta = termRef.current?.textarea;
     if (!ta) return;
-    ta.setAttribute('inputmode', compose ? 'none' : 'text');
-    if (compose && document.activeElement === ta) ta.blur();
-  }, [compose]);
+    const composing = compose && !pane;
+    ta.setAttribute('inputmode', composing ? 'none' : 'text');
+    if (composing && document.activeElement === ta) ta.blur();
+  }, [compose, pane]);
 
   // Seen while visible; refit when becoming visible (size may have changed).
   useEffect(() => {

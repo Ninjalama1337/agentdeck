@@ -23,9 +23,14 @@ export interface AutostartEntryOptions {
   args?: string[];
 }
 
+/** The `Exec=` value: the app, then `--hidden`. */
+export function autostartExec(options: AutostartEntryOptions): string {
+  return [options.execPath, ...(options.args ?? []), HIDDEN_FLAG].map(quoteExecArg).join(' ');
+}
+
 /** `~/.config/autostart/agentdeck.desktop` — starts the app at login, window hidden. */
 export function autostartEntry(options: AutostartEntryOptions): string {
-  const exec = [options.execPath, ...(options.args ?? []), HIDDEN_FLAG].map(quoteExecArg).join(' ');
+  const exec = autostartExec(options);
   return [
     '[Desktop Entry]',
     'Type=Application',
@@ -48,6 +53,21 @@ export function autostartTarget(env: NodeJS.ProcessEnv, execPath: string): strin
   return env.APPIMAGE && path.isAbsolute(env.APPIMAGE) ? env.APPIMAGE : execPath;
 }
 
+/** Does the desktop (GNOME Tweaks, KDE settings) hold this entry off? `Hidden=true` or `X-GNOME-Autostart-enabled=false`. */
+export function isEntryDisabled(text: string): boolean {
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('[') && line !== '[Desktop Entry]') break; // only the main group counts
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim().toLowerCase();
+    if (key === 'Hidden' && value === 'true') return true;
+    if (key === 'X-GNOME-Autostart-enabled' && value === 'false') return true;
+  }
+  return false;
+}
+
 export class Autostart {
   constructor(
     private readonly fs: FileSystem,
@@ -55,16 +75,41 @@ export class Autostart {
     private readonly options: () => AutostartEntryOptions,
   ) {}
 
-  isEnabled(): Promise<boolean> {
-    return this.fs.exists(this.file);
+  /** The entry exists and the desktop has not switched it off. */
+  async isEnabled(): Promise<boolean> {
+    try {
+      return !isEntryDisabled(await this.fs.readFile(this.file));
+    } catch {
+      return false;
+    }
   }
 
-  /** Writes (or rewrites, e.g. after the AppImage moved) or removes the entry. */
+  /** The user's choice in the app: write a fresh, enabled entry (this also undoes a switch-off made in the desktop), or remove it. */
   async set(enabled: boolean): Promise<void> {
     if (!enabled) {
       await this.fs.remove(this.file);
       return;
     }
     await writeFileAtomic(this.fs, this.file, autostartEntry(this.options()), 0o644);
+  }
+
+  /**
+   * At every start: when the entry exists but points somewhere else (the AppImage moved), fix
+   * its `Exec=` line — and nothing else. Whatever the desktop set (Hidden, enabled flag) stays.
+   */
+  async healExec(): Promise<boolean> {
+    let text: string;
+    try {
+      text = await this.fs.readFile(this.file);
+    } catch {
+      return false;
+    }
+    const wanted = `Exec=${autostartExec(this.options())}`;
+    const lines = text.split('\n');
+    const index = lines.findIndex((line) => line.startsWith('Exec='));
+    if (index < 0 || lines[index] === wanted) return false;
+    lines[index] = wanted;
+    await writeFileAtomic(this.fs, this.file, lines.join('\n'), 0o644);
+    return true;
   }
 }
