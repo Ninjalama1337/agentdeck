@@ -153,6 +153,8 @@ Chat-Auswahl und bleibt nur als „Projekt öffnen“-Button.
 | `AGENTDECK_VOICE_COMMAND` | `voice.command` | `whisper-cli -m … -f {wav}` |
 | `AGENTDECK_VOICE_API_KEY` | `voice.apiKey` | `sk-…` |
 | `AGENTDECK_VOICE_MODEL` | `voice.model` | `whisper-1` |
+| `AGENTDECK_TMUX` | tmux-Binary (sonst: `bin/tmux` des Pakets, dann `tmux` im PATH) | `/usr/local/bin/tmux` |
+| `AGENTDECK_VERSION` | angezeigte Server-Version (sonst: `version.json` des Pakets, dann `git describe`) | `1.2.3` |
 
 Der Tunnel selbst ist in [REMOTE.md](REMOTE.md) erklärt (Quick-Tunnel,
 Named Tunnel, Cloudflare Access).
@@ -193,6 +195,25 @@ Hinweise:
 - Zum Aktualisieren: in der App unter Settings → Server update, oder
   `scripts/update.sh` im Checkout ([RELEASES.md](RELEASES.md)).
 
+### Dienst ohne Checkout: `agentdeck-server service`
+
+Das Desktop-Paket ([DESKTOP.md](DESKTOP.md)) bringt den Server samt Node und
+tmux mit und richtet die Unit selbst ein — ohne `sed`, ohne Checkout:
+
+```bash
+agentdeck-server service install            # nur dieser Rechner (127.0.0.1)
+agentdeck-server service install --lan      # auch im LAN erreichbar (Handy)
+agentdeck-server service status --json
+agentdeck-server service stop|start|restart
+agentdeck-server service uninstall          # Daten bleiben
+agentdeck-server info --json                # Datenordner, Adresse, Pairing-Datei, Version
+```
+
+`install` kopiert die Laufzeit nach `~/.local/share/agentdeck/runtime/<version>/`
+und lässt die Unit auf `runtime/current` zeigen, nie auf einen flüchtigen Pfad
+(AppImage-Mount). Eine Unit, die `agentdeck-server` nicht selbst geschrieben
+hat (z. B. die aus dem Checkout), fasst es nur mit `--force` an.
+
 ## Speicherlayout unter `dataDir`
 
 Kurzreferenz (Details: [ARCHITECTURE.md](ARCHITECTURE.md)):
@@ -203,7 +224,8 @@ Kurzreferenz (Details: [ARCHITECTURE.md](ARCHITECTURE.md)):
 ├── devices.json             # gepaarte Geräte
 ├── jwt-secret               # HS256-Secret (0600) — löschen = alle Geräte abmelden
 ├── bridge-token             # Token für /api/bridge/run + APK-Uploads von CI/Skript (0600)
-├── pairing-code.txt         # aktueller Pairing-Code
+├── pairing-code.txt         # aktueller Pairing-Code (0600)
+├── server.pid               # PID des laufenden Servers (beim sauberen Beenden entfernt)
 ├── vapid.json               # Web-Push-Schlüssel (0600) — löschen = Geräte müssen Push neu aktivieren
 ├── push-subscriptions.json  # Push-Abos pro Gerät (0600)
 ├── apk/                     # agentdeck-latest.apk + apk.json (Version, SHA-256, …)

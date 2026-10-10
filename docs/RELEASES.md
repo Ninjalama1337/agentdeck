@@ -1,7 +1,8 @@
 # Releases & Updates
 
 Ein Release ist ein Git-Tag `vX.Y.Z` auf `main`. GitHub Actions testet den
-Stand, baut die Android-APK und veröffentlicht beides als GitHub-Release. Jeder
+Stand, baut die Android-APK und veröffentlicht beides als GitHub-Release; der
+Desktop-Workflow hängt danach AppImage und deb an dasselbe Release. Jeder
 AgentDeck-Server holt sich das Release selbst — so laufen mehrere Server auf
 derselben Version, und die App bekommt die passende APK.
 
@@ -17,13 +18,28 @@ scripts/release.sh ──► Tag vX.Y.Z ──► GitHub Actions: Tests + APK �
 ```bash
 scripts/release.sh            # nächste Patch-Version
 scripts/release.sh minor      # oder: major, oder eine Version wie 1.2.3
-scripts/release.sh --wait     # wartet, bis das Release online ist
+scripts/release.sh --wait     # wartet, bis das Release und die Desktop-Pakete online sind
 ```
 
 Das Skript verlangt einen sauberen, gepushten `main`, lässt Typecheck und Tests
 laufen, taggt und pusht das Tag. Den Rest macht
 [`.github/workflows/android.yml`](../.github/workflows/android.yml): Schlagen
 dort Typecheck oder Tests fehl, entsteht kein Release.
+
+## Desktop-Pakete
+
+[`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) baut auf
+`ubuntu-22.04` das Server-Bundle (`scripts/build-server-bundle.sh`: Node 22,
+`node-pty`, statisches tmux, gebauter Server und Web-App) und daraus
+`AgentDeck-<version>-linux-x64.AppImage`, das `.deb` und `latest-linux.yml`
+für das Auto-Update des AppImage. Der Workflow legt **kein** Release an: Er
+wartet (bis zu 60 min), bis `android.yml` es nach grünen Tests erzeugt hat, und
+lädt die Pakete dann hoch. Fehlen sie, meldet `scripts/release.sh --wait` eine
+Warnung — Server und APK des Releases sind davon nicht betroffen.
+
+Ein Server aus dem Desktop-Paket aktualisiert sich nicht über
+`scripts/update.sh` (kein Git-Checkout), sondern mit der App; Details in
+[DESKTOP.md](DESKTOP.md#updates).
 
 ## Server aktualisieren
 
