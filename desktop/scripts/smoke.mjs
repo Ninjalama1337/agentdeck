@@ -1,175 +1,33 @@
 // Headless smoke test of the real Electron app under xvfb, against a fake server CLI.
-//   npm run smoke            (needs the Electron binary, xvfb-run, a built dist/)
-// Drives the window through the DevTools protocol; native dialogs are answered by smoke-entry.cjs.
-import { spawn } from 'node:child_process';
+//   npm run build && npm run smoke       (needs the Electron binary and xvfb-run)
+// Covers: bridge + auto-pairing before the page runs, detached start, close dialog, window state,
+// single instance, stop on close, --hidden, port conflict. For the real server bundle see smoke-real.mjs.
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHarness, freePort, healthy, root, sleep, until } from './smoke-lib.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const electron = path.join(root, 'node_modules/electron/dist/electron');
 const fake = path.join(root, 'test/fixtures/fake-agentdeck-server.mjs');
-const entry = path.join(root, 'scripts/smoke-entry.cjs');
-
-const results = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `  -> ${detail}`}`);
-}
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(fn, timeoutMs = 20000, label = 'condition') {
-  const end = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const v = await fn();
-      if (v) return v;
-    } catch {}
-    if (Date.now() > end) throw new Error(`timeout waiting for ${label}`);
-    await sleep(150);
-  }
-}
-function freePort() {
-  return new Promise((resolve) => {
-    const s = net.createServer().listen(0, '127.0.0.1', () => {
-      const { port } = s.address();
-      s.close(() => resolve(port));
-    });
-  });
-}
-async function healthy(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-smoke-'));
 const port = await freePort();
-const debugPort = await freePort();
-const dataDir = path.join(tmp, 'data');
-const userData = path.join(tmp, 'userdata');
-const home = path.join(tmp, 'home');
-fs.mkdirSync(home, { recursive: true });
-const dialogLog = path.join(tmp, 'dialogs.jsonl');
-const answers = path.join(tmp, 'answers.json');
-const calls = path.join(tmp, 'calls.log');
-const cmdFile = path.join(tmp, 'cmd.json');
-const boundsFile = path.join(tmp, 'bounds.json');
-fs.writeFileSync(answers, '[]');
-
-const baseEnv = {
-  ...process.env,
-  HOME: home,
-  XDG_CONFIG_HOME: path.join(home, '.config'),
-  XDG_DATA_HOME: path.join(home, '.local/share'),
-  XDG_STATE_HOME: path.join(home, '.local/state'),
-  AGENTDECK_SERVER_BIN: fake,
-  AGENTDECK_DESKTOP_USER_DATA: userData,
-  AGENTDECK_NO_UPDATE_CHECK: '1',
-  FAKE_DATA_DIR: dataDir,
-  FAKE_PORT: String(port),
-  FAKE_VERSION: '9.9.9',
-  FAKE_CALLS: calls,
-  SMOKE_DIALOG_LOG: dialogLog,
-  SMOKE_DIALOG_ANSWERS: answers,
-  SMOKE_CMD_FILE: cmdFile,
-  SMOKE_BOUNDS_FILE: boundsFile,
-};
-delete baseEnv.ELECTRON_RUN_AS_NODE;
-
-const launched = [];
-const outputs = [];
-function launch(extraArgs = [], extraEnv = {}) {
-  const child = spawn(
-    'xvfb-run',
-    ['-a', '-s', '-screen 0 1600x1000x24', electron, entry, '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${debugPort}`, ...extraArgs],
-    // own process group, so a leftover app (and its Xvfb) can be killed as a whole
-    { cwd: root, env: { ...baseEnv, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
-  );
-  launched.push(child);
-  outputs.push(() => output);
-  let output = '';
-  child.stdout.on('data', (d) => (output += d));
-  child.stderr.on('data', (d) => (output += d));
-  const exited = new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
-  return { child, exited, output: () => output };
-}
-
-async function cdp(url) {
-  const ws = new WebSocket(url);
-  await new Promise((resolve, reject) => {
-    ws.onopen = resolve;
-    ws.onerror = reject;
-  });
-  let id = 0;
-  const pending = new Map();
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.id && pending.has(msg.id)) {
-      pending.get(msg.id)(msg);
-      pending.delete(msg.id);
-    }
-  };
-  const send = (method, params = {}) =>
-    new Promise((resolve) => {
-      const mid = ++id;
-      pending.set(mid, resolve);
-      ws.send(JSON.stringify({ id: mid, method, params }));
-    });
-  return { send, close: () => ws.close() };
-}
-
-function closeWindow() {
-  fs.writeFileSync(cmdFile, JSON.stringify({ close: true }));
-}
-
-function readBounds() {
-  try {
-    return JSON.parse(fs.readFileSync(boundsFile, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-async function connectPage() {
-  const target = await until(async () => {
-    const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
-    return list.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}/`));
-  }, 30000, 'the app page');
-  const { send, close } = await cdp(target.webSocketDebuggerUrl);
-  return {
-    send,
-    async evaluate(expression) {
-      const res = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      if (res.result?.exceptionDetails) throw new Error(res.result.exceptionDetails.text + JSON.stringify(res.result.exceptionDetails.exception?.description));
-      return res.result?.result?.value;
-    },
-    close,
-    targetId: target.id,
-  };
-}
-
-function dialogs() {
-  try {
-    return fs
-      .readFileSync(dialogLog, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => JSON.parse(l));
-  } catch {
-    return [];
-  }
-}
+const dataDir = path.join(os.tmpdir(), `agentdeck-smoke-data-${process.pid}`);
+const h = await createHarness({
+  serverBin: fake,
+  port,
+  env: {
+    FAKE_DATA_DIR: dataDir,
+    FAKE_PORT: String(port),
+    FAKE_VERSION: '9.9.9',
+  },
+});
+const { check, launch, connectPage, closeWindow, readBounds, dialogs, answer, clearDialogs } = h;
+const { home, userData } = h.files;
 
 try {
   // ------------------------------------------------------------------ run 1: first start
   console.log('--- run 1: first start (no systemd -> detached server, auto-pairing, bridge)');
-  fs.writeFileSync(answers, JSON.stringify([]));
-  const run1 = launch();
+  answer([]);
+  const run1 = await launch();
   const page = await connectPage();
 
   const probe = await until(async () => {
@@ -213,11 +71,11 @@ try {
   // navigation guard
   await page.evaluate("document.getElementById('ext').click()");
   await sleep(800);
-  const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
-  check('target=_blank link opens no new window', targets.filter((t) => t.type === 'page').length === 1);
+  const targets = await h.targets();
+  check('target=_blank link opens no new window', targets.length === 1);
   await page.evaluate("location.href = 'https://example.org/'").catch(() => undefined);
   await sleep(1000);
-  const urlAfter = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find((t) => t.type === 'page')?.url;
+  const urlAfter = (await h.targets()).find((t) => t.type === 'page')?.url;
   check('navigation away from the server origin is blocked', urlAfter?.startsWith(`http://127.0.0.1:${port}/`), String(urlAfter));
 
   // unauthorized -> re-pair + reload
@@ -234,13 +92,13 @@ try {
 
   // window state: resize through the protocol, then close via the dialog
   const livePage = await connectPage();
-  fs.writeFileSync(cmdFile, JSON.stringify({ bounds: { x: 120, y: 90, width: 1111, height: 777 } }));
+  h.setBounds({ x: 120, y: 90, width: 1111, height: 777 });
   await until(() => readBounds()?.bounds.width === 1111, 10000, 'the window to resize');
   await sleep(1200); // the state is saved debounced
 
   // close: dialog -> cancel (checkbox ticked: must not be remembered)
-  fs.writeFileSync(answers, JSON.stringify([{ response: 2, checkboxChecked: true }]));
-  fs.writeFileSync(dialogLog, '');
+  answer([{ response: 2, checkboxChecked: true }]);
+  clearDialogs();
   closeWindow();
   const closeDialog = await until(() => dialogs().find((d) => /Dienst/.test(d.message ?? '')), 15000, 'the close dialog');
   check('close shows the dialog with 3 buttons in the plan\'s order', JSON.stringify(closeDialog.buttons) === JSON.stringify(['Im Hintergrund weiterlaufen', 'Dienst stoppen und beenden', 'Abbrechen']), JSON.stringify(closeDialog.buttons));
@@ -253,14 +111,14 @@ try {
   check('cancel with "Nicht mehr fragen" ticked does not change the setting', settingsAfterCancel.closeAction === 'ask', JSON.stringify(settingsAfterCancel));
 
   // single instance: a second launch exits and leaves the first running
-  const second = launch();
+  const second = await launch();
   const secondExit = await Promise.race([second.exited, sleep(15000).then(() => null)]);
   check('second instance exits immediately (single-instance lock)', secondExit !== null && secondExit.code === 0, JSON.stringify(secondExit));
   check('first instance keeps running after the second launch', run1.child.exitCode === null);
 
   // close: keep running + remember
-  fs.writeFileSync(answers, JSON.stringify([{ response: 0, checkboxChecked: true }]));
-  fs.writeFileSync(dialogLog, '');
+  answer([{ response: 0, checkboxChecked: true }]);
+  clearDialogs();
   closeWindow();
   const exit1 = await Promise.race([run1.exited, sleep(30000).then(() => null)]);
   check('"Im Hintergrund weiterlaufen" quits the app', exit1 !== null, run1.output().slice(-600));
@@ -272,8 +130,8 @@ try {
 
   // ------------------------------------------------------------------ run 2: restore
   console.log('--- run 2: restart (state restored, no dialog because closeAction=background)');
-  fs.rmSync(boundsFile, { force: true });
-  const run2 = launch();
+  fs.rmSync(h.files.bounds, { force: true });
+  const run2 = await launch();
   const pageB = await connectPage();
   await until(async () => (await pageB.evaluate('document.title')) === 'bridge=yes', 30000, 'page title of run 2');
   const pairedB = JSON.parse(await pageB.evaluate('window.__probe.servers'));
@@ -284,7 +142,7 @@ try {
   check('window size restored', winB.bounds.width === 1111 && winB.bounds.height === 777 && winB.visible, JSON.stringify(winB));
   check('window position restored', winB.bounds.x === 120 && winB.bounds.y === 90, JSON.stringify(winB));
   // closeAction=background: closes without a dialog
-  fs.writeFileSync(dialogLog, '');
+  clearDialogs();
   closeWindow();
   const exit2 = await Promise.race([run2.exited, sleep(30000).then(() => null)]);
   check('closeAction=background quits without asking', exit2 !== null && !dialogs().some((d) => /Dienst/.test(d.message ?? '')), run2.output().slice(-400));
@@ -293,7 +151,7 @@ try {
   // ------------------------------------------------------------------ run 3: stop
   console.log('--- run 3: closeAction=stop stops the detached server');
   fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ closeAction: 'stop', lanAccess: false, launchAtLogin: false }));
-  const run3 = launch();
+  const run3 = await launch();
   const pageC = await connectPage();
   await until(async () => (await pageC.evaluate('document.title')) === 'bridge=yes', 30000, 'page title of run 3');
   closeWindow();
@@ -305,7 +163,7 @@ try {
 
   // ------------------------------------------------------------------ run 4: --hidden
   console.log('--- run 4: --hidden ensures the server, then exits');
-  const run4 = launch(['--hidden']);
+  const run4 = await launch(['--hidden']);
   const exit4 = await Promise.race([run4.exited, sleep(40000).then(() => null)]);
   check('--hidden exits by itself', exit4 !== null && exit4.code === 0, run4.output().slice(-400));
   check('--hidden left a running server behind', await healthy(port));
@@ -318,9 +176,9 @@ try {
   console.log('--- run 5: foreign program on the port -> clear error, no other port');
   const stranger = net.createServer((s) => s.end('HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi')).listen(port, '127.0.0.1');
   await sleep(200);
-  fs.writeFileSync(answers, JSON.stringify([{ response: 1, checkboxChecked: false }]));
-  fs.writeFileSync(dialogLog, '');
-  const run5 = launch();
+  answer([{ response: 1, checkboxChecked: false }]);
+  clearDialogs();
+  const run5 = await launch();
   const exit5 = await Promise.race([run5.exited, sleep(40000).then(() => null)]);
   stranger.close();
   const portDialog = dialogs().find((d) => /ist belegt/.test(d.message ?? ''));
@@ -328,21 +186,12 @@ try {
   check('the app quits on "Beenden" instead of using another port', exit5 !== null);
 } catch (err) {
   check('smoke test ran to completion', false, err instanceof Error ? err.stack : String(err));
-  console.log(`--- output of the last app run:\n${outputs.at(-1)?.().slice(-3000)}`);
+  console.log(`--- output of the last app run:\n${h.lastOutput().slice(-3000)}`);
 } finally {
   try {
     const pidFile = path.join(dataDir, 'server.pid');
     if (fs.existsSync(pidFile)) process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 'SIGTERM');
   } catch {}
-  for (const child of launched) {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {}
-  }
-  if (!process.env.SMOKE_KEEP) fs.rmSync(tmp, { recursive: true, force: true });
-  else console.log(`kept ${tmp}`);
+  fs.rmSync(dataDir, { recursive: true, force: true });
 }
-
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
-process.exit(failed.length ? 1 : 0);
+process.exit(h.finish());
