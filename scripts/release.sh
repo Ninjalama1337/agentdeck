@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # AgentDeck: ein Release anlegen. Ein Release ist ein Git-Tag vX.Y.Z auf main;
-# GitHub Actions (.github/workflows/android.yml) testet, baut die APK und
-# veroeffentlicht das GitHub-Release. Server holen es sich danach selbst
+# GitHub Actions testen, bauen die APK (android.yml) und die Desktop-Pakete (desktop.yml) und
+# veroeffentlichen das GitHub-Release. Server holen es sich danach selbst
 # (App: Settings → Server update, oder scripts/update.sh).
 #
 #   scripts/release.sh            naechste Patch-Version
 #   scripts/release.sh minor      naechste Minor-Version (major genauso)
 #   scripts/release.sh 1.2.3      genau diese Version
-#   scripts/release.sh --wait     zusaetzlich warten, bis das Release online ist
+#   scripts/release.sh --wait     zusaetzlich warten, bis das Release und die Desktop-Pakete online sind
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,13 +67,36 @@ npm test
 info "Tagge $TAG (${LAST:-erstes Release} → $TAG) und pushe das Tag …"
 git tag -a "$TAG" -m "AgentDeck $TAG"
 git push --quiet origin "$TAG"
-info "$TAG ist gepusht — GitHub Actions baut jetzt APK und Release."
+info "$TAG ist gepusht — GitHub Actions baut jetzt APK, Release und Desktop-Pakete."
+
+# Die Desktop-Pakete (AppImage, deb) haengt .github/workflows/desktop.yml erst an das
+# Release, wenn android.yml es angelegt hat. Fehlen sie, ist das nur eine Warnung: Server
+# und APK sind fertig, das Release gilt trotzdem.
+wait_desktop() {
+  info "Warte auf die Desktop-Pakete (AppImage, deb) — bis zu 40 min …"
+  local assets run
+  for _ in $(seq 1 160); do
+    assets="$(gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null || true)"
+    if grep -q '\.AppImage$' <<< "$assets" && grep -q '\.deb$' <<< "$assets"; then
+      info "Desktop-Pakete sind am Release."
+      return 0
+    fi
+    run="$(gh run list --workflow desktop.yml --branch "$TAG" --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)"
+    if [[ "$run" == "failure" || "$run" == "cancelled" ]]; then
+      printf 'WARNUNG: Der Desktop-Workflow fuer %s ist fehlgeschlagen — das Release hat keine Desktop-Pakete: gh run list --workflow desktop.yml\n' "$TAG" >&2
+      return 0
+    fi
+    sleep 15
+  done
+  printf 'WARNUNG: Die Desktop-Pakete fehlen nach 40 min noch am Release %s: gh run list --workflow desktop.yml\n' "$TAG" >&2
+}
 
 if (( WAIT )); then
   info "Warte auf das Release (bis zu 25 min) …"
   for _ in $(seq 1 100); do
     if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
       info "Release $TAG ist online: $(gh release view "$TAG" --json url -q .url)"
+      wait_desktop
       exit 0
     fi
     CONCLUSION="$(gh run list --workflow android.yml --branch "$TAG" --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)"
@@ -84,4 +107,4 @@ if (( WAIT )); then
   done
   die "Release $TAG ist nach 25 min noch nicht online — gh run list --workflow android.yml"
 fi
-printf 'Fortschritt:  gh run list --workflow android.yml\n'
+printf 'Fortschritt:  gh run list --workflow android.yml   (Desktop: --workflow desktop.yml)\n'
