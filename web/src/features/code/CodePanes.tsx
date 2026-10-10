@@ -35,7 +35,7 @@ export function CodePanes() {
   const killTerminal = useAppStore((s) => s.killTerminal);
   const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
   const refreshTerminals = useAppStore((s) => s.refreshTerminals);
-  const { count, slots, focus } = usePanes();
+  const { count, slots, focus, cleared } = usePanes();
   const { launch, restart } = useTerminalLauncher();
   /** Pane a new terminal is meant for while the launcher sheet is open. */
   const [launcherPane, setLauncherPane] = useState<number | null>(null);
@@ -44,7 +44,7 @@ export function CodePanes() {
     void refreshTerminals().catch(() => undefined);
   }, [refreshTerminals]);
 
-  const state = { count, slots, focus };
+  const state = { count, slots, focus, cleared };
   const project = projects.find((p) => p.id === activeProjectId);
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? 'project';
   const byId = useMemo(() => new Map(terminals.map((t) => [t.id, t])), [terminals]);

@@ -28,6 +28,9 @@ export class World {
   service: ServiceCliStatus | null = { ...noUnit };
   /** The running server was started by the app (marker matches). */
   detachedOurs = false;
+  detachedHost = '127.0.0.1';
+  /** Starting a detached server fails (for the rollback test). */
+  detachedStartFails = false;
   calls: string[] = [];
   state: DesktopState = { serviceDeclined: false };
   settings: DesktopSettings = { ...DEFAULT_DESKTOP_SETTINGS };
@@ -90,10 +93,12 @@ export class World {
     cliSource: 'bundled',
     probe: async () => this.probe,
     detached: {
-      isOurs: async () => this.detachedOurs,
-      start: async ({ env }) => {
+      inspect: async () => (this.detachedOurs ? { host: this.detachedHost } : null),
+      start: async ({ env, host }) => {
         this.calls.push(`detached-start host=${env.AGENTDECK_HOST} port=${env.AGENTDECK_PORT}`);
+        if (this.detachedStartFails) throw new Error('spawn failed');
         this.detachedOurs = true;
+        this.detachedHost = host;
         this.up();
         return 4242;
       },

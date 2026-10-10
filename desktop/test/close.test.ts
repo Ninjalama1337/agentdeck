@@ -11,21 +11,21 @@ import type { DesktopCloseAction, DesktopServerMode } from '../src/core/contract
 
 describe('decideClose', () => {
   it('asks when the setting says ask', () => {
-    expect(decideClose({ closeAction: 'ask', mode: 'service', controllable: true })).toEqual({ kind: 'ask' });
+    expect(decideClose({ closeAction: 'ask', mode: 'service', controllable: true, lan: false })).toEqual({ kind: 'ask' });
   });
 
   it('background keeps the server running', () => {
-    expect(decideClose({ closeAction: 'background', mode: 'service', controllable: true })).toEqual({ kind: 'quit', stopService: false });
+    expect(decideClose({ closeAction: 'background', mode: 'service', controllable: true, lan: false })).toEqual({ kind: 'quit', stopService: false });
   });
 
   it('stop stops what the app may stop', () => {
-    expect(decideClose({ closeAction: 'stop', mode: 'service', controllable: true })).toEqual({ kind: 'quit', stopService: true });
-    expect(decideClose({ closeAction: 'stop', mode: 'detached', controllable: true })).toEqual({ kind: 'quit', stopService: true });
+    expect(decideClose({ closeAction: 'stop', mode: 'service', controllable: true, lan: false })).toEqual({ kind: 'quit', stopService: true });
+    expect(decideClose({ closeAction: 'stop', mode: 'detached', controllable: true, lan: false })).toEqual({ kind: 'quit', stopService: true });
   });
 
   it('stop on an external server only closes the app', () => {
-    expect(decideClose({ closeAction: 'stop', mode: 'external', controllable: false })).toEqual({ kind: 'quit', stopService: false });
-    expect(decideClose({ closeAction: 'stop', mode: 'stopped', controllable: true })).toEqual({ kind: 'quit', stopService: false });
+    expect(decideClose({ closeAction: 'stop', mode: 'external', controllable: false, lan: false })).toEqual({ kind: 'quit', stopService: false });
+    expect(decideClose({ closeAction: 'stop', mode: 'stopped', controllable: true, lan: false })).toEqual({ kind: 'quit', stopService: false });
   });
 
   it('stopping is only offered for service and detached servers', () => {
@@ -38,7 +38,7 @@ describe('decideClose', () => {
 
 describe('buildCloseDialog', () => {
   it('has the three buttons, a default of "keep running" and the checkbox', () => {
-    const model = buildCloseDialog({ canStop: true, activity: { runs: 2, terminals: 1 } });
+    const model = buildCloseDialog({ canStop: true, lan: false, activity: { runs: 2, terminals: 1 } });
     expect(model.buttons).toEqual(['Im Hintergrund weiterlaufen', 'Dienst stoppen und beenden', 'Abbrechen']);
     expect(model.choices).toEqual(['background', 'stop', 'cancel']);
     expect(model.defaultId).toBe(0);
@@ -47,24 +47,31 @@ describe('buildCloseDialog', () => {
   });
 
   it('names the running agent runs and terminals', () => {
-    expect(buildCloseDialog({ canStop: true, activity: { runs: 2, terminals: 1 } }).detail).toContain('Gerade laufen: 2 Agent-Läufe und 1 Terminal.');
-    expect(buildCloseDialog({ canStop: true, activity: { runs: 1, terminals: 0 } }).detail).toContain('Gerade laufen: 1 Agent-Lauf.');
-    expect(buildCloseDialog({ canStop: true, activity: { runs: 0, terminals: 3 } }).detail).toContain('Gerade laufen: 3 Terminals.');
-    expect(buildCloseDialog({ canStop: true, activity: { runs: 0, terminals: 0 } }).detail).toContain('Gerade läuft kein Agent und kein Terminal.');
+    expect(buildCloseDialog({ canStop: true, lan: false, activity: { runs: 2, terminals: 1 } }).detail).toContain('Gerade laufen: 2 Agent-Läufe und 1 Terminal.');
+    expect(buildCloseDialog({ canStop: true, lan: false, activity: { runs: 1, terminals: 0 } }).detail).toContain('Gerade laufen: 1 Agent-Lauf.');
+    expect(buildCloseDialog({ canStop: true, lan: false, activity: { runs: 0, terminals: 3 } }).detail).toContain('Gerade laufen: 3 Terminals.');
+    expect(buildCloseDialog({ canStop: true, lan: false, activity: { runs: 0, terminals: 0 } }).detail).toContain('Gerade läuft kein Agent und kein Terminal.');
   });
 
   it('leaves the numbers out when the server cannot be asked', () => {
-    const detail = buildCloseDialog({ canStop: true, activity: null }).detail;
+    const detail = buildCloseDialog({ canStop: true, lan: false, activity: null }).detail;
     expect(detail).not.toContain('Gerade');
   });
 
+  it('promises the phone stays connected only with LAN access', () => {
+    expect(buildCloseDialog({ canStop: true, lan: true, activity: null }).detail).toContain('das Handy bleibt verbunden');
+    const neutral = buildCloseDialog({ canStop: true, lan: false, activity: null }).detail;
+    expect(neutral).not.toContain('Handy');
+    expect(neutral).toContain('Agenten, Routinen und Benachrichtigungen laufen weiter.');
+  });
+
   it('says that terminals keep running in tmux', () => {
-    expect(buildCloseDialog({ canStop: true, activity: null }).detail).toContain('Terminals laufen in tmux weiter');
-    expect(buildCloseDialog({ canStop: false, activity: null }).detail).toContain('tmux');
+    expect(buildCloseDialog({ canStop: true, lan: false, activity: null }).detail).toContain('Terminals laufen in tmux weiter');
+    expect(buildCloseDialog({ canStop: false, lan: false, activity: null }).detail).toContain('tmux');
   });
 
   it('offers no stop button for a server the app does not control', () => {
-    const model = buildCloseDialog({ canStop: false, activity: null });
+    const model = buildCloseDialog({ canStop: false, lan: false, activity: null });
     expect(model.buttons).toEqual(['Beenden', 'Abbrechen']);
     expect(model.choices).toEqual(['background', 'cancel']);
     expect(model.cancelId).toBe(1);
@@ -73,7 +80,7 @@ describe('buildCloseDialog', () => {
 });
 
 describe('resolveCloseDialog', () => {
-  const model = buildCloseDialog({ canStop: true, activity: null });
+  const model = buildCloseDialog({ canStop: true, lan: false, activity: null });
 
   it('maps the pressed button', () => {
     expect(resolveCloseDialog(model, 0, false)).toEqual({ choice: 'background', remember: null });
@@ -100,10 +107,13 @@ function flow(options: {
   checkbox?: boolean;
   activity?: Activity | null;
   stopFails?: boolean;
+  /** Answer to "stopping failed": quit anyway or stay. */
+  onStopFailed?: 'quit-anyway' | 'cancel';
+  lan?: boolean;
 }) {
   const events: string[] = [];
   const deps: CloseFlowDeps = {
-    context: async () => ({ closeAction: options.closeAction ?? 'ask', mode: options.mode ?? 'service', controllable: options.controllable ?? true }),
+    context: async () => ({ closeAction: options.closeAction ?? 'ask', mode: options.mode ?? 'service', controllable: options.controllable ?? true, lan: options.lan ?? false }),
     activity: async () => options.activity ?? null,
     showDialog: async (model) => {
       events.push(`dialog:${model.buttons.length}`);
@@ -116,8 +126,9 @@ function flow(options: {
       events.push('stop');
       if (options.stopFails) throw new Error('systemctl failed');
     },
-    reportStopFailure: async (message) => {
-      events.push(`report:${message}`);
+    stopFailed: async (message) => {
+      events.push(`stop-failed:${message}`);
+      return options.onStopFailed ?? 'cancel';
     },
     quit: async () => {
       events.push('quit');
@@ -161,21 +172,47 @@ describe('runCloseFlow', () => {
   });
 
   it('closing an external server never stops it', async () => {
-    const { deps, events } = flow({ closeAction: 'stop', mode: 'external', controllable: false });
+    const { deps, events } = flow({ closeAction: 'stop', mode: 'external', controllable: false, lan: false });
     await runCloseFlow(deps);
     expect(events).toEqual(['quit']);
   });
 
   it('shows the two-button dialog for an external server', async () => {
-    const { deps, events } = flow({ mode: 'external', controllable: false });
+    const { deps, events } = flow({ mode: 'external', controllable: false, lan: false });
     await runCloseFlow(deps);
     expect(events).toEqual(['dialog:2', 'quit']);
   });
 
-  it('keeps the window open and reports when stopping fails', async () => {
+  it('keeps the window open when stopping fails and the user stays', async () => {
     const { deps, events } = flow({ response: 1, stopFails: true });
     expect(await runCloseFlow(deps)).toBe('failed');
-    expect(events).toEqual(['dialog:3', 'stop', 'report:systemctl failed']);
+    expect(events).toEqual(['dialog:3', 'stop', 'stop-failed:systemctl failed']);
+  });
+
+  it('quits anyway on request when stopping fails (the server keeps running)', async () => {
+    const { deps, events } = flow({ response: 1, stopFails: true, onStopFailed: 'quit-anyway' });
+    expect(await runCloseFlow(deps)).toBe('quit');
+    expect(events).toEqual(['dialog:3', 'stop', 'stop-failed:systemctl failed', 'quit']);
+  });
+
+  it('remembers "don\'t ask again" only after the stop worked', async () => {
+    const failed = flow({ response: 1, checkbox: true, stopFails: true, onStopFailed: 'cancel' });
+    await runCloseFlow(failed.deps);
+    expect(failed.events.some((e) => e.startsWith('remember'))).toBe(false);
+
+    const failedButQuit = flow({ response: 1, checkbox: true, stopFails: true, onStopFailed: 'quit-anyway' });
+    await runCloseFlow(failedButQuit.deps);
+    expect(failedButQuit.events.some((e) => e.startsWith('remember'))).toBe(false);
+
+    const worked = flow({ response: 1, checkbox: true });
+    await runCloseFlow(worked.deps);
+    expect(worked.events).toEqual(['dialog:3', 'stop', 'remember:stop', 'quit']);
+  });
+
+  it('a fixed stop that fails does not trap the user: the next close offers the same way out', async () => {
+    const { deps, events } = flow({ closeAction: 'stop', stopFails: true, onStopFailed: 'quit-anyway' });
+    expect(await runCloseFlow(deps)).toBe('quit');
+    expect(events).toEqual(['stop', 'stop-failed:systemctl failed', 'quit']);
   });
 });
 
@@ -187,7 +224,7 @@ describe('runExplicitQuit', () => {
     const b = flow({});
     await runExplicitQuit(b.deps, {});
     expect(b.events).toEqual(['quit']);
-    const c = flow({ mode: 'external', controllable: false });
+    const c = flow({ mode: 'external', controllable: false, lan: false });
     await runExplicitQuit(c.deps, { stopService: true });
     expect(c.events).toEqual(['quit']);
   });
