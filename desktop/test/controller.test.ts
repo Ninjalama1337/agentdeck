@@ -279,12 +279,46 @@ describe('install command line', () => {
 });
 
 describe('applyLanAccess', () => {
-  it('rewrites the unit and restarts it', async () => {
+  it('rewrites the unit once — the CLI restarts a running unit whose file changed, no second restart', async () => {
     const w = new World();
     w.service = managed({ active: true, lan: false, runtimeVersion: '2.0.0' });
     w.probe = { state: 'agentdeck' };
     await w.controller.applyLanAccess(true);
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan --port 4317', 'restart']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan --port 4317']);
+  });
+
+  it('refuses a server the app does not control instead of pretending the setting applied', async () => {
+    const external = new World();
+    external.probe = { state: 'agentdeck' };
+    await expect(external.controller.applyLanAccess(true)).rejects.toThrow(/not started by AgentDeck/);
+
+    const foreignUnit = new World();
+    foreignUnit.service = { ...noUnit, installed: true, managed: false, active: true };
+    foreignUnit.probe = { state: 'agentdeck' };
+    await expect(foreignUnit.controller.applyLanAccess(true)).rejects.toThrow(/not set up by AgentDeck/);
+    expect(foreignUnit.calls.some((c) => c.startsWith('install'))).toBe(false);
+  });
+
+  it('only stores the setting when nothing runs (it applies at the next start)', async () => {
+    const w = new World();
+    await w.controller.applyLanAccess(true);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual([]);
+  });
+
+  it('puts the old binding back when the detached server will not start with the new one', async () => {
+    const w = new World();
+    w.service = { ...noUnit, systemd: false };
+    w.probe = { state: 'agentdeck' };
+    w.detachedOurs = true;
+    w.detachedStartFailsFor = '0.0.0.0';
+    await expect(w.controller.applyLanAccess(true)).rejects.toThrow('spawn failed');
+    expect(w.calls.filter((c) => c !== 'status')).toEqual([
+      'detached-stop',
+      'detached-start host=0.0.0.0 port=4317',
+      'detached-start host=127.0.0.1 port=4317',
+    ]);
+    expect((await w.controller.refresh(true)).mode).toBe('detached');
+    expect(w.controller.last()?.lan).toBe(false);
   });
 
   it('does nothing when the unit is already bound that way', async () => {
@@ -328,5 +362,96 @@ describe('status events', () => {
     w.probe = { state: 'agentdeck' };
     await w.controller.refresh();
     expect(seen).toEqual(['stopped', 'external']);
+  });
+});
+
+describe('a server that does not answer in time', () => {
+  it('is asked again after a short pause before it counts as busy', async () => {
+    const w = new World();
+    w.service = managed({ active: true, runtimeVersion: '2.0.0' });
+    const answers = [{ state: 'unresponsive' as const }, { state: 'agentdeck' as const }];
+    let asked = 0;
+    (w.controller as unknown as { deps: { probe: () => Promise<unknown> } }).deps.probe = async () => {
+      asked += 1;
+      return answers.shift() ?? { state: 'agentdeck' };
+    };
+    const state = await w.controller.refresh(true);
+    expect(asked).toBe(2);
+    expect(state).toMatchObject({ reachable: true, mode: 'service', holder: 'agentdeck' });
+  });
+
+  it('keeps its last known state for the close decision — a busy service must not look stopped', async () => {
+    const w = new World();
+    w.service = managed({ active: true, runtimeVersion: '2.0.0' });
+    w.probe = { state: 'agentdeck' };
+    await w.controller.refresh(true);
+    w.probe = { state: 'unresponsive' };
+    const state = await w.controller.stateForDecision();
+    expect(state).toMatchObject({ mode: 'service', controllable: true });
+    // closeAction=stop therefore still stops it
+    await w.controller.stopForQuit();
+    expect(w.calls).toContain('stop');
+  });
+
+  it('a busy detached server of ours stays controllable and is waited for, not started twice', async () => {
+    const w = new World();
+    w.service = { ...noUnit, systemd: false };
+    w.probe = { state: 'unresponsive' };
+    w.detachedOurs = true;
+    const state = await w.controller.refresh(true);
+    expect(state).toMatchObject({ mode: 'detached', controllable: true, reachable: false, portConflict: false });
+    w.probe = { state: 'agentdeck' };
+    const result = await w.controller.ensureRunning({ interactive: true });
+    expect(result.ok).toBe(true);
+    expect(w.calls.some((c) => c.startsWith('detached-start'))).toBe(false);
+  });
+
+  it('at startup an unknown program that does not answer is not called "AgentDeck"', async () => {
+    const w = new World();
+    w.probe = { state: 'unresponsive' };
+    const result = await w.controller.ensureRunning({ interactive: true });
+    expect(result).toMatchObject({ ok: false, kind: 'unresponsive' });
+  });
+});
+
+describe('identify (who holds the port)', () => {
+  it('uses the last look while it is fresh, a new one when it is old', async () => {
+    const w = new World();
+    w.probe = { state: 'agentdeck' };
+    await w.controller.refresh(true);
+    w.probe = { state: 'foreign' }; // swapped just now …
+    expect(await w.controller.identify(5000)).toBe('agentdeck'); // … but the look is young
+    w.clock += 6000;
+    expect(await w.controller.identify(5000)).toBe('foreign'); // old: looks again
+  });
+
+  it('identifies a stranger, an empty port and a failing CLI', async () => {
+    const w = new World();
+    expect(await w.controller.identify()).toBe('none');
+    w.probe = { state: 'foreign' };
+    expect(await w.controller.identify(0)).toBe('foreign');
+    const broken = new World();
+    broken.info = undefined as never; // the CLI answers nothing usable
+    broken.cli.info = async () => {
+      throw new Error('cli broken');
+    };
+    expect(await broken.controller.identify()).toBe('unknown');
+  });
+});
+
+describe('the unit status is not asked for on every look', () => {
+  it('caches it for 30 s, but looks again when the port changes hands', async () => {
+    const w = new World();
+    w.service = managed({ active: true, runtimeVersion: '2.0.0' });
+    w.probe = { state: 'agentdeck' };
+    await w.controller.refresh();
+    await w.controller.refresh();
+    expect(w.calls.filter((c) => c === 'status')).toHaveLength(1);
+    w.clock += 31_000;
+    await w.controller.refresh();
+    expect(w.calls.filter((c) => c === 'status')).toHaveLength(2);
+    w.probe = { state: 'closed' }; // changed holder -> fresh look at the unit
+    await w.controller.refresh();
+    expect(w.calls.filter((c) => c === 'status')).toHaveLength(3);
   });
 });
