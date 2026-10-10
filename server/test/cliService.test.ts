@@ -435,6 +435,8 @@ describe('a server running outside the service', () => {
 
   it('blocks install: a second server would fight for the port', async () => {
     const ctx = withDataDir(makeBundle('1.2.3'), alive());
+    // facts only: which pid, where to look — no advice to kill anything
+    await expect(serviceInstall(ctx, { lan: false })).rejects.not.toThrow(/kill/);
     await expect(serviceInstall(ctx, { lan: false })).rejects.toThrow(/\(pid 777, listed in .*server\.pid\) is already running outside the service/);
     // nothing was changed
     expect(fs.existsSync(ctx.paths.unitPath)).toBe(false);

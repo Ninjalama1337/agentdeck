@@ -52,11 +52,48 @@ describe('collectInfo', () => {
     expect('webDist' in collectInfo({ env: env(), webDist: undefined })).toBe(false);
   });
 
-  it('takes port and host from an installed service unit, unless the caller sets them', () => {
-    const unitPath = path.join(tmp, 'agentdeck.service');
-    fs.writeFileSync(unitPath, renderUnit({ execStart: '/r/current/bin/agentdeck-server', lan: true, port: 9100 }));
-    expect(collectInfo({ env: env(), unitPath, webDist: undefined })).toMatchObject({ port: 9100, host: '0.0.0.0' });
-    expect(collectInfo({ env: env({ AGENTDECK_PORT: '9200' }), unitPath, webDist: undefined })).toMatchObject({ port: 9200 });
+  describe('with a service unit installed', () => {
+    // The service reads ~/.config/agentdeck/config.json: give it an empty home of its own.
+    let oldHome: string | undefined;
+    beforeEach(() => {
+      oldHome = process.env.HOME;
+      process.env.HOME = tmp;
+    });
+    afterEach(() => {
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+    });
+    const unitPath = () => path.join(tmp, 'agentdeck.service');
+    const install = (opts: { lan: boolean; port?: number }) =>
+      fs.writeFileSync(unitPath(), renderUnit({ execStart: '/r/current/bin/agentdeck-server', ...opts }));
+
+    it('answers for the service: the unit’s host and port, not the caller’s shell', () => {
+      install({ lan: true, port: 9100 });
+      expect(collectInfo({ env: env(), unitPath: unitPath(), webDist: undefined })).toMatchObject({ port: 9100, host: '0.0.0.0' });
+      // AGENTDECK_PORT in the user's shell never reaches the service
+      expect(collectInfo({ env: env({ AGENTDECK_PORT: '9200' }), unitPath: unitPath(), webDist: undefined })).toMatchObject({ port: 9100 });
+    });
+
+    it('ignores the caller’s data dir and config path: the service never gets them', () => {
+      install({ lan: false });
+      const callerConfig = path.join(tmp, 'caller-config.json');
+      fs.writeFileSync(callerConfig, JSON.stringify({ port: 7777 }));
+      const info = collectInfo({
+        env: env({ AGENTDECK_DATA_DIR: path.join(tmp, 'caller-data'), AGENTDECK_CONFIG: callerConfig, AGENTDECK_TUNNEL: 'cloudflared' }),
+        unitPath: unitPath(),
+        webDist: undefined,
+      });
+      expect(info.dataDir).toBe(path.join(tmp, '.local/share/agentdeck'));
+      expect(info.configPath).toBe(path.join(tmp, '.config/agentdeck/config.json'));
+      expect(info.pairingCodeFile).toBe(path.join(info.dataDir, 'pairing-code.txt'));
+      expect(info.pidFile).toBe(path.join(info.dataDir, 'server.pid'));
+      expect(info.port).toBe(8787); // the unit pins no port; the caller's config.json is not the service's
+    });
+
+    it('lets the unit’s host win over config.json, like it does for the service', () => {
+      install({ lan: false });
+      expect(collectInfo({ env: env(), unitPath: unitPath(), webDist: undefined }).host).toBe('127.0.0.1');
+    });
   });
 
   it('ignores a unit it did not write', () => {
