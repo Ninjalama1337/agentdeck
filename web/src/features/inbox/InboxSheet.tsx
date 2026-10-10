@@ -27,7 +27,7 @@ export function InboxButton() {
         type="button"
         aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
         onClick={() => setOpen(true)}
-        className="press tap relative flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08] active:text-ink"
+        className="press tap relative flex h-11 w-11 items-center justify-center rounded-xl text-dim hover:bg-white/[0.08] hover:text-ink active:bg-white/[0.08] active:text-ink"
       >
         <Bell size={20} />
         {unread > 0 && <span className="badge absolute right-1.5 top-1.5">{unread > 9 ? '9+' : unread}</span>}

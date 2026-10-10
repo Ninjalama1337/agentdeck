@@ -22,7 +22,7 @@ export function MenuRow({ icon, label, description, danger, onClick }: MenuRowPr
       type="button"
       onClick={onClick}
       className={clsx(
-        'press tap flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left active:bg-white/[0.08]',
+        'press tap flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left hover:bg-white/[0.06] active:bg-white/[0.08]',
         danger ? 'text-danger' : 'text-ink',
       )}
     >

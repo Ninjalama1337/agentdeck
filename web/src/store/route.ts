@@ -19,8 +19,17 @@ export function parseHash(hash: string): Route {
   if (h === 'files') return { name: 'files' };
   if (h === 'git' || h === 'github') return { name: 'git' };
   if (h === 'settings') return { name: 'settings' };
-  if (h.startsWith('team/')) return { name: 'team', runId: h.slice('team/'.length) };
+  if (h.startsWith('team/')) return { name: 'team', runId: decodeRunId(h.slice('team/'.length)) };
   return { name: 'home' };
+}
+
+/** Inverse of the encodeURIComponent in routeToHash; an id that is not valid percent-encoding stays as written. */
+function decodeRunId(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 export function routeToHash(route: Route): string {
@@ -49,7 +58,7 @@ export function isScreenHash(hash: string | null | undefined): hash is string {
  * without one the screen last used on this server comes back, else home.
  */
 export function startHash(current: string, stored: string | null): string {
-  if (current.replace(/^#\/?/, '') !== '') return current;
+  if (current !== '' && current !== '#') return current;
   return isScreenHash(stored) ? stored : '#/';
 }
 

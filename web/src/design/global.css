@@ -731,6 +731,16 @@ html[data-layout='desktop'] .sheet-handle {
   display: none;
 }
 
+/* Hover feedback for the cards and rows that are buttons (the UI was made for touch: it only had :active). */
+@media (hover: hover) {
+  html[data-layout='desktop'] .glass.press:hover {
+    background: var(--ad-surface-2);
+  }
+  html[data-layout='desktop'] .glass-soft.press:hover {
+    background: var(--ad-surface-3);
+  }
+}
+
 /* The sticky screen header spans the centered content column only — let its
    background run to the edges of the content area. */
 html[data-layout='desktop'] .appbar {
