@@ -159,7 +159,7 @@ describe('runCloseFlow', () => {
   it('stores the choice when "don\'t ask again" is ticked', async () => {
     const { deps, events } = flow({ response: 1, checkbox: true });
     await runCloseFlow(deps);
-    expect(events).toEqual(['dialog:3', 'remember:stop', 'stop', 'quit']);
+    expect(events).toEqual(['dialog:3', 'stop', 'remember:stop', 'quit']);
   });
 
   it('does not ask when the close behaviour is fixed', async () => {
