@@ -10,6 +10,7 @@ import {
   launcherPath,
   pruneRuntimes,
   removeRuntime,
+  runtimeDirOfExe,
   runtimePaths,
   runtimeVersionOf,
   switchCurrent,
@@ -172,6 +173,17 @@ describe('pruneRuntimes', () => {
     expect(left).toContain('1.2.0');
   });
 
+  it('never removes a protected directory (a running server loads modules from it), nor the current one', () => {
+    const p = paths();
+    const running = install('1.0.0', 9000);
+    install('1.1.0', 3000);
+    install('1.2.0', 2000);
+    const current = install('1.3.0', 1000);
+    switchCurrent(p, current);
+    expect(pruneRuntimes(p, 2, [running]).sort()).toEqual(['1.1.0', '1.2.0']);
+    expect(fs.readdirSync(p.runtimeRoot).sort()).toEqual(['1.0.0', '1.3.0', 'current']);
+  });
+
   it('cleans up interrupted installs but not fresh ones', () => {
     const p = paths();
     const dir = install('1.0.0', 1000);
@@ -189,6 +201,16 @@ describe('pruneRuntimes', () => {
 
   it('copes with a missing runtime dir', () => {
     expect(pruneRuntimes(paths())).toEqual([]);
+  });
+});
+
+describe('runtimeDirOfExe', () => {
+  it('names the runtime directory a node binary belongs to — and only those inside the runtime tree', () => {
+    const { dir } = installRuntime(inspectBundle(makeBundle('1.0.0')), paths());
+    const real = fs.realpathSync(dir);
+    expect(runtimeDirOfExe(path.join(real, 'node/bin/node'), paths())).toBe(real);
+    expect(runtimeDirOfExe('/usr/bin/node', paths())).toBeUndefined();
+    expect(runtimeDirOfExe(path.join(tmp, 'elsewhere/node/bin/node'), paths())).toBeUndefined();
   });
 });
 

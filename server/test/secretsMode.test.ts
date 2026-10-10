@@ -50,4 +50,32 @@ describe('secret file permissions', () => {
     await loadOrCreateSecret(dir, 'jwt-secret');
     expect(mode(path.join(dir, 'jwt-secret'))).toBe(0o600);
   });
+
+  it('writes are atomic: no temp files stay behind and the content is whole', async () => {
+    const manager = new PairingCodeManager(dir);
+    for (let i = 0; i < 20; i++) {
+      const code = await manager.rotate();
+      expect(fs.readFileSync(path.join(dir, 'pairing-code.txt'), 'utf8')).toBe(`${code}\n`);
+    }
+    await loadOrCreateSecret(dir, 'jwt-secret');
+    expect(fs.readdirSync(dir).sort()).toEqual(['jwt-secret', 'pairing-code.txt']);
+  });
+
+  it('a reader never sees a half-written pairing code while it rotates', async () => {
+    const manager = new PairingCodeManager(dir);
+    await manager.rotate();
+    let stop = false;
+    const seen: (string | undefined)[] = [];
+    const reader = (async () => {
+      while (!stop) {
+        seen.push(await manager.read());
+        await new Promise((r) => setImmediate(r));
+      }
+    })();
+    for (let i = 0; i < 50; i++) await manager.rotate();
+    stop = true;
+    await reader;
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((c) => c !== undefined && /^\d{6}$/.test(c))).toBe(true);
+  });
 });
