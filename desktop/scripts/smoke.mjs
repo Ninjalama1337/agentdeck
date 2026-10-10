@@ -257,7 +257,7 @@ try {
   const stranger2 = await startStranger(port); // … and a stranger takes its port
   h.reloadWindow(); // "Neu laden": the window loads whatever answers there
   const foreignPage = await connectPage();
-  await until(async () => (await foreignPage.evaluate('document.title')).startsWith('foreign:'), 20000, 'the stranger\'s page');
+  await until(async () => /^foreign:(undefined|object)$/.test(await foreignPage.evaluate('document.title')), 20000, 'the stranger\'s page');
   check('a foreign page gets no window.agentdeckDesktop', (await foreignPage.evaluate('typeof window.agentdeckDesktop')) === 'undefined');
   await sleep(1500);
   check('the pairing code was not sent to the stranger (no POST /api/pair)', !stranger2.requests.some((r) => r.method === 'POST'), JSON.stringify(stranger2.requests));

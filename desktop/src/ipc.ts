@@ -9,7 +9,7 @@ import { isTrustedSender } from './core/urlPolicy';
 export interface IpcContext {
   origin: string;
   /** Who holds the server's port right now (a fresh look when the last one is old). */
-  identify(): Promise<ServerHolder>;
+  identify(maxAgeMs: number): Promise<ServerHolder>;
   appVersion: string;
   platform: string;
   getStatus(): Promise<ServerState>;
@@ -20,6 +20,10 @@ export interface IpcContext {
   quit(options: { stopService: boolean }): Promise<void>;
   log(message: string): void;
 }
+
+/** The pairing code and the bridge only go out after a look at the port made right now; calls may rely on a recent one. */
+const HAND_OUT_MAX_AGE_MS = 0;
+const CALL_MAX_AGE_MS = 5000;
 
 const ACTIONS: readonly DesktopServiceAction[] = ['install', 'uninstall', 'start', 'stop', 'restart'];
 
@@ -39,7 +43,7 @@ export function registerIpc(ctx: IpcContext): void {
   function handle<T>(channel: string, gate: 'hand-out' | 'call', work: (event: IpcMainInvokeEvent, arg: unknown) => Promise<T>): void {
     ipcMain.handle(channel, async (event, arg: unknown) => {
       if (!trusted(event)) throw new Error('Not allowed from this page.');
-      const holder = await ctx.identify();
+      const holder = await ctx.identify(gate === 'hand-out' ? HAND_OUT_MAX_AGE_MS : CALL_MAX_AGE_MS);
       if (!(gate === 'hand-out' ? trust.mayHandOut(holder) : trust.mayCall(holder))) {
         ctx.log(`${channel}: refused, the port is held by ${holder}`);
         throw new Error('The server on this port is not AgentDeck.');
@@ -60,7 +64,7 @@ export function registerIpc(ctx: IpcContext): void {
       return;
     }
     const info: InitInfo = { origin: ctx.origin, appVersion: ctx.appVersion, platform: ctx.platform };
-    ctx.identify().then(
+    ctx.identify(HAND_OUT_MAX_AGE_MS).then(
       (holder) => {
         event.returnValue = trust.mayHandOut(holder) ? info : null;
       },
@@ -77,7 +81,7 @@ export function registerIpc(ctx: IpcContext): void {
       return;
     }
     ctx
-      .identify()
+      .identify(HAND_OUT_MAX_AGE_MS)
       .then((holder) => (trust.mayHandOut(holder) ? ctx.pair() : null))
       .then(
         (outcome) => {

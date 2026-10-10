@@ -276,7 +276,7 @@ async function main(): Promise<void> {
 
   registerIpc({
     origin,
-    identify: () => controller.identify(),
+    identify: (maxAgeMs) => controller.identify(maxAgeMs),
     appVersion: app.getVersion(),
     platform: process.platform,
     getStatus: () => controller.refresh(),
