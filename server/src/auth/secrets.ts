@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { writeFileAtomic } from '../util/atomicWrite.js';
 import { ensureDir } from '../util/paths.js';
 
 function randomHex(bytes = 32): string {
@@ -25,13 +26,7 @@ export async function loadOrCreateSecret(dataDir: string, name: string): Promise
     // fall through to creation
   }
   const secret = randomHex(32);
-  const handle = await fsp.open(file, 'w', 0o600);
-  try {
-    await handle.writeFile(secret, 'utf8');
-  } finally {
-    await handle.close();
-  }
-  await fsp.chmod(file, 0o600).catch(() => undefined);
+  await writeFileAtomic(file, secret, 0o600);
   return secret;
 }
 
@@ -83,13 +78,8 @@ export class PairingCodeManager {
   async rotate(): Promise<string> {
     const code = PairingCodeManager.generate();
     await ensureDir(path.dirname(this.file));
-    const handle = await fsp.open(this.file, 'w', 0o600);
-    try {
-      await handle.writeFile(code + '\n', 'utf8');
-    } finally {
-      await handle.close();
-    }
-    await fsp.chmod(this.file, 0o600).catch(() => undefined);
+    // Atomic: the desktop shell reads this file while a pairing rotates it.
+    await writeFileAtomic(this.file, code + '\n', 0o600);
     return code;
   }
 }

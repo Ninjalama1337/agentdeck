@@ -180,13 +180,24 @@ export function runtimeVersionOf(dir: string): string | undefined {
   return fs.existsSync(dir) ? path.basename(dir) : undefined;
 }
 
+/**
+ * The runtime directory a process runs from, judged by its executable
+ * (`<runtime>/<version>/node/bin/node`); undefined when it runs from elsewhere.
+ */
+export function runtimeDirOfExe(exe: string, paths: RuntimePaths): string | undefined {
+  const dir = path.resolve(exe, '../../..');
+  return path.dirname(dir) === realpath(paths.runtimeRoot) ? dir : undefined;
+}
+
 const STALE_TEMP_MS = 10 * 60_000;
 
 /**
- * Removes old runtimes: keeps the one `current` points to plus the most
- * recently installed others, `keep` in total. Returns the removed versions.
+ * Removes old runtimes: keeps the one `current` points to, every directory in
+ * `protect` (a running server loads modules from its directory lazily — never
+ * pull it away) and the most recently installed others, `keep` in total or more
+ * when the first two already exceed it. Returns the removed versions.
  */
-export function pruneRuntimes(paths: RuntimePaths, keep = 2): string[] {
+export function pruneRuntimes(paths: RuntimePaths, keep = 2, protect: string[] = []): string[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(paths.runtimeRoot, { withFileTypes: true });
@@ -210,7 +221,10 @@ export function pruneRuntimes(paths: RuntimePaths, keep = 2): string[] {
   }
   versions.sort((a, b) => b.mtime - a.mtime);
   const kept = new Set<string>();
-  if (current && path.dirname(current) === realpath(paths.runtimeRoot)) kept.add(path.basename(current));
+  const root = realpath(paths.runtimeRoot);
+  for (const dir of [current, ...protect]) {
+    if (dir && path.dirname(realpath(dir)) === root) kept.add(path.basename(realpath(dir)));
+  }
   for (const v of versions) {
     if (kept.size >= keep) break;
     kept.add(v.name);

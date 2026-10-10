@@ -91,6 +91,9 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
+    // First thing: a server that takes over right after this one (service restart)
+    // must find the file free, not still naming a process that is on its way out.
+    removePidFile(config.dataDir);
     manager.stopAll();
     await tunnel.stop().catch(() => undefined);
     io.close();
@@ -99,7 +102,6 @@ async function main(): Promise<void> {
     } catch {
       // already closed
     }
-    removePidFile(config.dataDir);
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -110,7 +112,13 @@ async function main(): Promise<void> {
   // right away. The CLI and the desktop shell find (and stop) a detached server
   // through it; it is removed on a clean exit and checked for staleness by readers.
   try {
-    writePidFile(config.dataDir);
+    const result = writePidFile(config.dataDir);
+    if (!result.written) {
+      logger.warn(
+        { otherPid: result.otherPid },
+        'another AgentDeck server is running with this data dir — server.pid stays with it (two servers on one data dir are not supported)',
+      );
+    }
     process.once('exit', () => removePidFile(config.dataDir));
   } catch (err) {
     logger.warn({ err }, 'could not write server.pid');
