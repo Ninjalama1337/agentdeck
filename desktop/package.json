@@ -8,17 +8,18 @@
   "homepage": "https://github.com/Ninjalama1337/agentdeck",
   "license": "MIT",
   "main": "dist/main.js",
+  "desktopName": "agentdeck.desktop",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "start": "npm run build && electron . --no-sandbox",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "pack": "npm run build && electron-builder --linux AppImage deb --x64 --dir",
-    "dist": "npm run build && electron-builder --linux AppImage deb --x64 --publish never"
-  },
-  "dependencies": {
-    "electron-updater": "^6.3.9"
+    "smoke:real": "npm run build && node scripts/smoke-real.mjs",
+    "pack": "npm run build && node scripts/clean-release.mjs && electron-builder --linux deb --x64 --dir",
+    "dist:deb": "npm run build && node scripts/clean-release.mjs && electron-builder --linux deb --x64 --publish never",
+    "dist:appimage": "npm run build && node scripts/clean-release.mjs && electron-builder --linux AppImage --x64 --publish never -c.afterPack=build/after-pack-appimage.cjs",
+    "dist": "npm run dist:deb && npm run dist:appimage"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

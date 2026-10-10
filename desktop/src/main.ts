@@ -46,7 +46,6 @@ const STATUS_POLL_MS = 3000;
 const home = os.homedir();
 const paths = desktopPaths(xdgPaths(process.env, home), process.env);
 app.setPath('userData', paths.userData);
-app.setDesktopName('agentdeck.desktop');
 
 // Chromium's sandbox stays on. The only way off is an explicit switch.
 if (process.env.AGENTDECK_NO_SANDBOX === '1') app.commandLine.appendSwitch('no-sandbox');
