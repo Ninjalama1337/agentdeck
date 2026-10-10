@@ -5,14 +5,25 @@ on:
   push:
     tags:
       - 'v*'
+    # Auf main wird das Packaging schon vor dem Tag geprueft (AGENTS.md committet direkt auf main).
+    # Bewusst ohne paths-Filter: ein Tag-Push darf nie von einem Pfadfilter verschluckt werden.
+    branches:
+      - main
   pull_request:
     paths:
       - 'desktop/**'
       - 'server/**'
+      - 'web/**'
       - 'packages/shared/**'
+      - 'package-lock.json'
       - 'scripts/build-server-bundle.sh'
       - 'scripts/lib/**'
       - '.github/workflows/desktop.yml'
+
+# Ein neuer Push ersetzt den laufenden Lauf desselben Branchs/PRs; Tag-Laeufe werden nie abgebrochen.
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -27,9 +38,6 @@ jobs:
     # Auf Tags laedt der Job die Pakete ans GitHub Release -> Schreibrecht noetig.
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,6 +48,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Downloads, die sich nur mit den Skripten/Lockfiles aendern: Node-Tarball und tmux-Quellen des
+      # Bundles, Electron und die Werkzeuge von electron-builder.
+      - name: Download-Caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/agentdeck-bundle
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: desktop-dl-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json', 'scripts/build-server-bundle.sh', 'scripts/lib/**') }}
 
       # VERSION: Tag v1.2.3 -> "1.2.3", sonst CI-Nummer "0.1.<run_number>" (wie android.yml).
       # Dieselbe Version tragen die App (package.json), der Server im Bundle (version.json)
@@ -86,6 +105,11 @@ jobs:
           AGENTDECK_BUNDLE_TMUX: '1'
         run: scripts/build-server-bundle.sh
 
+      # Ohne tmux ueberleben Terminals keinen Neustart des Dienstes — ein Release ohne dieses Binary waere
+      # still kaputt (der Bundle-Bau wuerde nur warnen).
+      - name: tmux im Bundle pruefen
+        run: dist-bundle/agentdeck-server/bin/tmux -V
+
       - name: Version in die App schreiben
         working-directory: desktop
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
@@ -128,6 +152,9 @@ jobs:
       # Tests. Stattdessen warten (bis zu 60 min), dann die Pakete anhaengen.
       - name: Auf das GitHub Release warten (nur Tags)
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           for _ in $(seq 1 120); do
@@ -135,14 +162,23 @@ jobs:
               echo "Release $TAG ist online."
               exit 0
             fi
+            # Ohne gruene Tests legt android.yml kein Release an — dann nicht eine Stunde umsonst warten.
+            CONCLUSION="$(gh run list --workflow android.yml --branch "$TAG" --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)"
+            if [[ -n "$CONCLUSION" && "$CONCLUSION" != "success" ]]; then
+              echo "::error::android.yml endete mit '$CONCLUSION' — es gibt kein Release, an das die Pakete gehaengt werden koennten."
+              exit 1
+            fi
             echo "Release $TAG gibt es noch nicht — warte auf android.yml …"
             sleep 30
           done
-          echo "::error::Release $TAG ist nach 60 min noch nicht online (android.yml fehlgeschlagen?)."
+          echo "::error::Release $TAG ist nach 60 min noch nicht online."
           exit 1
 
       - name: Pakete ans Release hochladen (nur Tags)
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           gh release upload "$TAG" --clobber \

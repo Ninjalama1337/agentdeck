@@ -8,6 +8,7 @@
 #   scripts/release.sh minor      naechste Minor-Version (major genauso)
 #   scripts/release.sh 1.2.3      genau diese Version
 #   scripts/release.sh --wait     zusaetzlich warten, bis das Release und die Desktop-Pakete online sind
+#                                 (Exit 3 = Release ist online, nur die Desktop-Pakete fehlen)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,9 +70,9 @@ git tag -a "$TAG" -m "AgentDeck $TAG"
 git push --quiet origin "$TAG"
 info "$TAG ist gepusht — GitHub Actions baut jetzt APK, Release und Desktop-Pakete."
 
-# Die Desktop-Pakete (AppImage, deb) haengt .github/workflows/desktop.yml erst an das
-# Release, wenn android.yml es angelegt hat. Fehlen sie, ist das nur eine Warnung: Server
-# und APK sind fertig, das Release gilt trotzdem.
+# Die Desktop-Pakete (AppImage, deb) haengt .github/workflows/desktop.yml erst an das Release, wenn
+# android.yml es angelegt hat. Fehlen sie, ist das KEIN Fehler des Releases (Server und APK sind fertig),
+# aber auch nicht still: Exit-Code 3 — melden und trotzdem mit dem Server-Update weitermachen.
 wait_desktop() {
   info "Warte auf die Desktop-Pakete (AppImage, deb) — bis zu 40 min …"
   local assets run
@@ -82,13 +83,14 @@ wait_desktop() {
       return 0
     fi
     run="$(gh run list --workflow desktop.yml --branch "$TAG" --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)"
-    if [[ "$run" == "failure" || "$run" == "cancelled" ]]; then
-      printf 'WARNUNG: Der Desktop-Workflow fuer %s ist fehlgeschlagen — das Release hat keine Desktop-Pakete: gh run list --workflow desktop.yml\n' "$TAG" >&2
-      return 0
+    if [[ -n "$run" && "$run" != "success" ]]; then
+      printf 'WARNUNG: Der Desktop-Workflow fuer %s endete mit "%s" — das Release hat keine Desktop-Pakete: gh run list --workflow desktop.yml\n' "$TAG" "$run" >&2
+      return 3
     fi
     sleep 15
   done
   printf 'WARNUNG: Die Desktop-Pakete fehlen nach 40 min noch am Release %s: gh run list --workflow desktop.yml\n' "$TAG" >&2
+  return 3
 }
 
 if (( WAIT )); then
@@ -96,7 +98,7 @@ if (( WAIT )); then
   for _ in $(seq 1 100); do
     if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
       info "Release $TAG ist online: $(gh release view "$TAG" --json url -q .url)"
-      wait_desktop
+      wait_desktop || exit $?
       exit 0
     fi
     CONCLUSION="$(gh run list --workflow android.yml --branch "$TAG" --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)"
