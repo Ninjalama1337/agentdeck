@@ -59,6 +59,11 @@ jobs:
         working-directory: desktop
         run: npm ci --no-audit --no-fund
 
+      # Seit Electron 44 laedt `npm ci` die Binary nicht mehr; die Smoke-Tests starten die echte App.
+      - name: Electron-Binary laden
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
       - name: Typecheck (Desktop)
         working-directory: desktop
         run: npm run typecheck
