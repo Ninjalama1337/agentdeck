@@ -6,6 +6,8 @@ import {
   CLOSE_ACTIONS,
   confirmStep,
   createDesktopController,
+  lanAccessAvailable,
+  LAN_UNAVAILABLE_HINT,
   serviceActions,
   summarizeServer,
 } from '../src/features/settings/desktopSettings';
@@ -81,6 +83,16 @@ describe('service actions', () => {
     const all = serviceActions(status());
     expect(all.filter((a) => a.confirm).map((a) => a.action)).toEqual(['stop', 'uninstall']);
     expect(all.filter((a) => a.danger).map((a) => a.action)).toEqual(['stop', 'uninstall']);
+  });
+});
+
+describe('phone access (LAN) switch', () => {
+  it('is only available for a server the app controls', () => {
+    expect(lanAccessAvailable(status())).toBe(true);
+    expect(lanAccessAvailable(status({ mode: 'detached' }))).toBe(true);
+    expect(lanAccessAvailable(status({ mode: 'external', controllable: false }))).toBe(false);
+    expect(lanAccessAvailable(null)).toBe(false);
+    expect(LAN_UNAVAILABLE_HINT).toMatch(/not started by AgentDeck/);
   });
 });
 
@@ -168,6 +180,22 @@ describe('desktop controller', () => {
     await expect(c.update({ closeAction: 'background', lanAccess: true })).resolves.toBe(true);
     expect(c.getState().settings).toEqual({ closeAction: 'background', lanAccess: true, launchAtLogin: false });
     expect(c.getState().busy).toBeNull();
+  });
+
+  it('refuses the LAN switch for a server the app did not start — it would only be stored, never applied', async () => {
+    const { bridge } = fakeBridge({ getServerStatus: async () => status({ mode: 'external', controllable: false }) });
+    const setSettings = vi.spyOn(bridge, 'setSettings');
+    const errors: string[] = [];
+    const c = createDesktopController(bridge, (m) => errors.push(m));
+    await settle();
+    await expect(c.update({ lanAccess: true })).resolves.toBe(false);
+    expect(errors).toEqual([LAN_UNAVAILABLE_HINT]);
+    expect(setSettings).not.toHaveBeenCalled();
+    expect(c.getState().settings?.lanAccess).toBe(false);
+    // the other settings are the app's own and still work
+    await expect(c.update({ launchAtLogin: true })).resolves.toBe(true);
+    // and so does writing the value the setting already has
+    await expect(c.update({ lanAccess: false })).resolves.toBe(true);
   });
 
   it('reports a refused settings change and keeps the old value', async () => {
