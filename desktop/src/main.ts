@@ -251,7 +251,7 @@ async function main(): Promise<void> {
     },
     async activity() {
       // The login goes to the AgentDeck server only — never to another program on the port.
-      if ((await controller.identify()) !== 'agentdeck') return null;
+      if ((await controller.identify(0)) !== 'agentdeck') return null;
       return fetchActivity({ baseUrl: origin, token: (await windowToken()) ?? coordinator.lastToken(), fetch: nodeFetch });
     },
     showDialog: (model) => dialogs.askClose(win, model),
