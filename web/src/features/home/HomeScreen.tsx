@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { clsx } from 'clsx';
 import { BarChart3, FolderGit2, FolderOpen, Github, GitBranch, MessageSquare, MoreVertical, Plus, Repeat, Settings, SquareTerminal, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { AgentAvatar } from '../../components/ui/Avatar';
@@ -16,9 +17,11 @@ import { PresetGlyph } from '../code/Launcher';
 import { estimateSize } from '../code/termInput';
 import { usePrefs } from '../../store/prefs';
 import { haptic } from '../../util/haptics';
+import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 import type { AgentId, Project } from '@agentdeck/shared';
 
 export function HomeScreen() {
+  const desktop = useDesktopLayout();
   const projects = useAppStore((s) => s.projects);
   const agents = useAppStore((s) => s.agents);
   const agentOrder = useAppStore((s) => s.agentOrder);
@@ -81,24 +84,8 @@ export function HomeScreen() {
     navigate({ name: 'chat' });
   };
 
-  return (
-    <div className="flex min-h-full flex-col px-4 pb-8">
-      {/* header */}
-      <header className="flex items-center gap-1 py-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[22px] font-bold tracking-tight">{greetingText}</h1>
-        </div>
-        <InboxButton />
-        <button
-          type="button"
-          aria-label="Settings"
-          onClick={() => navigate({ name: 'settings' })}
-          className="press tap flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08] active:text-ink"
-        >
-          <Settings size={20} />
-        </button>
-      </header>
-
+  const quickStartSection = (
+    <>
       {/* quick start: one tap → agent TUI in the active project */}
       {quickAgents.length > 0 && (
         <section aria-label="Quick start" className="mb-5">
@@ -126,7 +113,11 @@ export function HomeScreen() {
           </div>
         </section>
       )}
+    </>
+  );
 
+  const liveTerminalsSection = (
+    <>
       {/* live terminals */}
       {terminals.length > 0 && (
         <section aria-label="Live terminals" className="mb-5">
@@ -166,9 +157,16 @@ export function HomeScreen() {
           </div>
         </section>
       )}
+    </>
+  );
 
+  const agentSection = (
+    <>
       {/* agent status row */}
-      <section aria-label="Agent status" className="no-scrollbar -mx-4 mb-4 flex gap-2.5 overflow-x-auto px-4 py-0.5">
+      <section
+        aria-label="Agent status"
+        className={clsx('mb-4 flex gap-2.5 py-0.5', desktop ? 'flex-wrap' : 'no-scrollbar -mx-4 overflow-x-auto px-4')}
+      >
         {agentOrder.map((id) => {
           const agent = agents[id];
           return (
@@ -187,7 +185,11 @@ export function HomeScreen() {
         })}
         {agentOrder.length === 0 && <p className="py-3 text-[13px] text-dim">No agents reported by the server.</p>}
       </section>
+    </>
+  );
 
+  const runningSection = (
+    <>
       {/* running now — BridgeMind's "dashboard of every agent running" */}
       {runningNow.length > 0 && (
         <section aria-label="Running now" className="mb-5">
@@ -216,7 +218,11 @@ export function HomeScreen() {
           </div>
         </section>
       )}
+    </>
+  );
 
+  const activitySection = (
+    <>
       <button
         type="button"
         onClick={() => useAppStore.getState().setActivitySheetOpen(true)}
@@ -230,7 +236,11 @@ export function HomeScreen() {
           <span className="block text-[12px] leading-snug text-dim">Which agent did how much — runs, time, tokens, cost.</span>
         </span>
       </button>
+    </>
+  );
 
+  const routinesSection = (
+    <>
       {/* routines */}
       <section aria-label="Routines" className="mb-5">
         <div className="mb-2 flex items-center justify-between">
@@ -285,7 +295,11 @@ export function HomeScreen() {
           </div>
         )}
       </section>
+    </>
+  );
 
+  const projectsSection = (
+    <>
       {/* projects */}
       <section aria-label="Projects" className="flex-1">
         <div className="mb-3 flex items-center justify-between">
@@ -311,11 +325,11 @@ export function HomeScreen() {
             />
           </GlassCard>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className={clsx('grid grid-cols-1 gap-3', desktop ? 'xl:grid-cols-2' : 'sm:grid-cols-2')}>
             {sortedProjects.map((project) => {
               const sessionCount = sessionsByProject[project.id]?.length;
               return (
-                <div key={project.id} className="glass press relative p-4" onClick={() => void openProjectAndChat(project.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void openProjectAndChat(project.id)}>
+                <div key={project.id} className="glass press relative p-4 hover:bg-surface-2" onClick={() => void openProjectAndChat(project.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void openProjectAndChat(project.id)}>
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{project.name}</h3>
                     <button
@@ -352,7 +366,11 @@ export function HomeScreen() {
           </div>
         )}
       </section>
+    </>
+  );
 
+  const fab = (
+    <>
       {/* FAB — right edge of the centered column, above the tab bar */}
       <button
         type="button"
@@ -363,6 +381,68 @@ export function HomeScreen() {
       >
         <Plus size={26} />
       </button>
+    </>
+  );
+
+  return (
+    <div className="flex min-h-full flex-col px-4 pb-8">
+
+      {/* header */}
+      <header className="flex items-center gap-1 py-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[22px] font-bold tracking-tight">{greetingText}</h1>
+        </div>
+        {desktop ? (
+          // The sidebar carries inbox and settings; the FAB's job moves here.
+          <button
+            type="button"
+            onClick={() => setNewProjectOpen(true)}
+            className="press btn-primary flex h-10 items-center gap-2 rounded-xl px-4 text-[13.5px] font-semibold text-white"
+          >
+            <Plus size={16} /> New project
+          </button>
+        ) : (
+          <>
+            <InboxButton />
+            <button
+              type="button"
+              aria-label="Settings"
+              onClick={() => navigate({ name: 'settings' })}
+              className="press tap flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08] active:text-ink"
+            >
+              <Settings size={20} />
+            </button>
+          </>
+        )}
+      </header>
+
+      {desktop ? (
+        // Desktop: the projects are the main column; what is live (terminals, runs, agents) sits beside them.
+        <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-8">
+          <div className="min-w-0">
+            {quickStartSection}
+            {projectsSection}
+          </div>
+          <div className="min-w-0">
+            {liveTerminalsSection}
+            {runningSection}
+            {agentSection}
+            {activitySection}
+            {routinesSection}
+          </div>
+        </div>
+      ) : (
+        <>
+          {quickStartSection}
+          {liveTerminalsSection}
+          {agentSection}
+          {runningSection}
+          {activitySection}
+          {routinesSection}
+          {projectsSection}
+          {fab}
+        </>
+      )}
 
       {/* project actions */}
       <Sheet open={projectMenu !== null} onClose={() => setProjectMenu(null)} title={projectMenu?.name}>

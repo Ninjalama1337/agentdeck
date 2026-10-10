@@ -51,7 +51,7 @@ export function OtherServers({ className }: { className?: string }) {
  * Top-bar chip naming the active server; opens the list of saved servers.
  * Hidden while only one server is saved — nothing to switch to.
  */
-export function ServerSwitcher() {
+export function ServerSwitcher({ fill }: { fill?: boolean } = {}) {
   const servers = useAppStore((s) => s.servers);
   const activeId = useAppStore((s) => s.activeServerId);
   const switchServer = useAppStore((s) => s.switchServer);
@@ -68,10 +68,13 @@ export function ServerSwitcher() {
         type="button"
         aria-label={`Server: ${serverLabel(active)} — switch server`}
         onClick={() => setOpen(true)}
-        className="press mx-2 inline-flex min-w-0 items-center gap-1.5 rounded-full border border-line bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-ink active:bg-white/[0.1]"
+        className={clsx(
+          'press inline-flex min-w-0 items-center gap-1.5 rounded-full border border-line bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-ink active:bg-white/[0.1]',
+          fill ? 'w-full' : 'mx-2',
+        )}
       >
         <Server size={13} className="shrink-0 text-accent" />
-        <span className="truncate">{serverLabel(active)}</span>
+        <span className={clsx('truncate', fill && 'flex-1 text-left')}>{serverLabel(active)}</span>
         <ChevronDown size={13} className="shrink-0 text-dim" />
       </button>
       {/* Portal: the top bar's backdrop-filter would otherwise trap the fixed sheet inside the bar. */}

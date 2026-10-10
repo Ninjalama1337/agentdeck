@@ -49,6 +49,10 @@ interface Props {
   onModifierUsed: () => void;
   onRestart: () => void;
   onClose: () => void;
+  /** Desktop pane: the pane frame draws the border, the scroll buttons appear on hover. */
+  pane?: boolean;
+  /** Desktop pane: the terminal takes keyboard focus when this turns true. */
+  focused?: boolean;
 }
 
 /**
@@ -56,7 +60,7 @@ interface Props {
  * survives tab switches. The server's headless emulator answers terminal
  * queries, so replies xterm.js would generate are dropped here.
  */
-export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart, onClose }: Props) {
+export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart, onClose, pane = false, focused = false }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -212,6 +216,11 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // A desktop pane that gets focus (click, tab, shortcut) types into its terminal.
+  useEffect(() => {
+    if (focused) termRef.current?.focus();
+  }, [focused, id]);
+
   // Font size (pref / pinch) → refit.
   useEffect(() => {
     const term = termRef.current;
@@ -272,10 +281,10 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   };
 
   return (
-    <div className={clsx('absolute inset-0 flex flex-col', !visible && 'invisible')} aria-hidden={!visible}>
+    <div className={clsx('absolute inset-0 flex flex-col', pane && 'group/pane', !visible && 'invisible')} aria-hidden={!visible}>
       <div
         ref={hostRef}
-        className="term-host min-h-0 flex-1 overflow-hidden rounded-[16px] border border-line"
+        className={clsx('term-host min-h-0 flex-1 overflow-hidden', !pane && 'rounded-[16px] border border-line')}
         style={{ background: TERM_THEME.background }}
         onTouchStart={(e) => {
           if (e.touches.length === 2) pinch.current = { dist: distance(e.touches), size: usePrefs.getState().termFontSize };
@@ -290,7 +299,12 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           pinch.current = null;
         }}
       />
-      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-xl border border-line bg-surface-2/90 p-1 shadow-lg backdrop-blur-sm">
+      <div
+        className={clsx(
+          'absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-xl border border-line bg-surface-2/90 p-1 shadow-lg backdrop-blur-sm',
+          pane && 'opacity-0 transition-opacity focus-within:opacity-100 group-hover/pane:opacity-100',
+        )}
+      >
         <button
           type="button"
           aria-label="Scroll terminal up one page"
