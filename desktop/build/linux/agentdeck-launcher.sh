@@ -32,6 +32,8 @@ if [ "$(id -u)" = "0" ] || $PROBE >/dev/null 2>&1; then
 fi
 
 IMAGE="${APPIMAGE:-/path/to/AgentDeck.AppImage}"
+# The commands of step 2 are printed flush left, with nothing in front of the heredoc terminator,
+# so that they can be pasted into a terminal as they are.
 MESSAGE="AgentDeck kann auf diesem System die Chromium-Sandbox nicht starten.
 
 Ubuntu 24.04 und neuer sperren Benutzer-Namensräume für Programme ohne AppArmor-Profil.
@@ -39,18 +41,20 @@ Das AppImage kann kein Profil mitbringen. Lösungen:
 
 1. Das .deb-Paket installieren — es richtet das Profil ein (empfohlen).
 
-2. Ein Profil für dieses AppImage anlegen (einmalig, als root):
-     sudo tee /etc/apparmor.d/agentdeck-appimage >/dev/null <<'PROFILE'
-     abi <abi/4.0>,
-     include <tunables/global>
-     profile agentdeck-appimage \"$IMAGE\" flags=(unconfined) {
-       userns,
-     }
-     PROFILE
-     sudo systemctl reload apparmor
+2. Ein Profil für dieses AppImage anlegen (einmalig). Diese Zeilen im Terminal einfügen:
+
+sudo tee /etc/apparmor.d/agentdeck-appimage >/dev/null <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+profile agentdeck-appimage \"$IMAGE\" flags=(unconfined) {
+  userns,
+}
+PROFILE
+sudo systemctl reload apparmor
 
 3. Notlösung, ohne Sandbox (unsicherer):
-     AGENTDECK_NO_SANDBOX=1 \"$IMAGE\""
+
+AGENTDECK_NO_SANDBOX=1 \"$IMAGE\""
 
 printf '%s\n' "$MESSAGE" >&2
 

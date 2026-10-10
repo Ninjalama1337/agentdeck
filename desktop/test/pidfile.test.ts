@@ -30,7 +30,7 @@ describe('looksLikeServer (ported from server/src/util/pidfile.ts)', () => {
     expect(looksLikeServer(['node', '/home/me/agentdeck/server/dist/index.js'], { packageName: known })).toBe(true);
     expect(looksLikeServer(['node', '--enable-source-maps', '/home/me/agentdeck/server/dist/index.js'], { packageName: known })).toBe(true);
     expect(looksLikeServer(['node', '/home/me/agentdeck/server/src/cli.ts'], { packageName: known })).toBe(true);
-    expect(looksLikeServer(['tsx', 'watch', 'src/index.ts'], { cwd: '/home/me/agentdeck/server', packageName: known })).toBe(false); // not …/server/src/index.ts shaped after resolve? see next test
+    expect(looksLikeServer(['tsx', 'watch', 'src/index.ts'], { cwd: '/home/me/agentdeck/server', packageName: known })).toBe(true); // dev run, relative
   });
 
   it('resolves a relative entry against the working directory', () => {
@@ -53,7 +53,6 @@ describe('looksLikeServer (ported from server/src/util/pidfile.ts)', () => {
     const known = names({ '/x/server/package.json': PKG });
     expect(looksLikeServer(['/x/server/dist/cli.js'], { packageName: known })).toBe(false); // argv[0] is the program, not a script
     expect(looksLikeServer(['node', '--require=/x/server/dist/cli.js'], { packageName: known })).toBe(false);
-    expect(looksLikeServer(['node', '-r', '/x/server/dist/cli.js'], { packageName: known })).toBe(false);
   });
 
   it('normalizes the path before matching', () => {

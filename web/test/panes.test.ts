@@ -142,6 +142,53 @@ describe('reconcile with the terminals that exist', () => {
   });
 });
 
+describe('a pane the user emptied on purpose', () => {
+  it('emptying marks the pane; showing a terminal there unmarks it', () => {
+    const emptied = assignTerminal(state(2, ['a', 'b']), 0, null);
+    expect(emptied.slots).toEqual([null, 'b']);
+    expect(emptied.cleared).toEqual([0]);
+    expect(assignTerminal(emptied, 0, null)).toBe(emptied);
+    expect(assignTerminal(emptied, 0, 'a').cleared).toEqual([]);
+    // swapping a terminal into another pane also unmarks the target
+    expect(assignTerminal(emptied, 0, 'b')).toEqual(state(2, ['b', null], 0, []));
+  });
+
+  it('stays empty although terminals exist that no pane shows', () => {
+    const emptied = assignTerminal(state(2, ['a', 'b']), 0, null); // a is spare now
+    const same = reconcilePanes(emptied, ['a', 'b']);
+    expect(same).toBe(emptied);
+    expect(reconcilePanes(emptied, ['a', 'b', 'c']).slots).toEqual([null, 'b']);
+  });
+
+  it('is only refilled by a terminal that was just started', () => {
+    const emptied = assignTerminal(state(2, ['a', 'b']), 0, null);
+    const refilled = reconcilePanes(emptied, ['a', 'b', 'c'], ['c']);
+    expect(refilled.slots).toEqual(['c', 'b']);
+    expect(refilled.cleared).toEqual([]);
+    // a fresh terminal that is already shown elsewhere changes nothing
+    expect(reconcilePanes(emptied, ['a', 'b'], ['b'])).toBe(emptied);
+  });
+
+  it('a pane that is not emptied on purpose still picks up spare terminals next to a cleared one', () => {
+    const s = state(3, [null, null, 'c'], 0, [0]);
+    expect(reconcilePanes(s, ['c', 'x', 'y']).slots).toEqual([null, 'x', 'c']);
+    expect(reconcilePanes(s, ['c', 'x', 'y']).cleared).toEqual([0]);
+  });
+
+  it('drops the mark when the pane is gone, and keeps it when panes are added', () => {
+    const s = state(3, ['a', null, null], 0, [2]);
+    expect(setPaneCount(s, 2).cleared).toEqual([]);
+    expect(setPaneCount(s, 4).cleared).toEqual([2]);
+  });
+
+  it('is read from storage only for empty panes inside the count', () => {
+    expect(normalizePanes({ count: 3, slots: ['a', null, null], cleared: [1, 1, 2] }).cleared).toEqual([1, 2]);
+    expect(normalizePanes({ count: 2, slots: ['a', null], cleared: [0, 1, 5, -1, 'x', 0.5] }).cleared).toEqual([1]);
+    expect(normalizePanes({ count: 2, slots: [null, null], cleared: 'all' }).cleared).toEqual([]);
+    expect(normalizePanes({ count: 2, slots: [null, null] }).cleared).toEqual([]);
+  });
+});
+
 describe('launching into a pane', () => {
   it('prefers the focused pane when it is empty, then the first empty one, then the focused one', () => {
     expect(launchTarget(state(3, ['a', null, null], 2))).toBe(2);
@@ -189,6 +236,16 @@ describe('persistence (per server)', () => {
     usePanes.getState().assign(1, 'b');
     usePanes.getState().focusPane(1);
     expect(JSON.parse(store.get('agentdeck:panes') ?? 'null')).toEqual({ count: 3, slots: [null, 'b', null], focus: 1, cleared: [] });
+  });
+
+  it('remembers an emptied pane across a restart', async () => {
+    const { usePanes } = await load();
+    usePanes.getState().setCount(2);
+    usePanes.getState().assign(0, 'a');
+    usePanes.getState().assign(0, null);
+    expect(JSON.parse(store.get('agentdeck:panes') ?? 'null')).toEqual({ count: 2, slots: [null, null], focus: 0, cleared: [0] });
+    const again = await load({ 'agentdeck:panes': store.get('agentdeck:panes') ?? '' });
+    expect(again.usePanes.getState().cleared).toEqual([0]);
   });
 
   it('restores the panes of the last page load', async () => {
@@ -356,6 +413,46 @@ describe('sync with the active terminal', () => {
     list(['a', 'b', 'c']);
     panes.getState().setCount(3);
     expect(panes.getState().slots).toEqual(['a', 'b', 'c']);
+  });
+
+  it('a pane the user emptied stays empty when the terminal list changes — until a terminal is started', async () => {
+    const { panes, list } = await setup({ panes: state(2, ['a', 'b'], 0) });
+    list(['a', 'b']);
+    panes.getState().assign(0, null);
+    expect(panes.getState().slots).toEqual([null, 'b']);
+    // the server repeats its list (a reconnect, another terminal ending elsewhere): nothing moves in
+    list(['a', 'b']);
+    list(['a', 'b', 'x']);
+    list(['a', 'b']);
+    expect(panes.getState().slots).toEqual([null, 'b']);
+    // a terminal that is new to the list takes the pane
+    list(['a', 'b', 'c']);
+    expect(panes.getState().slots).toEqual(['c', 'b']);
+  });
+
+  it('more panes still fill with spare terminals while an emptied pane stays empty', async () => {
+    const { panes, list } = await setup({ panes: state(1, ['a'], 0) });
+    list(['a', 'b', 'c']);
+    panes.getState().setCount(3);
+    expect(panes.getState().slots).toEqual(['a', 'b', 'c']);
+    panes.getState().assign(1, null);
+    panes.getState().setCount(2);
+    panes.getState().setCount(3);
+    expect(panes.getState().slots).toEqual(['a', null, 'c']);
+  });
+
+  it('after a dropped login the remembered panes settle again with the next list', async () => {
+    const { app, panes, list } = await setup({ panes: state(2, ['b', 'c'], 1) });
+    list(['a', 'b', 'c'], 'a');
+    expect(app.getState().activeTerminalId).toBe('c');
+    // the login is dropped: the store forgets its terminals (and the active one)
+    app.setState({ terminals: [], terminalsLoaded: false, activeTerminalId: null });
+    expect(panes.getState().slots).toEqual(['b', 'c']);
+    // paired again: the store picks its first terminal, the remembered pane wins
+    list(['a', 'b', 'c'], 'a');
+    expect(panes.getState().slots).toEqual(['b', 'c']);
+    expect(panes.getState().focus).toBe(1);
+    expect(app.getState().activeTerminalId).toBe('c');
   });
 
   it('stops syncing when detached', async () => {
