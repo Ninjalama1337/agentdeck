@@ -15,7 +15,12 @@ import {
   type PaneState,
 } from '../src/features/code/paneLayout';
 
-const state = (count: PaneState['count'], slots: (string | null)[], focus = 0): PaneState => ({ count, slots, focus });
+const state = (count: PaneState['count'], slots: (string | null)[], focus = 0, cleared: number[] = []): PaneState => ({
+  count,
+  slots,
+  focus,
+  cleared,
+});
 
 describe('normalizePanes (untrusted storage content)', () => {
   it('gives the default single pane for anything that is not a panes object', () => {
@@ -183,7 +188,7 @@ describe('persistence (per server)', () => {
     usePanes.getState().setCount(3);
     usePanes.getState().assign(1, 'b');
     usePanes.getState().focusPane(1);
-    expect(JSON.parse(store.get('agentdeck:panes') ?? 'null')).toEqual({ count: 3, slots: [null, 'b', null], focus: 1 });
+    expect(JSON.parse(store.get('agentdeck:panes') ?? 'null')).toEqual({ count: 3, slots: [null, 'b', null], focus: 1, cleared: [] });
   });
 
   it('restores the panes of the last page load', async () => {
