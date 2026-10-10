@@ -34,11 +34,10 @@ module.exports = {
     icon: path.join(__dirname, '..', 'web', 'public', 'icons', 'icon-512.png'),
     maintainer: 'Ninjalama <miron.schueler@gmail.com>',
     synopsis: 'Window on your AgentDeck server',
-    description: 'AgentDeck desktop app: a window on the AgentDeck server that runs your coding agents. Includes the server.',
+    description: 'Control your coding agents. A window on the AgentDeck server, which this package includes and can run in the background.',
     desktop: {
       entry: {
         Name: 'AgentDeck',
-        Comment: 'Control your coding agents',
         Categories: 'Development;',
         Keywords: 'agent;claude;codex;terminal;',
       },

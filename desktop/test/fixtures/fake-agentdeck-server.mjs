@@ -9,7 +9,7 @@
 //
 // Environment: FAKE_DATA_DIR (required), FAKE_PORT (required), FAKE_VERSION,
 // FAKE_SERVICE (JSON, default: no systemd), FAKE_CALLS (file to append argv to),
-// AGENTDECK_HOST (bind address, default 127.0.0.1).
+// AGENTDECK_HOST (bind address, default 127.0.0.1), AGENTDECK_PORT (only recorded in bind.txt).
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -65,7 +65,9 @@ function serve() {
   let code = '123456';
   if (fs.existsSync(codeFile)) code = fs.readFileSync(codeFile, 'utf8').trim();
   else fs.writeFileSync(codeFile, `${code}\n`, { mode: 0o600 });
-  let issued = 0;
+  // survives restarts of the fake, so token numbers keep counting
+  const issuedFile = path.join(dataDir, 'issued.txt');
+  let issued = fs.existsSync(issuedFile) ? Number(fs.readFileSync(issuedFile, 'utf8')) : 0;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -87,6 +89,7 @@ function serve() {
         if (body.code !== current) return json(401, { error: { code: 'INVALID_CODE', message: 'Invalid pairing code.' } });
         fs.writeFileSync(codeFile, `${String(100000 + Math.floor(Math.random() * 899999))}\n`, { mode: 0o600 });
         issued += 1;
+        fs.writeFileSync(issuedFile, String(issued));
         json(200, { token: `fake-token-${issued}`, server: { name: 'fake-deck', version, host: `127.0.0.1:${port}` } });
       });
       return;
@@ -114,8 +117,11 @@ function serve() {
     }
     res.writeHead(404).end();
   });
-  server.listen(port, process.env.AGENTDECK_HOST || '127.0.0.1', () => {
+  const host = process.env.AGENTDECK_HOST || '127.0.0.1';
+  server.listen(port, host, () => {
     fs.writeFileSync(pidFile, `${process.pid}\n`);
+    // what the app asked for, for the tests
+    fs.writeFileSync(path.join(dataDir, 'bind.txt'), `${host}:${process.env.AGENTDECK_PORT ?? ''}\n`);
   });
   const stop = () => {
     try {

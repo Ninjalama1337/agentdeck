@@ -69,6 +69,7 @@ function createLogger(file: string): (message: string) => void {
 }
 
 const log = createLogger(paths.desktopLog);
+process.on('unhandledRejection', (reason) => log(`unhandled rejection: ${String(reason)}`));
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const nodeFetch: FetchLike = (url, init) => fetch(url, init);
 
@@ -136,7 +137,7 @@ async function main(): Promise<void> {
     async looksLikeServer(pid) {
       try {
         const cmdline = (await fsp.readFile(`/proc/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ');
-        return /agentdeck|dist\/(cli|index)\.js/i.test(cmdline);
+        return /agentdeck|(dist|src)\/(index|cli)\.(js|ts)/i.test(cmdline);
       } catch {
         return false;
       }
@@ -366,6 +367,11 @@ async function main(): Promise<void> {
           detail: 'Die Verbindung wird erneut versucht, sobald er antwortet.',
         }),
       );
+    });
+    // A crashed renderer comes back by itself (the web app restores its route).
+    current.webContents.on('render-process-gone', (_event, details) => {
+      log(`renderer gone: ${details.reason}`);
+      if (details.reason !== 'clean-exit' && !quitting) setTimeout(() => !current.isDestroyed() && current.reload(), 1000);
     });
     void current.loadURL(statusPageUrl({ origin, title: 'AgentDeck startet …' }));
     await loadApp().catch((err: unknown) => log(`cannot load the app: ${String(err)}`));

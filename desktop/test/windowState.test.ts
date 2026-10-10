@@ -53,10 +53,10 @@ describe('resolveWindowState', () => {
   });
 
   it('fits the default size to a small screen', () => {
-    const small = screen(1, 0, 0, 1024, 600);
+    const small = screen(1, 0, 0, 1100, 700);
     const r = resolveWindowState(null, [small], small);
-    expect(r.width).toBe(1024);
-    expect(r.height).toBe(572);
+    expect(r.width).toBe(1100);
+    expect(r.height).toBe(672);
   });
 
   it('restores size, position and maximized state as saved', () => {
@@ -79,6 +79,10 @@ describe('resolveWindowState', () => {
     const r = resolveWindowState(saved({ x: 1900, y: 1070 }), [main], main);
     expect(r.x).toBeLessThanOrEqual(1920 - 160);
     expect(r.y).toBeLessThanOrEqual(1080 - 80);
+  });
+
+  it('never goes below the width where the web UI switches to its phone layout', () => {
+    expect(MIN_WINDOW_SIZE.width).toBeGreaterThanOrEqual(1024);
   });
 
   it('shrinks a window that no longer fits, but never below the minimum', () => {

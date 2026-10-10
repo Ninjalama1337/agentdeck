@@ -67,6 +67,19 @@ try {
 
   // status events reach the page
   await page.evaluate("window.__events = []; window.__off = agentdeckDesktop.onServerStatus((s) => window.__events.push(s.mode)); true");
+  check('detached server was started with bind address and port set explicitly', fs.readFileSync(path.join(dataDir, 'bind.txt'), 'utf8').trim() === `127.0.0.1:${port}`);
+  const stopped = await page.evaluate("agentdeckDesktop.serviceAction('stop')");
+  check('serviceAction(stop) stops the detached server', stopped.mode === 'stopped' && !(await healthy(port)), JSON.stringify(stopped));
+  const restarted = await page.evaluate("agentdeckDesktop.serviceAction('start')");
+  check('serviceAction(start) without a unit starts it detached again', restarted.mode === 'detached' && restarted.reachable, JSON.stringify(restarted));
+  const events = await page.evaluate('window.__events');
+  check('onServerStatus delivered the changes (stopped, then detached)', events.includes('stopped') && events.at(-1) === 'detached', JSON.stringify(events));
+  await page.evaluate("agentdeckDesktop.setSettings({ lanAccess: true })");
+  check('lanAccess=true restarts the detached server on all interfaces', fs.readFileSync(path.join(dataDir, 'bind.txt'), 'utf8').trim() === `0.0.0.0:${port}` && (await healthy(port)));
+  const lanSettings = await page.evaluate('agentdeckDesktop.getSettings()');
+  check('getSettings reports lanAccess', lanSettings.lanAccess === true);
+  await page.evaluate("agentdeckDesktop.setSettings({ lanAccess: false })");
+  check('lanAccess=false binds to loopback again', fs.readFileSync(path.join(dataDir, 'bind.txt'), 'utf8').trim() === `127.0.0.1:${port}`);
 
   // navigation guard
   await page.evaluate("document.getElementById('ext').click()");

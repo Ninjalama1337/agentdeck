@@ -2,6 +2,4 @@
 dist/
 release/
 node_modules/
-# Copied by scripts/build.mjs / used by electron-builder
-build/icon.png
 *.tsbuildinfo

@@ -138,11 +138,11 @@ export class ServerController {
       if (service?.systemd && service.installed && service.managed) {
         // Our unit exists: start it — as an update when the app brought a newer server.
         const info = await this.info();
-        if (this.runtimeIsOutdated(info, service)) await this.deps.cli.serviceInstall({ lan: service.lan });
-        else await this.deps.cli.serviceStart();
+        if (this.runtimeIsOutdated(info, service)) await this.installUnit(service.lan);
+        else await this.startUnit();
       } else if (service?.systemd && !service.installed && !this.deps.state.get().serviceDeclined && options.interactive) {
         if (await this.deps.offerService()) {
-          await this.deps.cli.serviceInstall({ lan: this.deps.settings.get().lanAccess });
+          await this.installUnit(this.deps.settings.get().lanAccess);
         } else {
           await this.deps.state.update({ serviceDeclined: true });
           await this.startDetached();
@@ -176,16 +176,42 @@ export class ServerController {
     const info = await this.info();
     if (!service || !this.runtimeIsOutdated(info, service)) return;
     this.deps.log(`updating the service runtime ${service.runtimeVersion} -> ${info.version}`);
-    await this.deps.cli.serviceInstall({ lan: service.lan });
+    await this.installUnit(service.lan);
     await this.expectUp();
   }
 
-  private async startDetached(): Promise<void> {
+  /** The CLI refuses install/start while a server outside the unit runs (server.pid) — ours goes first. */
+  private async freeServerForService(): Promise<void> {
+    const info = await this.info();
+    if (await this.deps.detached.isOurs(info.pidFile)) {
+      this.deps.log('stopping the detached server before the service takes over');
+      await this.stopDetached();
+    }
+  }
+
+  /** (Re)writes the unit and starts it. The port is always explicit; `--lan` only when wanted (a reinstall does not keep it). */
+  private async installUnit(lan: boolean): Promise<void> {
+    await this.freeServerForService();
+    const info = await this.info();
+    await this.deps.cli.serviceInstall({ lan, port: info.port });
+  }
+
+  private async startUnit(): Promise<void> {
+    await this.freeServerForService();
+    await this.deps.cli.serviceStart();
+  }
+
+  /** `lan` defaults to the stored setting; a change that is being applied passes its new value (it is stored afterwards). */
+  private async startDetached(lan: boolean = this.deps.settings.get().lanAccess): Promise<void> {
     const info = await this.info();
     const bin = await this.deps.detachedBin(info);
-    const host = this.deps.settings.get().lanAccess ? '0.0.0.0' : '127.0.0.1';
+    const host = lan ? '0.0.0.0' : '127.0.0.1';
     this.deps.log(`starting the server detached (${bin}, bind ${host})`);
-    await this.deps.detached.start({ bin, env: { ...this.deps.env, AGENTDECK_HOST: host } });
+    // Bind address and port are set explicitly: what the app connects to is what the server listens on.
+    await this.deps.detached.start({
+      bin,
+      env: { ...this.deps.env, AGENTDECK_HOST: host, AGENTDECK_PORT: String(info.port) },
+    });
   }
 
   private async waitFor(done: (probe: HealthProbe) => boolean, timeoutMs: number): Promise<boolean> {
@@ -228,8 +254,7 @@ export class ServerController {
     switch (action) {
       case 'install': {
         if (!service?.systemd) throw new Error('systemd --user is not available on this machine.');
-        if (state.mode === 'detached') await this.stopDetached();
-        await cli.serviceInstall({ lan: this.deps.settings.get().lanAccess });
+        await this.installUnit(managed && service ? service.lan : this.deps.settings.get().lanAccess);
         await this.expectUp();
         return;
       }
@@ -242,7 +267,7 @@ export class ServerController {
       case 'start': {
         if (state.reachable) return;
         if (state.portConflict) throw new Error(this.portBusy(state).message);
-        if (managed) await cli.serviceStart();
+        if (managed) await this.startUnit();
         else await this.startDetached();
         await this.expectUp();
         return;
@@ -257,7 +282,7 @@ export class ServerController {
         if (state.reachable) this.requireControllable(state);
         if (state.mode === 'service' || (!state.reachable && managed)) {
           if (state.mode === 'service' && service?.active) await cli.serviceRestart();
-          else await cli.serviceStart();
+          else await this.startUnit();
         } else {
           if (state.mode === 'detached') await this.stopDetached();
           await this.startDetached();
@@ -300,14 +325,16 @@ export class ServerController {
       const service = state.service;
       if (service?.systemd && service.installed && service.managed) {
         if (service.lan === lan) return;
-        await this.deps.cli.serviceInstall({ lan });
+        await this.installUnit(lan);
         if (service.active) await this.deps.cli.serviceRestart();
         await this.expectUp();
       } else if (state.mode === 'detached') {
         await this.stopDetached();
-        await this.startDetached();
+        await this.startDetached(lan);
         await this.expectUp();
       }
+      // Tell the window: the binding is part of the status it shows.
+      await this.refresh(true);
     });
   }
 
