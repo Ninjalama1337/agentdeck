@@ -81,7 +81,9 @@ chmod +x AgentDeck-*.AppImage
 
 Der **Port ist fest** (8787, oder `port` in `~/.config/agentdeck/config.json`).
 Antwortet dort ein anderes Programm, weicht die App nicht aus, sondern sagt es
-dir — die Anmeldung im Fenster hängt an der Adresse.
+dir — die Anmeldung im Fenster hängt an der Adresse. Ein fremdes Programm auf dem
+Port bekommt weder die Fenster-Bridge noch den Pairing-Code: Beides gibt es nur
+für einen Server, der sich auf `/api/health` als AgentDeck meldet.
 
 ## Schließen
 
@@ -89,7 +91,7 @@ Beim Schließen des Fensters erscheint (Standard) ein Dialog:
 
 | Button | Wirkung |
 |---|---|
-| **Im Hintergrund weiterlaufen** (Standard) | Fenster zu, Dienst läuft weiter. Agenten, Routinen und Benachrichtigungen aufs Handy laufen weiter. |
+| **Im Hintergrund weiterlaufen** (Standard) | Fenster zu, Dienst läuft weiter. Agenten, Routinen und Benachrichtigungen laufen weiter; das Handy bleibt verbunden, wenn „Handy-Zugriff im LAN“ an ist. |
 | **Dienst stoppen und beenden** | Der Server hält an; laufende Agent-Läufe werden unterbrochen. **Terminals laufen in tmux weiter** und sind nach dem nächsten Start wieder da. |
 | **Abbrechen** | Das Fenster bleibt offen. |
 
@@ -115,6 +117,15 @@ Chat-Turn** endet, wenn der Dienst gestoppt wird (nach dem Start steht er auf
 gespeichert. Terminals gehen bei Reboot und Logout verloren — die Agent-Sitzung
 setzt du mit *Weiter* fort.
 
+Auch wenn tmux nach einem Wechsel zwischen Checkout- und Paket-Server die Sitzungen
+nicht ansprechen kann (unterschiedliche tmux-Versionen), löscht der Server die
+Terminal-Einträge nicht: Er behält sie, meldet es laut im Log und hängt sich
+wieder an, sobald ein passendes tmux läuft. Ungültige Sitzungen entfernt er erst,
+wenn tmux eindeutig sagt, dass es sie nicht (mehr) gibt.
+
+Wird die Anmeldung des Fensters ungültig (z. B. Server-Daten zurückgesetzt), pairt
+es sich still neu und behält dabei Ansicht, Chat, Projekt und Panes.
+
 ## Einstellungen
 
 *Settings → Desktop app* erscheint nur im Desktop-Fenster:
@@ -129,6 +140,11 @@ setzt du mit *Weiter* fort.
   lass es in fremden Netzen aus.
 - **Service** — Status (Modus, Version, Adresse) und *Start*, *Restart*,
   *Stop*, *Install*, *Uninstall* (Daten bleiben).
+
+Der angezeigte Host ist die tatsächliche Bindung (`127.0.0.1` oder `0.0.0.0`).
+Bei einem Server, den die App nicht gestartet hat (**external**, oder eine Unit,
+die nicht von `agentdeck-server` stammt), ist der LAN-Schalter deaktiviert: Dort
+ändert man es dort, wo man den Server startet.
 
 Modus des Servers: **service** (systemd-Unit läuft), **detached** (von der App
 gestartet), **external** (läuft anderswo, die App verbindet sich nur),
@@ -155,7 +171,8 @@ beim Login.
 ## Desktop-Layout
 
 Ab **1024 px Breite mit Maus/Touchpad** (`(pointer: fine)`) wechselt die
-Oberfläche — im Fenster wie im Browser — auf das Desktop-Layout; kleiner und auf
+Oberfläche im Browser auf das Desktop-Layout. Im Desktop-Fenster gilt es schon ab
+**640 px**, damit Zoomen (`Strg +`) das Fenster nicht ins Handy-Layout kippt. Kleiner und auf
 dem Handy bleibt alles wie bisher.
 
 - Seitenleiste statt Tab-Leiste (Projekt, Tabs mit Hinweisen, Verbrauch,
@@ -171,22 +188,31 @@ dem Handy bleibt alles wie bisher.
 | `Strg/Cmd + ,` | Settings |
 | `Strg/Cmd + K` | Projektwechsler (nicht im Terminal, dort ist es „Zeile löschen“) |
 
+`Strg + 1…5` gelten bewusst auch im Terminal (xterm würde `Strg + 2…5` sonst als
+NUL/ESC/FS/GS senden). Ein Pane, das du bewusst leerst, bleibt leer, bis ein neues
+Terminal gestartet oder eines zugewiesen wird.
+
 Kleine Verhaltensänderungen durch das Desktop-Layout und die Wiederherstellung:
 „Enter sendet“ im Chat ist im Desktop-Layout ohne eigene Einstellung
-voreingestellt; „Compose bar“ hat in den Desktop-Panes keine Wirkung; der
-gewählte Terminal wird auch auf dem Handy gemerkt; beim Serverwechsel öffnet
-der neue Server seine eigene letzte Ansicht.
+voreingestellt; „Compose bar“ hat in den Desktop-Panes keine Wirkung; die App
+startet — auch auf Handy, PWA und APK — auf der zuletzt genutzten Ansicht statt auf
+Home, und der gewählte Terminal wird gemerkt; beim Serverwechsel öffnet der neue
+Server seine eigene letzte Ansicht.
 
 ## Updates
 
-- **App:** Die App prüft beim Start (öffentliche GitHub-API) auf eine neuere
-  Version und zeigt einen Hinweis mit Link zur Release-Seite; sie ersetzt sich
-  nicht selbst. Neues `.deb` mit `sudo apt install ./…` einspielen, AppImage
+- **App:** Die App prüft beim Start über die GitHub-API auf eine neuere Version
+  und zeigt einen Hinweis mit Link zur Release-Seite; sie ersetzt sich nicht
+  selbst. Das geht nur, solange die Releases ohne Anmeldung lesbar sind: Ist das
+  Repository privat, sieht die App kein Release und zeigt nie einen Hinweis —
+  dann die Release-Seite von Hand ansehen. Neues `.deb` mit `sudo apt install ./…` einspielen, AppImage
   austauschen.
 - **Dienst:** Beim ersten Start der neuen App erkennt sie, dass die installierte
   Laufzeit älter ist als die mitgelieferte, kopiert die neue
   (`runtime/current` zeigt darauf; die letzten zwei Versionen bleiben) und startet den
-  Dienst neu. Terminals laufen in tmux weiter.
+  Dienst neu — **ohne Rückfrage**; laufende Agent-Läufe werden dabei unterbrochen,
+  Terminals laufen in tmux weiter. Ein von der App losgelöst gestarteter Server
+  (ohne Dienst) wird nicht automatisch auf die neue Version gebracht.
 - Ein Dienst aus dem Paket aktualisiert sich **nicht** über *Settings → Server
   update* oder `scripts/update.sh` (kein Git-Checkout); die App zeigt dort den
   Grund. Ein Checkout-Server funktioniert wie bisher ([RELEASES.md](RELEASES.md)).
@@ -214,7 +240,7 @@ Deinstallieren: *Settings → Service → Uninstall* (oder
 
 ```bash
 npm ci
-AGENTDECK_BUNDLE_TMUX=1 scripts/build-server-bundle.sh   # → dist-bundle/agentdeck-server/
+AGENTDECK_BUNDLE_TMUX=1 scripts/build-server-bundle.sh   # → dist-bundle/agentdeck-server/ (CI: =required)
 cd desktop
 npm ci                       # eigenes Projekt, nicht Teil der Root-Workspaces
 npm run typecheck && npm test
@@ -223,7 +249,10 @@ npm run dist                 # → desktop/release/ (AppImage + deb)
 
 `scripts/build-server-bundle.sh` lädt Node 22 von nodejs.org (SHA256-geprüft),
 baut `node-pty` gegen genau dieses Node und mit `AGENTDECK_BUNDLE_TMUX=1` ein
-statisches tmux (`bison` wird dafür gebraucht). Umgebungsvariablen stehen im
+statisches tmux (`bison` wird dafür gebraucht; `=required` bricht ab, wenn es
+nicht entsteht — so läuft es in CI). Die Prüfsummen von Node und der tmux-Quellen
+sind im Skript festgeschrieben; die Lizenztexte von tmux, libevent und ncurses
+liegen im Bundle unter `licenses/`. Umgebungsvariablen stehen im
 Kopf des Skripts. `desktop/` ist ein eigenes npm-Projekt, damit
 `npm ci` für den Server (CI, `scripts/update.sh`) kein Electron lädt. CI und
 Release: [RELEASES.md](RELEASES.md#desktop-pakete).
@@ -238,7 +267,11 @@ Release: [RELEASES.md](RELEASES.md#desktop-pakete).
 - **AppImage startet nicht, Meldung zu FUSE:** `sudo apt install libfuse2t64`, oder
   `./AgentDeck-*.AppImage --appimage-extract-and-run`.
 - **„Port 8787 ist belegt“:** Ein anderes Programm hört dort. Beende es oder
-  setze `port` in `~/.config/agentdeck/config.json`.
+  setze `port` in `~/.config/agentdeck/config.json`. Antwortet dort ein Programm
+  nur sehr langsam, sagt die App „antwortet nicht“ mit „Erneut versuchen“.
+- **Der Pairing-Code vom Handy ist ungültig:** Der Code rotiert nach jeder
+  Verwendung — also auch, wenn sich das Desktop-Fenster pairt. Den aktuellen Code
+  zeigt *Settings → Paired devices*.
 - **Dienst startet nicht:** `agentdeck-server service status --json`,
   `journalctl --user -u agentdeck -e`. Läuft noch ein von der App losgelöst
   gestarteter Server, verweigern `service install`/`start` mit Hinweis — erst

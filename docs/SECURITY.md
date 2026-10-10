@@ -143,7 +143,12 @@ Netzen hängt:
   nicht; `--no-sandbox` gibt es nur mit ausdrücklichem
   `AGENTDECK_NO_SANDBOX=1`.
 - Das Fenster lädt nur den Server-Origin; externe Links öffnen im
-  System-Browser, Navigation weg vom Server wird blockiert.
+  System-Browser, Navigation weg vom Server wird blockiert. Die Fenster-Bridge
+  (Dienst steuern, LAN schalten, App beenden) und das Auto-Pairing gibt es nur,
+  solange der Server auf `/api/health` als AgentDeck antwortet: Ein fremdes
+  Programm auf dem festen Port bekommt weder die Bridge noch den Pairing-Code.
+  Ein Prozess desselben Benutzers, der AgentDeck täuschend nachahmt, ist damit
+  nicht ausgeschlossen — er könnte ohnehin alles, was dieser Benutzer darf.
 - Der Dienst läuft als dein Benutzer (`systemd --user`), nicht als root.
 
 ## Betriebsempfehlungen
