@@ -23,14 +23,14 @@ export interface AppPort {
 }
 
 export interface PanePort {
-  getState(): PaneState & { reveal(id: string): void; reconcile(liveIds: readonly string[]): void };
+  getState(): PaneState & { reveal(id: string): void; reconcile(liveIds: readonly string[], fresh?: readonly string[]): void };
   subscribe(listener: (state: PaneState, prev: PaneState) => void): () => void;
 }
 
 export function attachPaneSync(app: AppPort, panes: PanePort): () => void {
   let ready = false;
 
-  const reconcile = () => panes.getState().reconcile(app.getState().terminals.map((t) => t.id));
+  const reconcile = (fresh: readonly string[] = []) => panes.getState().reconcile(app.getState().terminals.map((t) => t.id), fresh);
   const activateFocused = () => {
     const id = focusedTerminal(panes.getState());
     if (id && id !== app.getState().activeTerminalId) app.getState().setActiveTerminal(id);
@@ -50,7 +50,11 @@ export function attachPaneSync(app: AppPort, panes: PanePort): () => void {
       return;
     }
     if (!ready) return settle();
-    if (st.terminals !== prev.terminals) reconcile();
+    if (st.terminals !== prev.terminals) {
+      // A terminal that was not in the list before was just started: it may take a pane the user emptied.
+      const known = new Set(prev.terminals.map((t) => t.id));
+      reconcile(prev.terminalsLoaded ? st.terminals.map((t) => t.id).filter((id) => !known.has(id)) : []);
+    }
     const id = st.activeTerminalId;
     if (id && id !== prev.activeTerminalId && st.terminals.some((t) => t.id === id)) panes.getState().reveal(id);
   });
