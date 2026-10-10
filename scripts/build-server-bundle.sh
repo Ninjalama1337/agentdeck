@@ -238,22 +238,24 @@ chmod 0755 "$OUT/bin/agentdeck-server"
 
 # ---------------------------------------------------------------- tmux (optional)
 TMUX_NOTE="nicht gebuendelt (System-tmux)"
-case "${AGENTDECK_BUNDLE_TMUX:-}" in
+TMUX_MODE="${AGENTDECK_BUNDLE_TMUX:-}"
+case "$TMUX_MODE" in
   "" | 0) ;;
-  1)
-    info "Baue statisches tmux (optional) …"
-    if "$ROOT/scripts/lib/build-tmux-static.sh" "$OUT/bin/tmux" && "$OUT/bin/tmux" -V >/dev/null 2>&1; then
+  1 | required)
+    info "Baue tmux (libevent/ncurses statisch) …"
+    if "$ROOT/scripts/lib/build-tmux-static.sh" "$OUT/bin/tmux" "$OUT/licenses" && "$OUT/bin/tmux" -V >/dev/null 2>&1; then
       TMUX_NOTE="$("$OUT/bin/tmux" -V) (libevent/ncurses statisch)"
     else
-      rm -f "$OUT/bin/tmux"
-      warn "Statisches tmux konnte nicht gebaut werden — das Bundle nutzt das tmux des Systems."
+      rm -rf "$OUT/bin/tmux" "$OUT/licenses"
+      [[ "$TMUX_MODE" != "required" ]] || die "AGENTDECK_BUNDLE_TMUX=required: tmux wurde nicht gebaut oder startet nicht."
+      warn "tmux konnte nicht gebaut werden — das Bundle nutzt das tmux des Systems."
     fi
     ;;
   *)
-    if [[ -x "${AGENTDECK_BUNDLE_TMUX}" ]] && install -m 0755 "${AGENTDECK_BUNDLE_TMUX}" "$OUT/bin/tmux"; then
-      TMUX_NOTE="aus $AGENTDECK_BUNDLE_TMUX kopiert"
+    if [[ -x "$TMUX_MODE" ]] && install -m 0755 "$TMUX_MODE" "$OUT/bin/tmux"; then
+      TMUX_NOTE="aus $TMUX_MODE kopiert (ohne Lizenztexte)"
     else
-      warn "AGENTDECK_BUNDLE_TMUX=${AGENTDECK_BUNDLE_TMUX} ist keine ausfuehrbare Datei — ohne gebuendeltes tmux."
+      warn "AGENTDECK_BUNDLE_TMUX=$TMUX_MODE ist keine ausfuehrbare Datei — ohne gebuendeltes tmux."
     fi
     ;;
 esac
