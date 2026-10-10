@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { ServiceCliStatus } from '@agentdeck/shared';
 import { inspectPidFile, pidFilePath, type PidProbe } from '../util/pidfile.js';
 import { CliError, type ExecFn } from './exec.js';
+import { systemProc, type ProcAccess } from './proc.js';
 import {
   currentRuntimeDir,
   inspectBundle,
@@ -16,6 +17,7 @@ import {
   launcherPath,
   pruneRuntimes,
   removeRuntime,
+  runtimeDirOfExe,
   runtimePaths,
   runtimeVersionOf,
   switchCurrent,
@@ -46,6 +48,8 @@ export interface ServiceContext {
   /** Data dir of the server: its server.pid tells whether a server runs outside the service. */
   dataDir?: string;
   pidProbe?: PidProbe;
+  /** How to look at the running service process (default: /proc). */
+  proc?: ProcAccess;
   /** Wait after a start before checking the service stayed up (ms). */
   settleMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -79,13 +83,49 @@ function runtimeVersionFor(unit: ParsedUnit): string | undefined {
   }
 }
 
+interface RunningServer {
+  /** Runtime directory the process runs from (real path), if it is one of ours. */
+  dir?: string;
+  version?: string;
+  /** Environment the process was started with. */
+  env?: Record<string, string>;
+}
+
+/** What the service's main process really is — the symlink and the unit only say what a restart would start. */
+function inspectRunning(ctx: ServiceContext, state: UnitState): RunningServer {
+  if (!state.active || state.mainPid === undefined) return {};
+  const proc = ctx.proc ?? systemProc;
+  const exe = proc.exe(state.mainPid);
+  const dir = exe ? runtimeDirOfExe(exe, ctx.paths) : undefined;
+  const env = proc.environ(state.mainPid);
+  const version = dir ? runtimeVersionOf(dir) : undefined;
+  return { ...(dir ? { dir } : {}), ...(version ? { version } : {}), ...(env ? { env } : {}) };
+}
+
+/** Why the running process is not what an install now asks for, or undefined when it matches (or cannot be told). */
+function runningDiffers(running: RunningServer, wanted: { dir: string; host: string; port?: number }): string | undefined {
+  if (running.dir !== undefined && running.dir !== wanted.dir) {
+    return `it runs the server ${running.version ?? 'from another directory'}`;
+  }
+  if (running.env !== undefined) {
+    if (running.env.AGENTDECK_HOST !== wanted.host) {
+      return `it listens on ${running.env.AGENTDECK_HOST ?? 'the configured address'}, not ${wanted.host}`;
+    }
+    if (wanted.port !== undefined && running.env.AGENTDECK_PORT !== String(wanted.port)) {
+      return `it uses port ${running.env.AGENTDECK_PORT ?? 'from the config'}, not ${wanted.port}`;
+    }
+  }
+  return undefined;
+}
+
 export async function serviceStatus(ctx: ServiceContext): Promise<ServiceCliStatus> {
   const systemd = new Systemd(ctx.exec);
   const text = readUnit(ctx.paths.unitPath);
   const unit = text !== undefined ? parseUnit(text) : undefined;
   const usable = await systemd.available();
   const state: UnitState = usable && unit ? await systemd.state(DESKTOP_SERVICE_UNIT) : { active: false, enabled: false };
-  const runtimeVersion = unit?.managed ? runtimeVersionFor(unit) : undefined;
+  // The version that actually runs, not just the one the symlink would start next.
+  const runtimeVersion = unit?.managed ? (inspectRunning(ctx, state).version ?? runtimeVersionFor(unit)) : undefined;
   return {
     systemd: usable,
     installed: unit !== undefined,
@@ -120,9 +160,8 @@ function assertNoStrayServer(ctx: ServiceContext, state: UnitState): void {
   const pid = inspectPidFile(ctx.dataDir, ctx.pidProbe);
   if (pid?.running && pid.pid !== state.mainPid) {
     throw new CliError(
-      `An AgentDeck server is already running outside the service (pid ${pid.pid}, see ${pidFilePath(ctx.dataDir)}). ` +
-        'It would hold the port the service needs — stop it first (quit it in the desktop app, or `kill ' +
-        `${pid.pid}\`), then run this again.`,
+      `An AgentDeck server (pid ${pid.pid}, listed in ${pidFilePath(ctx.dataDir)}) is already running outside the service ` +
+        'and would hold the port the service needs. Stop it first, then run this again.',
     );
   }
 }
@@ -187,15 +226,29 @@ export async function serviceInstall(ctx: ServiceContext, opts: InstallOptions):
     await systemd.daemonReload();
   }
 
+  // Judge by the running process, not by the files: an earlier install may have
+  // written the unit or flipped the symlink and then failed to restart.
+  const running = inspectRunning(ctx, state);
+  const stale = runningDiffers(running, {
+    dir: fs.realpathSync(runtime.dir),
+    host: opts.lan ? '0.0.0.0' : '127.0.0.1',
+    ...(port !== undefined ? { port } : {}),
+  });
+  // A server that keeps running keeps its directory (it loads modules lazily).
+  let protect: string[] = running.dir ? [running.dir] : [];
   if (opts.start === false) {
     await systemd.enable(DESKTOP_SERVICE_UNIT, false);
     ctx.report('Enabled (not started)');
+    if (state.active && (unitChanged || runtimeChanged || stale)) {
+      ctx.report('The running service keeps its current version and settings until it is restarted');
+    }
   } else if (state.active) {
     await systemd.enable(DESKTOP_SERVICE_UNIT, false);
-    if (unitChanged || runtimeChanged) {
+    if (unitChanged || runtimeChanged || stale) {
       await systemd.restart(DESKTOP_SERVICE_UNIT);
-      ctx.report('Restarted the service (terminals keep running in tmux)');
+      ctx.report(`Restarted the service${stale ? ` (${stale})` : ''} — terminals keep running in tmux`);
       await ensureStaysUp(ctx, systemd);
+      protect = [];
     } else {
       ctx.report('The service already runs this version');
     }
@@ -203,9 +256,10 @@ export async function serviceInstall(ctx: ServiceContext, opts: InstallOptions):
     await systemd.enable(DESKTOP_SERVICE_UNIT, true);
     ctx.report('Enabled and started the service');
     await ensureStaysUp(ctx, systemd);
+    protect = [];
   }
 
-  const removed = pruneRuntimes(ctx.paths);
+  const removed = pruneRuntimes(ctx.paths, 2, protect);
   if (removed.length > 0) ctx.report(`Removed old server versions: ${removed.join(', ')}`);
   return serviceStatus(ctx);
 }
