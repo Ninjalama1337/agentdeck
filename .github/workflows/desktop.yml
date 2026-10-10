@@ -109,8 +109,11 @@ jobs:
         working-directory: desktop
         run: node scripts/smoke-packaged.mjs release/linux-unpacked/agentdeck
 
+      # Nur zum Ausprobieren eines PR-Builds. Ein volles Artifact-Kontingent des Kontos darf den Lauf nicht
+      # kippen (die Pakete am Release laedt der Schritt weiter unten hoch); kurze Aufbewahrung, die Pakete sind gross.
       - name: Pakete als Artifact hochladen
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: AgentDeck-Desktop-Linux
           path: |
@@ -118,6 +121,7 @@ jobs:
             desktop/release/AgentDeck-*.deb
             desktop/release/latest-linux.yml
           if-no-files-found: error
+          retention-days: 3
 
       # Das Release legt android.yml an — erst nach gruenen Tests (Typecheck + Tests in allen
       # Workspaces). Hier wird NICHT selbst eines erzeugt, sonst gaebe es ein Release ohne gruene
