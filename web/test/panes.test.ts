@@ -420,10 +420,9 @@ describe('sync with the active terminal', () => {
     list(['a', 'b']);
     panes.getState().assign(0, null);
     expect(panes.getState().slots).toEqual([null, 'b']);
-    // the server repeats its list (a reconnect, another terminal ending elsewhere): nothing moves in
+    // the server repeats its list (a reconnect), in another order: nothing moves in
     list(['a', 'b']);
-    list(['a', 'b', 'x']);
-    list(['a', 'b']);
+    list(['b', 'a']);
     expect(panes.getState().slots).toEqual([null, 'b']);
     // a terminal that is new to the list takes the pane
     list(['a', 'b', 'c']);
@@ -438,7 +437,8 @@ describe('sync with the active terminal', () => {
     panes.getState().assign(1, null);
     panes.getState().setCount(2);
     panes.getState().setCount(3);
-    expect(panes.getState().slots).toEqual(['a', null, 'c']);
+    // the new third pane takes the first terminal no pane shows; the emptied one stays empty
+    expect(panes.getState().slots).toEqual(['a', null, 'b']);
   });
 
   it('after a dropped login the remembered panes settle again with the next list', async () => {

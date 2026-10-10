@@ -74,6 +74,28 @@ describe('AppImage launcher (build/linux/agentdeck-launcher.sh)', () => {
     expect(await readFile(path.join(dir, 'zenity.log'), 'utf8')).toContain('Chromium-Sandbox');
   });
 
+  // The help text is meant to be pasted: run exactly the printed lines through a shell and check the profile it writes.
+  it('prints the AppArmor commands so that they work when pasted into a terminal', async () => {
+    const r = await launch([], { AGENTDECK_SANDBOX_PROBE: 'false' });
+    const lines = r.stderr.split('\n');
+    const start = lines.findIndex((l) => l.startsWith('sudo tee '));
+    const end = lines.findIndex((l) => l === 'PROFILE');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start); // the terminator stands alone at the start of its line
+    const target = path.join(dir, 'profile-out');
+    const script = [
+      // the real command line would say sudo and /etc/apparmor.d — redirect it into the temp dir
+      ...lines.slice(start, end + 1).map((l) => l.replace('sudo tee /etc/apparmor.d/agentdeck-appimage', `tee ${target}`)),
+    ].join('\n');
+    const pasted = await run('/bin/sh', ['-c', script], { PATH: '/usr/bin:/bin' });
+    expect(pasted.stderr).toBe(''); // no "here-document delimited by end-of-file"
+    expect(await readFile(target, 'utf8')).toBe(
+      'abi <abi/4.0>,\ninclude <tunables/global>\nprofile agentdeck-appimage "/home/me/AgentDeck.AppImage" flags=(unconfined) {\n  userns,\n}\n',
+    );
+    // the last step is a plain, runnable command line too
+    expect(lines).toContain('AGENTDECK_NO_SANDBOX=1 "/home/me/AgentDeck.AppImage"');
+  });
+
   it('does not pop up a window for the login autostart', async () => {
     const r = await launch(['--hidden'], { AGENTDECK_SANDBOX_PROBE: 'false' });
     expect(r.code).toBe(1);
