@@ -188,6 +188,12 @@ export function extraBinDirs(home = os.homedir()): string[] {
     path.join(home, '.cargo/bin'),
     path.join(home, '.deno/bin'),
     path.join(home, 'go/bin'),
+    path.join(home, '.volta/bin'),
+    path.join(home, '.local/share/pnpm'),
+    path.join(home, '.local/share/fnm/aliases/default/bin'),
+    path.join(home, '.local/share/mise/shims'),
+    path.join(home, '.asdf/shims'),
+    path.join(home, '.yarn/bin'),
     '/home/linuxbrew/.linuxbrew/bin',
     '/opt/homebrew/bin',
     '/usr/local/bin',
@@ -200,6 +206,8 @@ export function extraBinDirs(home = os.homedir()): string[] {
   } catch {
     // no nvm
   }
+  // The base system dirs: a service manager may start us with a PATH that lacks them.
+  dirs.push('/usr/bin', '/bin', '/snap/bin');
   return dirs;
 }
 

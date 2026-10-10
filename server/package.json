@@ -5,11 +5,12 @@
   "type": "module",
   "description": "AgentDeck backend: Fastify API, socket.io gateway, agent adapters, MCP bridge.",
   "bin": {
-    "agentdeck-mcp": "dist/mcp/bridge.js"
+    "agentdeck-mcp": "dist/mcp/bridge.js",
+    "agentdeck-server": "dist/cli.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && chmod +x dist/mcp/bridge.js",
+    "build": "tsc -p tsconfig.json && chmod +x dist/mcp/bridge.js dist/cli.js",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

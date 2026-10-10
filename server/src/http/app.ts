@@ -2,9 +2,6 @@
  * Fastify app factory: CORS, multipart, static SPA serving, auth hook,
  * socket.io gateway, store→WS broadcast wiring, error shaping.
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import fastify, {
@@ -42,11 +39,12 @@ import { VoiceService } from '../voice/transcribe.js';
 import { registerRoutes } from '../routes/index.js';
 import { terminalBroadcasts } from '../routes/terminals.js';
 import type { AppDeps } from '../routes/deps.js';
-import { NAME, REPO_ROOT, VERSION } from '../version.js';
+import { NAME, PACKAGED, REPO_ROOT, VERSION } from '../version.js';
 import { StatsDb } from '../stats/db.js';
 import { readClaudeTurn } from '../stats/claudeTranscript.js';
 import { newId } from '../util/ids.js';
 import { UpdateManager } from '../update/manager.js';
+import { findWebDist } from './webDist.js';
 
 const gzip = promisify(zlib.gzip);
 /** Smaller answers are not worth compressing. */
@@ -61,20 +59,7 @@ main{text-align:center;max-width:34rem;padding:2rem}code{background:#1c2230;padd
 <p>The web UI is not built yet. Run <code>npm run build -w web</code> and reload.</p>
 <p>REST API under <code>/api</code> · WebSocket under <code>/socket.io</code></p></main></body></html>`;
 
-/** Absolute path of the built web app, or undefined when not built. */
-export function findWebDist(): string | undefined {
-  if (process.env.AGENTDECK_WEB_DIST) {
-    const envCandidate = path.resolve(process.env.AGENTDECK_WEB_DIST);
-    if (fs.existsSync(path.join(envCandidate, 'index.html'))) return envCandidate;
-  }
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  // src/http (tsx dev) → ../../web/dist ; dist/http (built) → ../../../web/dist
-  const candidates = [path.resolve(here, '../../web/dist'), path.resolve(here, '../../../web/dist')];
-  for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, 'index.html'))) return candidate;
-  }
-  return undefined;
-}
+export { findWebDist };
 
 export interface BuiltApp {
   app: FastifyInstance;
@@ -311,6 +296,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   const updateManager = new UpdateManager({
     repoRoot: REPO_ROOT,
     currentVersion: VERSION,
+    packaged: PACKAGED,
     dataDir: config.dataDir,
     // A wildcard bind is reachable on loopback; a specific address only on itself.
     localUrl: `http://${config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host}:${config.port}`,
