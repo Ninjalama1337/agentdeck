@@ -392,8 +392,9 @@ describe('install judges by the running process, not by the files', () => {
     // The symlink moved on, the process did not.
     expect(fs.readlinkSync(base.paths.currentLink)).toBe('1.2.0');
     expect((await serviceStatus(base)).runtimeVersion).toBe('1.0.0');
-    // keep=2 alone would have removed 1.0.0 — the directory the running server loads modules from.
-    expect(fs.readdirSync(base.paths.runtimeRoot).sort()).toEqual(['1.0.0', '1.1.0', '1.2.0', 'current']);
+    // keep=2 alone would have removed 1.0.0 — the directory the running server loads modules from —
+    // and kept 1.1.0; now the running and the current one fill the two places.
+    expect(fs.readdirSync(base.paths.runtimeRoot).sort()).toEqual(['1.0.0', '1.2.0', 'current']);
     expect(messages.join('\n')).toMatch(/keeps its current version and settings until it is restarted/);
 
     // A normal install restarts it ("runtimeVersion != bundle" is how the desktop app finds out), then the old directory can go.
@@ -420,7 +421,11 @@ describe('install judges by the running process, not by the files', () => {
 });
 
 describe('a server running outside the service', () => {
-  const alive = (cmdline = 'node /x/app/server/dist/cli.js'): PidProbe => ({ alive: () => true, cmdline: () => cmdline });
+  const alive = (cmdline = ['node', '/x/app/server/dist/cli.js']): PidProbe => ({
+    alive: () => true,
+    cmdline: () => cmdline,
+    packageName: (file) => (file === '/x/app/server/package.json' ? '@agentdeck/server' : undefined),
+  });
   const withDataDir = (bundle: string | undefined, probe: PidProbe, pid = 777) => {
     const dataDir = path.join(tmp, 'server-data');
     writePidFile(dataDir, pid);
