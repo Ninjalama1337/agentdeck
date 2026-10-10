@@ -2,8 +2,9 @@
 //   npm run build && npm run smoke       (needs the Electron binary and xvfb-run)
 // Covers: bridge + auto-pairing before the page runs, detached start, close dialog, window state,
 // single instance, stop on close, --hidden, port conflict. For the real server bundle see smoke-real.mjs.
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createHarness, freePort, healthy, root, sleep, until } from './smoke-lib.mjs';
@@ -20,6 +21,48 @@ const h = await createHarness({
     FAKE_VERSION: '9.9.9',
   },
 });
+/** A program that is not AgentDeck on the server's port; it records everything it is asked. */
+function startStranger(listenPort) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url, auth: req.headers.authorization ? 'Bearer' : undefined });
+    if (req.url === '/api/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, name: 'not-agentdeck' }));
+    } else if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end("<!doctype html><title>foreign:</title><script>document.title = 'foreign:' + typeof window.agentdeckDesktop;</script>");
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  return new Promise((resolve) => {
+    server.listen(listenPort, '127.0.0.1', () =>
+      resolve({
+        requests,
+        close: () =>
+          new Promise((done) => {
+            server.closeAllConnections();
+            server.close(() => done());
+          }),
+      }),
+    );
+  });
+}
+
+/** The fake server again, started by hand (not by the app). */
+function startFake(dataDirectory, listenPort) {
+  return spawn(fake, [], {
+    stdio: 'ignore',
+    env: { ...process.env, FAKE_DATA_DIR: dataDirectory, FAKE_PORT: String(listenPort), FAKE_VERSION: '9.9.9' },
+  });
+}
+
+async function stopFake(dataDirectory) {
+  const pid = Number(fs.readFileSync(path.join(dataDirectory, 'server.pid'), 'utf8').trim());
+  process.kill(pid, 'SIGTERM');
+}
+
 const { check, launch, connectPage, closeWindow, readBounds, dialogs, answer, clearDialogs } = h;
 const { home, userData } = h.files;
 
@@ -186,17 +229,61 @@ try {
   await until(async () => !(await healthy(port)), 10000, 'server stop').catch(() => undefined);
 
   // ------------------------------------------------------------------ run 5: port taken by a stranger
-  console.log('--- run 5: foreign program on the port -> clear error, no other port');
-  const stranger = net.createServer((s) => s.end('HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi')).listen(port, '127.0.0.1');
-  await sleep(200);
+  console.log('--- run 5: foreign program on the port -> clear error, no other port, nothing handed to it');
+  const stranger1 = await startStranger(port);
   answer([{ response: 1, checkboxChecked: false }]);
   clearDialogs();
   const run5 = await launch();
   const exit5 = await Promise.race([run5.exited, sleep(40000).then(() => null)]);
-  stranger.close();
   const portDialog = dialogs().find((d) => /ist belegt/.test(d.message ?? ''));
   check('port conflict shows a clear message with the port (and a retry/quit choice)', Boolean(portDialog) && portDialog.message.includes(String(port)), JSON.stringify(dialogs()));
   check('the app quits on "Beenden" instead of using another port', exit5 !== null);
+  check(
+    'the stranger was only asked for /api/health: no page load, no pairing code',
+    stranger1.requests.every((r) => r.url === '/api/health') && stranger1.requests.length > 0,
+    JSON.stringify(stranger1.requests),
+  );
+  await stranger1.close();
+
+  // ------------------------------------------------------------------ run 6: a stranger takes the port under a running window
+  console.log('--- run 6: a foreign program replaces the server -> no bridge, no pairing code, no navigation');
+  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ closeAction: 'background', lanAccess: false, launchAtLogin: false }));
+  const run6 = await launch();
+  const page6 = await connectPage();
+  await until(async () => (await page6.evaluate('document.title')) === 'bridge=yes', 30000, 'page title of run 6');
+  page6.close();
+  await stopFake(dataDir); // the real server goes away …
+  await until(async () => !(await healthy(port)), 10000, 'server stop');
+  const stranger2 = await startStranger(port); // … and a stranger takes its port
+  h.reloadWindow(); // "Neu laden": the window loads whatever answers there
+  const foreignPage = await connectPage();
+  await until(async () => (await foreignPage.evaluate('document.title')).startsWith('foreign:'), 20000, 'the stranger\'s page');
+  check('a foreign page gets no window.agentdeckDesktop', (await foreignPage.evaluate('typeof window.agentdeckDesktop')) === 'undefined');
+  await sleep(1500);
+  check('the pairing code was not sent to the stranger (no POST /api/pair)', !stranger2.requests.some((r) => r.method === 'POST'), JSON.stringify(stranger2.requests));
+  check('the stranger got no login token either', !JSON.stringify(stranger2.requests).includes('Bearer'));
+  foreignPage.close();
+  await stranger2.close();
+
+  // The window shows the status page while nothing answers; a stranger appearing then must not pull it along.
+  h.reloadWindow();
+  await until(async () => (await h.targets()).some((t) => t.url.startsWith('data:text/html')), 15000, 'the status page');
+  check('with nothing on the port the window shows the status page', (await h.targets()).some((t) => t.url.startsWith('data:text/html')));
+  const stranger3 = await startStranger(port);
+  await sleep(5000);
+  const during = (await h.targets()).map((t) => t.url.slice(0, 20));
+  check('the status page does not follow a stranger that answers /api/health', during.every((u) => u.startsWith('data:')) && !stranger3.requests.some((r) => r.url === '/'), JSON.stringify({ during, requests: stranger3.requests }));
+  await stranger3.close();
+
+  // … but it loads the app as soon as the real server is back.
+  const back = startFake(dataDir, port);
+  await until(async () => (await h.targets()).some((t) => t.url.startsWith(`http://127.0.0.1:${port}/`)), 20000, 'the app to load again');
+  const again = await connectPage();
+  await until(async () => (await again.evaluate('document.title')) === 'bridge=yes', 15000, 'bridge after the server is back');
+  check('the app loads by itself when the AgentDeck server answers again (bridge present)', (await again.evaluate('typeof window.agentdeckDesktop')) === 'object');
+  again.close();
+  back.kill('SIGTERM');
+  h.killApps();
 } catch (err) {
   check('smoke test ran to completion', false, err instanceof Error ? err.stack : String(err));
   console.log(`--- output of the last app run:\n${h.lastOutput().slice(-3000)}`);

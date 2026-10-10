@@ -188,6 +188,9 @@ export async function createHarness(options) {
     closeWindow() {
       fs.writeFileSync(files.cmd, JSON.stringify({ close: true }));
     },
+    reloadWindow() {
+      fs.writeFileSync(files.cmd, JSON.stringify({ reload: true }));
+    },
     setBounds(bounds) {
       fs.writeFileSync(files.cmd, JSON.stringify({ bounds }));
     },
