@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveTmuxBinary } from '../src/term/tmux.js';
+import { resolveTmux, resolveTmuxBinary } from '../src/term/tmux.js';
 
 let tmp = '';
 
@@ -66,5 +66,39 @@ describe('resolveTmuxBinary', () => {
 
   it('finds nothing when there is no tmux anywhere', () => {
     expect(resolveTmuxBinary({ env: {}, bundleRoot: undefined, pathValue: path.join(tmp, 'empty') })).toBeUndefined();
+  });
+
+  it('passes over a tmux that does not run and reports it', () => {
+    const bundled = fakeTmux('bundle', 'bin', 'tmux');
+    const system = fakeTmux('sys', 'tmux');
+    const probe = (bin: string) => (bin === bundled ? 'version `GLIBC_2.38\' not found' : undefined);
+    const resolved = resolveTmux({ env: {}, bundleRoot: path.join(tmp, 'bundle'), pathValue: path.join(tmp, 'sys'), probe });
+    expect(resolved.bin).toBe(system);
+    expect(resolved.rejected).toEqual([{ path: bundled, reason: 'version `GLIBC_2.38\' not found' }]);
+  });
+
+  it('has no tmux when none of the candidates runs', () => {
+    const system = fakeTmux('sys', 'tmux');
+    const resolved = resolveTmux({ env: {}, bundleRoot: undefined, pathValue: path.join(tmp, 'sys'), probe: () => 'broken' });
+    expect(resolved.bin).toBeUndefined();
+    expect(resolved.rejected).toEqual([{ path: system, reason: 'broken' }]);
+  });
+
+  it('asks each distinct candidate once', () => {
+    const same = fakeTmux('sys', 'tmux');
+    const asked: string[] = [];
+    resolveTmux({ env: { AGENTDECK_TMUX: same }, bundleRoot: undefined, pathValue: path.join(tmp, 'sys'), probe: (bin) => (asked.push(bin), 'no') });
+    expect(asked).toEqual([same]);
+  });
+
+  it('really runs `tmux -V` by default', () => {
+    const good = path.join(tmp, 'good-tmux');
+    const bad = path.join(tmp, 'bad-tmux');
+    fs.writeFileSync(good, '#!/bin/sh\necho "tmux 9.9"\n', { mode: 0o755 });
+    fs.writeFileSync(bad, '#!/bin/sh\necho "libc.so.6: version GLIBC_2.99 not found" >&2\nexit 127\n', { mode: 0o755 });
+    const resolved = resolveTmux({ env: { AGENTDECK_TMUX: bad }, bundleRoot: undefined, pathValue: tmp + ':' + path.dirname(good) });
+    expect(resolved.rejected[0]).toMatchObject({ path: bad });
+    expect(resolved.rejected[0]?.reason).toContain('GLIBC_2.99');
+    expect(resolveTmux({ env: { AGENTDECK_TMUX: good }, bundleRoot: undefined, pathValue: '' }).bin).toBe(good);
   });
 });

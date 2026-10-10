@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SERVICE_UNIT_MARKER } from '@agentdeck/shared';
 import { CliError, type ExecFn } from '../src/cli/exec.js';
+import { noProc, type ProcAccess } from '../src/cli/proc.js';
 import { launcherPath } from '../src/cli/runtime.js';
 import {
   serviceControl,
@@ -24,6 +25,10 @@ class FakeSystemctl {
   /** Make `start`/`enable --now`/`restart` leave the unit dead (a crashing service). */
   crashes = false;
   mainPid = 4711;
+  /** `restart` fails (the unit and the symlink are already changed by then). */
+  failRestart = false;
+  /** Called whenever the unit (re)starts — the fake process is whatever the files say at that moment. */
+  onStart: (() => void) | undefined;
   calls: string[] = [];
 
   exec: ExecFn = async (command, args) => {
@@ -47,14 +52,17 @@ class FakeSystemctl {
         };
       case 'enable':
         this.enabled = true;
-        if (rest.includes('--now')) this.active = !this.crashes;
+        if (rest.includes('--now')) this.started();
         return ok;
       case 'disable':
         this.enabled = false;
         return ok;
-      case 'start':
       case 'restart':
-        this.active = !this.crashes;
+        if (this.failRestart) return { code: 1, stdout: '', stderr: 'Job for agentdeck.service failed' };
+        this.started();
+        return ok;
+      case 'start':
+        this.started();
         return ok;
       case 'stop':
         this.active = false;
@@ -65,6 +73,31 @@ class FakeSystemctl {
         throw new Error(`unexpected systemctl verb ${verb}`);
     }
   };
+
+  private started(): void {
+    this.active = !this.crashes;
+    if (this.active) this.onStart?.();
+  }
+}
+
+/** The service's main process as /proc would show it: set when the fake unit starts, from the files at that moment. */
+class FakeProc implements ProcAccess {
+  running: { exe: string; env: Record<string, string> } | undefined;
+  exe(): string | undefined {
+    return this.running?.exe;
+  }
+  environ(): Record<string, string> | undefined {
+    return this.running?.env;
+  }
+  /** What `systemctl start` would exec right now. */
+  startFrom(ctx: ServiceContext): void {
+    const dir = fs.realpathSync(ctx.paths.currentLink);
+    const unit = parseUnit(fs.readFileSync(ctx.paths.unitPath, 'utf8'));
+    this.running = {
+      exe: path.join(dir, 'node/bin/node'),
+      env: { ...(unit.host ? { AGENTDECK_HOST: unit.host } : {}), ...(unit.port ? { AGENTDECK_PORT: String(unit.port) } : {}) },
+    };
+  }
 }
 
 let tmp = '';
@@ -98,6 +131,7 @@ function context(bundleRoot: string | undefined, overrides: Partial<ServiceConte
     bundleRoot,
     report: (m) => messages.push(m),
     settleMs: 0,
+    proc: noProc,
     ...overrides,
   };
 }
@@ -292,6 +326,96 @@ describe('service install', () => {
   it('complains when the service does not stay up', async () => {
     sys.crashes = true;
     await expect(serviceInstall(context(makeBundle('1.2.3')), { lan: false })).rejects.toThrow(/did not stay up.*journalctl/s);
+  });
+});
+
+describe('install judges by the running process, not by the files', () => {
+  let proc: FakeProc;
+  const withProc = (bundle: string | undefined): ServiceContext => context(bundle, { proc });
+
+  beforeEach(() => {
+    proc = new FakeProc();
+  });
+
+  it('retries a restart that failed after the unit was written', async () => {
+    const ctx = withProc(makeBundle('1.2.3'));
+    sys.onStart = () => proc.startFrom(ctx);
+    await serviceInstall(ctx, { lan: false });
+    expect(proc.running?.env.AGENTDECK_HOST).toBe('127.0.0.1');
+
+    sys.failRestart = true;
+    await expect(serviceInstall(ctx, { lan: true })).rejects.toThrow(/systemctl --user restart failed/);
+    expect(parseUnit(unitText(ctx)).lan).toBe(true); // written already, the process still listens on loopback
+
+    sys.failRestart = false;
+    sys.calls.length = 0;
+    messages.length = 0;
+    await serviceInstall(ctx, { lan: true });
+    expect(sys.calls).toContain('restart agentdeck.service');
+    expect(messages.join('\n')).toMatch(/Restarted the service \(it listens on 127\.0\.0\.1, not 0\.0\.0\.0\)/);
+    expect(proc.running?.env.AGENTDECK_HOST).toBe('0.0.0.0');
+
+    // ... and now it really is up to date
+    sys.calls.length = 0;
+    await serviceInstall(ctx, { lan: true });
+    expect(sys.calls.some((c) => c.startsWith('restart'))).toBe(false);
+  });
+
+  it('notices a changed port or version of the running process even when the files look current', async () => {
+    const ctx = withProc(makeBundle('1.0.0'));
+    sys.onStart = () => proc.startFrom(ctx);
+    await serviceInstall(ctx, { lan: false, port: 9100 });
+    // someone changed the unit behind our back: the process runs another port
+    proc.running = { exe: proc.running?.exe as string, env: { AGENTDECK_HOST: '127.0.0.1', AGENTDECK_PORT: '8000' } };
+    sys.calls.length = 0;
+    await serviceInstall(ctx, { lan: false });
+    expect(sys.calls).toContain('restart agentdeck.service');
+    expect(proc.running?.env.AGENTDECK_PORT).toBe('9100');
+  });
+
+  it('install --no-start leaves the running service alone: status shows what runs, pruning spares its directory', async () => {
+    const base = withProc(undefined);
+    sys.onStart = () => proc.startFrom(base);
+    const install = (v: string, opts: { start?: boolean } = {}) =>
+      serviceInstall({ ...base, bundleRoot: makeBundle(v) }, { lan: false, ...opts });
+    const age = (v: string, minutes: number) => {
+      const t = new Date(Date.now() - minutes * 60_000);
+      fs.utimesSync(path.join(base.paths.runtimeRoot, v), t, t);
+    };
+
+    await install('1.0.0');
+    age('1.0.0', 30);
+    await install('1.1.0', { start: false });
+    age('1.1.0', 20);
+    await install('1.2.0', { start: false });
+
+    // The symlink moved on, the process did not.
+    expect(fs.readlinkSync(base.paths.currentLink)).toBe('1.2.0');
+    expect((await serviceStatus(base)).runtimeVersion).toBe('1.0.0');
+    // keep=2 alone would have removed 1.0.0 — the directory the running server loads modules from.
+    expect(fs.readdirSync(base.paths.runtimeRoot).sort()).toEqual(['1.0.0', '1.1.0', '1.2.0', 'current']);
+    expect(messages.join('\n')).toMatch(/keeps its current version and settings until it is restarted/);
+
+    // A normal install restarts it ("runtimeVersion != bundle" is how the desktop app finds out), then the old directory can go.
+    await install('1.2.0');
+    expect((await serviceStatus(base)).runtimeVersion).toBe('1.2.0');
+    expect(sys.calls).toContain('restart agentdeck.service');
+    expect(fs.readdirSync(base.paths.runtimeRoot)).not.toContain('1.0.0');
+    expect(fs.readdirSync(base.paths.runtimeRoot)).toContain('1.2.0');
+  });
+
+  it('status falls back to the symlink when the process cannot be inspected', async () => {
+    const ctx = context(makeBundle('1.2.3')); // noProc
+    await serviceInstall(ctx, { lan: false });
+    expect((await serviceStatus(ctx)).runtimeVersion).toBe('1.2.3');
+  });
+
+  it('ignores a service whose executable is not in the runtime tree', async () => {
+    const ctx = withProc(makeBundle('1.2.3'));
+    sys.onStart = () => proc.startFrom(ctx);
+    await serviceInstall(ctx, { lan: false });
+    proc.running = { exe: '/usr/bin/node', env: { AGENTDECK_HOST: '127.0.0.1' } };
+    expect((await serviceStatus(ctx)).runtimeVersion).toBe('1.2.3'); // from the symlink
   });
 });
 
