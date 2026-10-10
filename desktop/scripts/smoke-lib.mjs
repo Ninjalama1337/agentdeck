@@ -87,6 +87,10 @@ export async function createHarness(options) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `agentdeck-${options.tag ?? 'smoke'}-`));
   const home = path.join(tmp, 'home');
   fs.mkdirSync(home, { recursive: true });
+  // Own runtime dir: `systemctl --user` must not reach the real user manager (a CI runner has one, and
+  // the "set up as a service?" box of a packaged app cannot be answered here) and the tmux socket lives in it.
+  const runDir = path.join(tmp, 'run');
+  fs.mkdirSync(runDir, { mode: 0o700 });
   const files = {
     tmp,
     home,
@@ -103,7 +107,7 @@ export async function createHarness(options) {
   const runAs = process.env.SMOKE_RUN_AS ? Number(process.env.SMOKE_RUN_AS) : null;
   if (runAs !== null) {
     fs.mkdirSync(files.userData, { recursive: true });
-    for (const dir of [tmp, home, files.userData]) fs.chownSync(dir, runAs, runAs);
+    for (const dir of [tmp, home, runDir, files.userData]) fs.chownSync(dir, runAs, runAs);
   }
 
   const baseEnv = {
@@ -112,6 +116,7 @@ export async function createHarness(options) {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_DATA_HOME: path.join(home, '.local/share'),
     XDG_STATE_HOME: path.join(home, '.local/state'),
+    XDG_RUNTIME_DIR: runDir,
     ...(serverBin ? { AGENTDECK_SERVER_BIN: serverBin } : {}),
     AGENTDECK_DESKTOP_USER_DATA: files.userData,
     AGENTDECK_NO_UPDATE_CHECK: '1',
