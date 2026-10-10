@@ -62,7 +62,7 @@ describe('looksLikeServer (ported from server/src/util/pidfile.ts)', () => {
   });
 });
 
-function probe(over: Partial<ProcessProbe> & { alive?: boolean }): ProcessProbe {
+function probe(over: { alive?: boolean; cmdline?: ProcessProbe['cmdline']; cwd?: ProcessProbe['cwd']; packageName?: ProcessProbe['packageName'] }): ProcessProbe {
   return {
     alive: () => over.alive ?? true,
     cmdline: over.cmdline ?? (() => undefined),
