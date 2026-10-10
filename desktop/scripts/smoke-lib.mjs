@@ -1,7 +1,7 @@
 // Shared harness of the headless smoke tests (smoke.mjs, smoke-real.mjs): launches the real
 // Electron app under xvfb with a throw-away HOME and drives its window over the DevTools protocol.
 // Native message boxes are answered by smoke-entry.cjs (nothing of this ships in the package).
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = path.join(root, 'node_modules/electron/dist/electron');
+
+/** Since Electron 44 `npm ci` no longer downloads the binary: fetch it on first use (no-op when present). */
+function ensureElectron() {
+  if (fs.existsSync(electron)) return;
+  const done = spawnSync(process.execPath, [path.join(root, 'node_modules/electron/install.js')], { stdio: 'inherit' });
+  if (done.status !== 0 || !fs.existsSync(electron)) throw new Error('Electron binary missing — run: npx install-electron');
+}
 const entry = path.join(root, 'scripts/smoke-entry.cjs');
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -132,6 +139,7 @@ export async function createHarness(options) {
     /** Starts the app; returns { child, exited, output }. */
     async launch(extraArgs = [], extraEnv = {}) {
       debugPort = await freePort(); // a fresh DevTools port per run: the previous one may sit in TIME_WAIT
+      if (!options.app) ensureElectron();
       const command = options.app
         ? options.app(debugPort, extraArgs)
         : { file: electron, args: [entry, '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${debugPort}`, ...extraArgs] };
