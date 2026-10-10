@@ -62,4 +62,8 @@ export class MemFs implements FileSystem {
   async symlink(target: string, link: string): Promise<void> {
     this.links.set(link, target);
   }
+  readonly writable: string[] = [];
+  async makeUserWritable(dir: string): Promise<void> {
+    this.writable.push(dir);
+  }
 }

@@ -731,6 +731,11 @@ html[data-layout='desktop'] .sheet-handle {
   display: none;
 }
 
+/* Toasts span the whole width on a phone; on a wide window they stay a readable size. */
+html[data-layout='desktop'] .toast-card {
+  max-width: 36rem;
+}
+
 /* Hover feedback for the cards and rows that are buttons (the UI was made for touch: it only had :active). */
 @media (hover: hover) {
   html[data-layout='desktop'] .glass.press:hover {

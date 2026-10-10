@@ -44,7 +44,11 @@ export function attachPaneSync(app: AppPort, panes: PanePort): () => void {
   };
 
   const unsubscribeApp = app.subscribe((st, prev) => {
-    if (!st.terminalsLoaded) return;
+    if (!st.terminalsLoaded) {
+      // The list was reset (login dropped): the next one settles the panes again.
+      ready = false;
+      return;
+    }
     if (!ready) return settle();
     if (st.terminals !== prev.terminals) reconcile();
     const id = st.activeTerminalId;

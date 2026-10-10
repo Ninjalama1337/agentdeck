@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Route } from '../store/route';
+import { isDesktopApp } from '../util/desktop';
 
 /**
  * Desktop layout: a wide window with a precise pointer (mouse, trackpad) —
@@ -8,9 +9,16 @@ import type { Route } from '../store/route';
  */
 export const DESKTOP_MIN_WIDTH = 1024;
 
+/**
+ * Inside the desktop app the window is zoomed with Ctrl+Plus, which shrinks the
+ * CSS width (a 1280px window at 200% is 640 CSS px) — that must not flip the
+ * app into the phone layout, so the threshold is much lower there.
+ */
+export const DESKTOP_APP_MIN_WIDTH = 640;
+
 /** The one rule that decides between the two layouts. */
-export function isDesktopLayout(viewport: { width: number; finePointer: boolean }): boolean {
-  return viewport.finePointer && viewport.width >= DESKTOP_MIN_WIDTH;
+export function isDesktopLayout(viewport: { width: number; finePointer: boolean; desktopApp?: boolean }): boolean {
+  return viewport.finePointer && viewport.width >= (viewport.desktopApp ? DESKTOP_APP_MIN_WIDTH : DESKTOP_MIN_WIDTH);
 }
 
 const POINTER_QUERY = '(pointer: fine)';
@@ -26,7 +34,7 @@ function pointerList(): MediaQueryList | null {
 /** The layout for the window as it is right now (false without a browser). */
 export function desktopLayoutNow(): boolean {
   if (typeof window === 'undefined') return false;
-  return isDesktopLayout({ width: window.innerWidth, finePointer: pointerList()?.matches ?? false });
+  return isDesktopLayout({ width: window.innerWidth, finePointer: pointerList()?.matches ?? false, desktopApp: isDesktopApp() });
 }
 
 function subscribe(onChange: () => void): () => void {

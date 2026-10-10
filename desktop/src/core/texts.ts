@@ -5,8 +5,9 @@ export const TEXTS = {
     message: 'Als Hintergrunddienst einrichten?',
     detail:
       'AgentDeck kann als Dienst Ihres Benutzerkontos laufen (systemd --user). Er startet beim Anmelden, ' +
-      'auch ohne dieses Fenster: Agenten, Routinen und das Handy bleiben erreichbar. ' +
-      'Terminals laufen in tmux und gehen dabei nicht verloren.\n\n' +
+      'auch ohne dieses Fenster: Agenten, Routinen und Benachrichtigungen laufen weiter. ' +
+      'Terminals laufen in tmux und gehen dabei nicht verloren. ' +
+      'Das Handy erreicht ihn, sobald Sie in den Einstellungen „Handy-Zugriff im LAN“ einschalten.\n\n' +
       'Ohne Dienst läuft der Server nur, solange Sie ihn über diese App gestartet haben. ' +
       'Sie können das jederzeit in den Einstellungen ändern.',
     install: 'Als Dienst einrichten',
@@ -26,6 +27,19 @@ export const TEXTS = {
   serverBinMissing:
     'Der mitgelieferte AgentDeck-Server wurde nicht gefunden. Die Installation ist unvollständig — bitte AgentDeck neu installieren.',
   stopFailed: 'Der Dienst konnte nicht gestoppt werden',
+  stopFailedQuit: 'Trotzdem beenden (Dienst läuft weiter)',
+  cancel: 'Abbrechen',
+  portUnresponsive: (port: number) => ({
+    message: `Port ${port} antwortet nicht`,
+    detail:
+      `Auf 127.0.0.1:${port} nimmt ein Programm Verbindungen an, antwortet aber nicht rechtzeitig. ` +
+      'Läuft AgentDeck gerade erst hoch, hilft „Erneut versuchen“. Sonst das Programm beenden, das den Port hält. ' +
+      'AgentDeck weicht bewusst nicht auf einen anderen Port aus.',
+  }),
+  renderCrash: {
+    title: 'Das Fenster ist mehrfach abgestürzt',
+    detail: 'AgentDeck lädt die Seite nicht noch einmal automatisch. Neu laden mit Strg+Umschalt+R, oder die App neu starten.',
+  },
   update: {
     message: (version: string) => `AgentDeck ${version} ist verfügbar`,
     detail:

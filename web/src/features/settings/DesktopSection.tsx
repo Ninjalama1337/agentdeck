@@ -9,6 +9,8 @@ import {
   closeActionHint,
   confirmStep,
   createDesktopController,
+  lanAccessAvailable,
+  LAN_UNAVAILABLE_HINT,
   serviceActions,
   summarizeServer,
   type DesktopController,
@@ -51,7 +53,10 @@ export function DesktopSection({ bridge }: { bridge: DesktopBridge }) {
   const update = (patch: Partial<DesktopSettings>) => controller.current?.update(patch);
   const summary = status ? summarizeServer(status) : null;
   const actions = serviceActions(status);
-  const lan = lanPending ?? settings?.lanAccess ?? false;
+  const lanAvailable = lanAccessAvailable(status);
+  const lan = (lanAvailable ? lanPending : null) ?? settings?.lanAccess ?? false;
+  // A bridge call is running: nothing else can be changed until it answered.
+  const working = busy !== null;
 
   const runAction = (action: DesktopServiceAction) => {
     const step = confirmStep(armed, action);
@@ -75,23 +80,37 @@ export function DesktopSection({ bridge }: { bridge: DesktopBridge }) {
             <Segmented
               value={settings.closeAction}
               onChange={(closeAction) => void update({ closeAction })}
+              disabled={working}
               options={CLOSE_ACTIONS.map(({ value, label }) => ({ value, label }))}
             />
             <p className="mt-1.5 text-[12px] leading-snug text-dim">{closeActionHint(settings.closeAction)}</p>
           </div>
 
           <Row title="Start at login" hint="Starts AgentDeck when you log in — the server only, without a window">
-            <Toggle label="Start at login" checked={settings.launchAtLogin} onChange={(launchAtLogin) => void update({ launchAtLogin })} />
+            <Toggle
+              label="Start at login"
+              checked={settings.launchAtLogin}
+              disabled={working}
+              onChange={(launchAtLogin) => void update({ launchAtLogin })}
+            />
           </Row>
 
-          <Row title="Phone access in the local network" hint="Lets your phone reach this computer. Off: only this computer can.">
+          <Row
+            title="Phone access in the local network"
+            hint={
+              status && !lanAvailable
+                ? LAN_UNAVAILABLE_HINT
+                : 'Lets your phone reach this computer. Off: only this computer can.'
+            }
+          >
             <Toggle
               label="Phone access in the local network"
               checked={lan}
+              disabled={working || !lanAvailable}
               onChange={(v) => setLanPending(v === settings.lanAccess ? null : v)}
             />
           </Row>
-          {lanPending !== null && (
+          {lanPending !== null && lanAvailable && (
             <div className="mb-2 rounded-xl border border-accent/30 bg-accent/10 p-3" role="alert">
               <p className="text-[12.5px] leading-snug">
                 {lanPending ? 'Phones on your network will be able to reach AgentDeck. ' : 'Only this computer will be able to reach AgentDeck. '}
@@ -100,7 +119,7 @@ export function DesktopSection({ bridge }: { bridge: DesktopBridge }) {
               <div className="mt-2.5 flex gap-2">
                 <button
                   type="button"
-                  disabled={busy !== null}
+                  disabled={working}
                   onClick={() => {
                     const next = lanPending;
                     setLanPending(null);
@@ -146,7 +165,7 @@ export function DesktopSection({ bridge }: { bridge: DesktopBridge }) {
                 <button
                   key={spec.action}
                   type="button"
-                  disabled={busy !== null}
+                  disabled={working}
                   onClick={() => runAction(spec.action)}
                   className={clsx(
                     'press h-9 rounded-xl border px-3.5 text-[13px] font-medium disabled:opacity-45',

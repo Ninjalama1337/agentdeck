@@ -52,6 +52,20 @@ export async function startFailed(win: BrowserWindow | null, message: string, de
   return result.response === 0;
 }
 
+/** Stopping the server failed: leave anyway (it keeps running) or stay in the app. */
+export async function stopFailed(win: BrowserWindow | null, message: string): Promise<'quit-anyway' | 'cancel'> {
+  const result = await box(win, {
+    type: 'error',
+    title: TEXTS.appName,
+    message: TEXTS.stopFailed,
+    detail: message,
+    buttons: [TEXTS.stopFailedQuit, TEXTS.cancel],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  return result.response === 0 ? 'quit-anyway' : 'cancel';
+}
+
 export async function showError(win: BrowserWindow | null, message: string, detail: string): Promise<void> {
   await box(win, { type: 'error', title: TEXTS.appName, message, detail, buttons: ['OK'] });
 }

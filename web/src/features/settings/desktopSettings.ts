@@ -77,6 +77,17 @@ export function serviceActions(status: DesktopServerStatus | null): ServiceActio
   return out;
 }
 
+/** Why the LAN switch is unavailable for a server the app did not start. */
+export const LAN_UNAVAILABLE_HINT = 'This server was not started by AgentDeck — change it where you started it.';
+
+/**
+ * Phone access applies by restarting the server the app runs (service reinstall),
+ * which only works for one it controls — never for a server something else started.
+ */
+export function lanAccessAvailable(status: DesktopServerStatus | null): boolean {
+  return status !== null && status.controllable;
+}
+
 /** Two taps for the actions that take the server down: the first arms, the second runs. */
 export function confirmStep(
   armed: DesktopServiceAction | null,
@@ -155,6 +166,11 @@ export function createDesktopController(bridge: DesktopBridge, onError: (message
       return () => listeners.delete(listener);
     },
     async update(patch) {
+      // The server cannot be restarted into another binding if the app did not start it.
+      if (patch.lanAccess !== undefined && patch.lanAccess !== state.settings?.lanAccess && !lanAccessAvailable(state.status)) {
+        onError(LAN_UNAVAILABLE_HINT);
+        return false;
+      }
       set({ busy: 'settings' });
       try {
         set({ settings: await call(() => bridge.setSettings(patch)) });
