@@ -32,6 +32,7 @@ setInterval(() => {
       const cmd = JSON.parse(fs.readFileSync(cmdFile, 'utf8'));
       if (cmd.bounds) win.setBounds(cmd.bounds);
       if (cmd.close) win.close(); // same event as the title bar's close button
+      if (cmd.reload) win.webContents.reload(); // the menu's "Neu laden"
     } catch {}
     fs.rmSync(cmdFile, { force: true });
   }
