@@ -1,5 +1,7 @@
 # Build output (esbuild bundle, electron-builder packages)
 dist/
+# ... except the fake server bundle of the tests, whose path must look like the real one (server/dist/cli.js)
+!test/fixtures/**/dist/
 release/
 node_modules/
 *.tsbuildinfo
