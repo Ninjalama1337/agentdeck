@@ -32,11 +32,22 @@ async function boot(initial: Record<string, string>): Promise<Store> {
   });
   vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
   const target = new EventTarget() as typeof win;
-  target.location = { hash: '', pathname: '/', search: '' };
+  // Like a browser: assigning the hash fires hashchange, replaceState does not.
+  let hash = '';
+  target.location = {
+    get hash() {
+      return hash;
+    },
+    set hash(value: string) {
+      hash = value;
+      target.dispatchEvent(new Event('hashchange'));
+    },
+    pathname: '/',
+    search: '',
+  };
   target.history = {
     replaceState: (_state, _title, url) => {
-      const hash = String(url).includes('#') ? String(url).slice(String(url).indexOf('#')) : '';
-      target.location.hash = hash;
+      hash = String(url).includes('#') ? String(url).slice(String(url).indexOf('#')) : '';
     },
   };
   win = target;
@@ -77,8 +88,6 @@ describe('where the user was, per server', () => {
   it('follows the user around: the screen and the open chat are written as they change', async () => {
     const { useAppStore } = await boot(LEFT_OFF);
     useAppStore.getState().navigate({ name: 'git' });
-    win.location.hash = '#/git';
-    win.dispatchEvent(new Event('hashchange'));
     expect(storage.get('agentdeck:route')).toBe('#/git');
     useAppStore.setState({ activeSessionId: 's2' });
     expect(storage.get('agentdeck:session')).toBe('s2');
@@ -114,8 +123,6 @@ describe('a login the server turns down (401)', () => {
     const { useAppStore } = await boot(LEFT_OFF);
     win.dispatchEvent(new CustomEvent('agentdeck:unauthorized'));
     useAppStore.getState().navigate({ name: 'home' });
-    win.location.hash = '#/';
-    win.dispatchEvent(new Event('hashchange'));
     useAppStore.setState({ activeSessionId: null });
     expect(storage.get('agentdeck:route')).toBe('#/code');
     expect(storage.get('agentdeck:session')).toBe('s1');
