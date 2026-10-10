@@ -7,7 +7,11 @@
 # Absichtlich NICHT voll statisch: eine statische glibc laedt NSS-Module des
 # Hosts nach und stolpert ueber andere glibc-Versionen.
 #
-#   scripts/lib/build-tmux-static.sh <ausgabedatei>
+#   scripts/lib/build-tmux-static.sh <ausgabedatei> [<lizenz-ordner>]
+#
+# Mit <lizenz-ordner> werden die Lizenztexte von tmux, libevent und ncurses aus den
+# Quell-Tarballs dorthin kopiert (tmux-COPYING, libevent-LICENSE, ncurses-COPYING) —
+# wer die Binary weitergibt, gibt die Lizenzen mit.
 #
 # Wird von scripts/build-server-bundle.sh (AGENTDECK_BUNDLE_TMUX=1) aufgerufen.
 # Die Quell-Tarballs sind unten mit Version und SHA256 gepinnt; Aenderungen an
@@ -41,9 +45,11 @@ TERMINFO_FALLBACKS="xterm-256color,xterm,screen-256color,screen,tmux-256color,tm
 info() { printf '==> %s\n' "$*" >&2; }
 die()  { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 
-[[ $# -eq 1 && -n "$1" ]] || die "Aufruf: $0 <ausgabedatei>"
+[[ ($# -eq 1 || $# -eq 2) && -n "$1" ]] || die "Aufruf: $0 <ausgabedatei> [<lizenz-ordner>]"
 OUTFILE="$1"
 [[ "$OUTFILE" = /* ]] || OUTFILE="$PWD/$OUTFILE"
+LICENSES_DIR="${2:-}"
+[[ -z "$LICENSES_DIR" || "$LICENSES_DIR" = /* ]] || LICENSES_DIR="$PWD/$LICENSES_DIR"
 
 for tool in curl tar make gcc sha256sum; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool nicht gefunden."
@@ -103,7 +109,8 @@ TMUX_TAR="$(fetch "$TMUX_URL" "$TMUX_SHA256")"
 
 # ---------------------------------------------------------------- libevent
 info "Baue libevent $LIBEVENT_VERSION …"
-SRC="$(unpack "$LIBEVENT_TAR" "libevent-$LIBEVENT_VERSION")"
+LIBEVENT_SRC="$(unpack "$LIBEVENT_TAR" "libevent-$LIBEVENT_VERSION")"
+SRC="$LIBEVENT_SRC"
 (
   cd "$SRC"
   quiet ./configure --prefix="$PREFIX" --disable-shared --enable-static --with-pic \
@@ -114,7 +121,8 @@ SRC="$(unpack "$LIBEVENT_TAR" "libevent-$LIBEVENT_VERSION")"
 
 # ---------------------------------------------------------------- ncurses
 info "Baue ncurses $NCURSES_VERSION …"
-SRC="$(unpack "$NCURSES_TAR" "ncurses-$NCURSES_VERSION")"
+NCURSES_SRC="$(unpack "$NCURSES_TAR" "ncurses-$NCURSES_VERSION")"
+SRC="$NCURSES_SRC"
 (
   cd "$SRC"
   quiet ./configure --prefix="$PREFIX" --without-shared --with-normal --without-debug \
@@ -157,4 +165,10 @@ fi
 strip "$BIN" 2>/dev/null || true
 mkdir -p "$(dirname "$OUTFILE")"
 install -m 0755 "$BIN" "$OUTFILE"
+if [[ -n "$LICENSES_DIR" ]]; then
+  mkdir -p "$LICENSES_DIR"
+  install -m 0644 "$WORK/src/tmux-$TMUX_VERSION/COPYING" "$LICENSES_DIR/tmux-COPYING"
+  install -m 0644 "$LIBEVENT_SRC/LICENSE" "$LICENSES_DIR/libevent-LICENSE"
+  install -m 0644 "$NCURSES_SRC/COPYING" "$LICENSES_DIR/ncurses-COPYING"
+fi
 info "tmux $("$OUTFILE" -V | cut -d' ' -f2) -> $OUTFILE"

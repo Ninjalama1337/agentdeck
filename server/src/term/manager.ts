@@ -25,12 +25,14 @@ import type { DeckNotificationState } from '@agentdeck/shared';
 import { interpretClaudeHook, removeClaudeHookSettings, withClaudeHooks, writeClaudeHookSettings } from './claudeHooks.js';
 import {
   isTmuxAvailable,
+  lastTmuxFailure,
+  rejectedTmuxBinaries,
+  tmuxSessionState,
   tmuxCommand,
   tmuxSocketPath,
   tmuxSessionName,
   createTmuxSession,
   applyTmuxSessionOptions,
-  hasTmuxSession,
   killTmuxSession,
   resizeTmuxWindow,
   captureTmuxPane,
@@ -248,6 +250,13 @@ export class TerminalManager {
     }
   }
 
+  /**
+   * Records of terminals whose tmux session could not be checked or attached at
+   * startup (tmux of another version than the running tmux server, a crash …):
+   * not shown, but kept in terminals.json — the sessions may well be alive.
+   */
+  private readonly unrestored = new Map<string, PersistedTerminal>();
+
   private savePersisted(): void {
     const fp = this.persistedFilePath();
     if (!fp) return;
@@ -257,6 +266,9 @@ export class TerminalManager {
         projectPath: t.projectPath,
         ...(t.tmuxSession ? { tmuxSession: t.tmuxSession } : {}),
       }));
+      for (const rec of this.unrestored.values()) {
+        if (!this.active.has(rec.info.id)) records.push(rec);
+      }
       fs.mkdirSync(path.dirname(fp), { recursive: true });
       const tmp = `${fp}.tmp.${Date.now()}`;
       fs.writeFileSync(tmp, JSON.stringify(records, null, 2), 'utf-8');
@@ -280,6 +292,7 @@ export class TerminalManager {
   }
 
   private clearPersisted(): void {
+    this.unrestored.clear();
     const fp = this.persistedFilePath();
     if (!fp || !fs.existsSync(fp)) return;
     try {
@@ -351,7 +364,7 @@ export class TerminalManager {
         tmuxSession = sName;
         info.persistent = true;
       } else {
-        this.log.warn({ terminal: id }, 'tmux session creation failed — falling back to direct PTY');
+        this.log.warn({ terminal: id, reason: lastTmuxFailure() }, 'tmux session creation failed — falling back to direct PTY (this terminal will not survive a server restart)');
       }
     }
 
@@ -451,21 +464,40 @@ export class TerminalManager {
    */
   restoreAll(broadcast: TerminalBroadcasts): void {
     const useTmux = this.options.useTmux ?? isTmuxAvailable();
+    for (const bad of rejectedTmuxBinaries()) {
+      this.log.error({ tmux: bad.path, reason: bad.reason }, 'tmux binary found but it does not run — skipped');
+    }
     if (!useTmux) return;
     const records = this.loadPersisted();
     let changed = false;
     for (const rec of records) {
       if (this.active.has(rec.info.id)) continue;
-      if (!rec.tmuxSession || !hasTmuxSession(rec.tmuxSession)) {
-        // Session ended while server was down
+      if (!rec.tmuxSession) {
+        changed = true; // a plain PTY did not outlive the server
+        continue;
+      }
+      const state = tmuxSessionState(rec.tmuxSession);
+      if (state === 'absent') {
+        // tmux itself says the session is gone: it ended while the server was down
         changed = true;
+        continue;
+      }
+      if (state === 'unknown') {
+        // Not the same as gone: keep the record (and the tmux session with the agent inside) for the next start.
+        this.unrestored.set(rec.info.id, rec);
+        changed = true;
+        this.log.error(
+          { terminal: rec.info.id, tmuxSession: rec.tmuxSession, reason: lastTmuxFailure() },
+          'cannot ask tmux about a saved terminal — keeping it; tmux and its sessions may be of another version than this server uses (AGENTDECK_TMUX)',
+        );
         continue;
       }
       try {
         this.restoreOne(rec, broadcast);
         changed = true;
       } catch (err) {
-        this.log.error({ err, id: rec.info.id }, 'failed to restore tmux terminal session');
+        this.unrestored.set(rec.info.id, rec);
+        this.log.error({ err, id: rec.info.id }, 'failed to restore tmux terminal session — keeping it for the next start');
         changed = true;
       }
     }
@@ -724,6 +756,7 @@ export class TerminalManager {
       const rec = records.find((r) => r.info.id === id);
       if (rec?.tmuxSession) {
         killTmuxSession(rec.tmuxSession);
+        this.unrestored.delete(id);
         this.removePersisted(id);
         this.removeHooks(id);
         broadcast.onExit(id, -1);
