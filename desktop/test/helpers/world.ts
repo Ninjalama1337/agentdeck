@@ -50,7 +50,7 @@ export class World {
       return { ...this.service };
     },
     serviceInstall: async (options = {}) => {
-      this.calls.push(`install${options.lan ? ' --lan' : ''}`);
+      this.calls.push(`install${options.lan ? ' --lan' : ''} --port ${options.port}`);
       const wasActive = this.service?.active ?? false;
       this.service = {
         ...(this.service as ServiceCliStatus),
@@ -92,7 +92,7 @@ export class World {
     detached: {
       isOurs: async () => this.detachedOurs,
       start: async ({ env }) => {
-        this.calls.push(`detached-start host=${env.AGENTDECK_HOST}`);
+        this.calls.push(`detached-start host=${env.AGENTDECK_HOST} port=${env.AGENTDECK_PORT}`);
         this.detachedOurs = true;
         this.up();
         return 4242;

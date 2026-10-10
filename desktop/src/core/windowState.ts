@@ -24,7 +24,8 @@ export interface WindowState {
 }
 
 export const DEFAULT_WINDOW_SIZE = { width: 1280, height: 820 } as const;
-export const MIN_WINDOW_SIZE = { width: 800, height: 560 } as const;
+/** The web UI switches to its phone layout below 1024 px — the window never gets narrower than that. */
+export const MIN_WINDOW_SIZE = { width: 1024, height: 600 } as const;
 
 /** Part of the title bar / window that must stay on a screen for the window to count as reachable. */
 const MIN_VISIBLE = { width: 160, height: 80 } as const;

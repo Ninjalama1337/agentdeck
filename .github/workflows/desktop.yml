@@ -1,0 +1,143 @@
+name: Desktop App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'server/**'
+      - 'packages/shared/**'
+      - 'scripts/build-server-bundle.sh'
+      - 'scripts/lib/**'
+      - '.github/workflows/desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (AppImage + deb)
+    # ubuntu-22.04: die gebuendelten Binaries (tmux, Electron) brauchen dann nur glibc >= 2.35
+    # und laufen auf Ubuntu 22.04+, Debian 12+, Fedora 36+ (also auch Bazzite).
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    # Auf Tags laedt der Job die Pakete ans GitHub Release -> Schreibrecht noetig.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Node 22 einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # VERSION: Tag v1.2.3 -> "1.2.3", sonst CI-Nummer "0.1.<run_number>" (wie android.yml).
+      # Dieselbe Version tragen die App (package.json), der Server im Bundle (version.json)
+      # und die Dateinamen der Pakete.
+      - name: Version ermitteln
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="0.1.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Baue AgentDeck Desktop $VERSION"
+
+      # Eigenes npm-Projekt (nicht in den Root-Workspaces): der Server-Build zieht kein Electron nach.
+      - name: Desktop-Abhaengigkeiten installieren
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck (Desktop)
+        working-directory: desktop
+        run: npm run typecheck
+
+      - name: Tests (Desktop)
+        working-directory: desktop
+        run: npm test
+
+      # Das Bundle (Node, tmux, gebauter Server + Web-App) wird von der Shell als extraResource
+      # mitgeliefert. bison braucht der tmux-Build (yacc).
+      - name: Abhaengigkeiten installieren (Server)
+        run: npm ci --no-audit --no-fund
+
+      - name: Build-Werkzeuge installieren
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bison xvfb
+
+      - name: Server-Bundle bauen
+        env:
+          AGENTDECK_VERSION: ${{ env.VERSION }}
+          AGENTDECK_BUNDLE_TMUX: '1'
+        run: scripts/build-server-bundle.sh
+
+      - name: Version in die App schreiben
+        working-directory: desktop
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      # deb vor AppImage: der AppImage-Lauf tauscht die Electron-Binary gegen den Launcher
+      # (build/after-pack-appimage.cjs) und schreibt zuletzt latest-linux.yml.
+      - name: deb bauen
+        working-directory: desktop
+        run: npm run dist:deb
+
+      - name: AppImage bauen
+        working-directory: desktop
+        run: npm run dist:appimage
+
+      # Startet die gebaute App wirklich (Xvfb): Bridge, Auto-Pairing, mitgelieferter Server.
+      - name: Smoke-Test (Fake-Server)
+        working-directory: desktop
+        run: node scripts/smoke.mjs
+
+      - name: Smoke-Test (gepackte App mit dem echten Bundle)
+        working-directory: desktop
+        run: node scripts/smoke-packaged.mjs release/linux-unpacked/agentdeck
+
+      - name: Pakete als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentDeck-Desktop-Linux
+          path: |
+            desktop/release/AgentDeck-*.AppImage
+            desktop/release/AgentDeck-*.deb
+            desktop/release/latest-linux.yml
+          if-no-files-found: error
+
+      # Das Release legt android.yml an — erst nach gruenen Tests (Typecheck + Tests in allen
+      # Workspaces). Hier wird NICHT selbst eines erzeugt, sonst gaebe es ein Release ohne gruene
+      # Tests. Stattdessen warten (bis zu 60 min), dann die Pakete anhaengen.
+      - name: Auf das GitHub Release warten (nur Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          for _ in $(seq 1 120); do
+            if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+              echo "Release $TAG ist online."
+              exit 0
+            fi
+            echo "Release $TAG gibt es noch nicht — warte auf android.yml …"
+            sleep 30
+          done
+          echo "::error::Release $TAG ist nach 60 min noch nicht online (android.yml fehlgeschlagen?)."
+          exit 1
+
+      - name: Pakete ans Release hochladen (nur Tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release upload "$TAG" --clobber \
+            desktop/release/AgentDeck-*.AppImage \
+            desktop/release/AgentDeck-*.deb \
+            desktop/release/latest-linux.yml
+          echo "AppImage, deb und latest-linux.yml an $TAG angehaengt."

@@ -69,8 +69,11 @@ async function cdp(url) {
 }
 
 /**
- * @param {{ serverBin: string, port: number, env?: Record<string, string>, tag?: string }} options
+ * @param {{ serverBin?: string, port: number, env?: Record<string, string>, tag?: string,
+ *   app?: (debugPort: number, extraArgs: string[]) => { file: string, args: string[] } }} options
  *   `env` is added to every app launch (for the server CLI: its data dir, version …).
+ *   `app` replaces the default command (Electron + smoke-entry.cjs), e.g. to start a packaged build;
+ *   without `serverBin` the app finds its own bundled server.
  */
 export async function createHarness(options) {
   const { serverBin, port } = options;
@@ -88,13 +91,21 @@ export async function createHarness(options) {
   };
   fs.writeFileSync(files.answers, '[]');
 
+  // SMOKE_RUN_AS=<uid>: run the app as that unprivileged user, so Chromium's real sandbox is on
+  // (as root it refuses to start without --no-sandbox).
+  const runAs = process.env.SMOKE_RUN_AS ? Number(process.env.SMOKE_RUN_AS) : null;
+  if (runAs !== null) {
+    fs.mkdirSync(files.userData, { recursive: true });
+    for (const dir of [tmp, home, files.userData]) fs.chownSync(dir, runAs, runAs);
+  }
+
   const baseEnv = {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_DATA_HOME: path.join(home, '.local/share'),
     XDG_STATE_HOME: path.join(home, '.local/state'),
-    AGENTDECK_SERVER_BIN: serverBin,
+    ...(serverBin ? { AGENTDECK_SERVER_BIN: serverBin } : {}),
     AGENTDECK_DESKTOP_USER_DATA: files.userData,
     AGENTDECK_NO_UPDATE_CHECK: '1',
     SMOKE_DIALOG_LOG: files.dialogLog,
@@ -121,9 +132,14 @@ export async function createHarness(options) {
     /** Starts the app; returns { child, exited, output }. */
     async launch(extraArgs = [], extraEnv = {}) {
       debugPort = await freePort(); // a fresh DevTools port per run: the previous one may sit in TIME_WAIT
+      const command = options.app
+        ? options.app(debugPort, extraArgs)
+        : { file: electron, args: [entry, '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${debugPort}`, ...extraArgs] };
+      const xvfb = ['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24', command.file, ...command.args];
+      const full = runAs === null ? xvfb : ['setpriv', `--reuid=${runAs}`, `--regid=${runAs}`, '--clear-groups', ...xvfb];
       const child = spawn(
-        'xvfb-run',
-        ['-a', '-s', '-screen 0 1600x1000x24', electron, entry, '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${debugPort}`, ...extraArgs],
+        full[0],
+        full.slice(1),
         // own process group, so a leftover app (and its Xvfb) can be killed as a whole
         { cwd: root, env: { ...baseEnv, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
       );
@@ -188,13 +204,17 @@ export async function createHarness(options) {
       }
     },
     lastOutput: () => outputs.at(-1)?.() ?? '',
-    /** Kills leftovers, removes the temp dir, prints the summary; returns the exit code. */
-    finish() {
+    /** SIGKILLs every launched app (with its Xvfb) — a crash, not a clean quit. */
+    killApps() {
       for (const child of launched) {
         try {
           process.kill(-child.pid, 'SIGKILL');
         } catch {}
       }
+    },
+    /** Kills leftovers, removes the temp dir, prints the summary; returns the exit code. */
+    finish() {
+      h.killApps();
       if (!process.env.SMOKE_KEEP) fs.rmSync(tmp, { recursive: true, force: true });
       else console.log(`kept ${tmp}`);
       const failed = results.filter((r) => !r.ok);

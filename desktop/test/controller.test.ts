@@ -20,7 +20,7 @@ describe('ensureRunning', () => {
     const result = await w.controller.ensureRunning({ interactive: true });
     expect(result.ok).toBe(true);
     // keeps the unit's current LAN binding
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan --port 4317']);
   });
 
   it('never downgrades the service to an older bundle', async () => {
@@ -28,7 +28,7 @@ describe('ensureRunning', () => {
     w.service = managed({ active: true, runtimeVersion: '3.0.0' });
     w.probe = { state: 'agentdeck', version: '3.0.0' };
     await w.controller.ensureRunning({ interactive: true });
-    expect(w.calls).not.toContain('install');
+    expect(w.calls.some((c) => c.startsWith('install'))).toBe(false);
   });
 
   it('only updates the runtime from the bundled CLI, not from an env override', async () => {
@@ -52,7 +52,7 @@ describe('ensureRunning', () => {
     const w = new World();
     w.service = managed({ runtimeVersion: '1.0.0' });
     await w.controller.ensureRunning({ interactive: true });
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --port 4317']);
   });
 
   it('offers the service on first start and installs it with the LAN setting', async () => {
@@ -60,7 +60,7 @@ describe('ensureRunning', () => {
     w.settings = { ...w.settings, lanAccess: true };
     const result = await w.controller.ensureRunning({ interactive: true });
     expect(result.ok && result.state.mode).toBe('service');
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['offer', 'install --lan']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['offer', 'install --lan --port 4317']);
   });
 
   it('remembers a "no" and runs the server detached', async () => {
@@ -69,7 +69,7 @@ describe('ensureRunning', () => {
     const result = await w.controller.ensureRunning({ interactive: true });
     expect(result.ok && result.state.mode).toBe('detached');
     expect(w.state.serviceDeclined).toBe(true);
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['offer', 'detached-start host=127.0.0.1']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['offer', 'detached-start host=127.0.0.1 port=4317']);
 
     // the next start does not ask again
     const w2 = new World();
@@ -113,7 +113,7 @@ describe('ensureRunning', () => {
     w.service = { ...noUnit, systemd: false };
     w.settings = { ...w.settings, lanAccess: true };
     await w.controller.ensureRunning({ interactive: true });
-    expect(w.calls).toContain('detached-start host=0.0.0.0');
+    expect(w.calls).toContain('detached-start host=0.0.0.0 port=4317');
   });
 
   it('treats a server it did not start as external and just connects', async () => {
@@ -181,13 +181,21 @@ describe('serviceAction', () => {
     w.detachedOurs = true;
     const status = await w.controller.serviceAction('install');
     expect(status.mode).toBe('service');
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'install']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'install --port 4317']);
   });
 
   it('install without systemd is an error, not a crash', async () => {
     const w = new World();
     w.service = { ...noUnit, systemd: false };
     await expect(w.controller.serviceAction('install')).rejects.toThrow(/systemd/);
+  });
+
+  it('install and start hand a detached server over first (the CLI refuses while server.pid is taken)', async () => {
+    const w = new World();
+    w.service = managed({ runtimeVersion: '2.0.0' });
+    w.detachedOurs = true; // ours is alive but not answering (still starting)
+    await w.controller.serviceAction('start');
+    expect(w.calls.filter((c) => c !== 'status').slice(0, 2)).toEqual(['detached-stop', 'start']);
   });
 
   it('uninstall removes the unit and leaves the server stopped', async () => {
@@ -215,7 +223,7 @@ describe('serviceAction', () => {
     w.probe = { state: 'agentdeck' };
     w.detachedOurs = true;
     await w.controller.serviceAction('restart');
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'detached-start host=127.0.0.1']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'detached-start host=127.0.0.1 port=4317']);
   });
 
   it('actions run one at a time', async () => {
@@ -249,13 +257,34 @@ describe('stopForQuit', () => {
   });
 });
 
+describe('install command line', () => {
+  it('always names the port, and --lan only when LAN access is on', async () => {
+    const w = new World();
+    w.info = { ...w.info, port: 4401 };
+    await w.controller.serviceAction('install');
+    expect(w.calls).toContain('install --port 4401');
+    const lan = new World();
+    lan.settings = { ...lan.settings, lanAccess: true };
+    await lan.controller.serviceAction('install');
+    expect(lan.calls).toContain('install --lan --port 4317');
+  });
+
+  it('a detached server gets bind address and port explicitly', async () => {
+    const w = new World();
+    w.service = { ...noUnit, systemd: false };
+    w.info = { ...w.info, port: 4402 };
+    await w.controller.ensureRunning({ interactive: false });
+    expect(w.calls).toContain('detached-start host=127.0.0.1 port=4402');
+  });
+});
+
 describe('applyLanAccess', () => {
   it('rewrites the unit and restarts it', async () => {
     const w = new World();
     w.service = managed({ active: true, lan: false, runtimeVersion: '2.0.0' });
     w.probe = { state: 'agentdeck' };
     await w.controller.applyLanAccess(true);
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan', 'restart']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['install --lan --port 4317', 'restart']);
   });
 
   it('does nothing when the unit is already bound that way', async () => {
@@ -266,14 +295,26 @@ describe('applyLanAccess', () => {
     expect(w.calls.filter((c) => c !== 'status')).toEqual([]);
   });
 
+  it('announces the new binding to the window', async () => {
+    const w = new World();
+    w.service = managed({ active: true, lan: false, runtimeVersion: '2.0.0' });
+    w.probe = { state: 'agentdeck' };
+    const seen: Array<boolean | undefined> = [];
+    await w.controller.refresh();
+    w.controller.onChange((s) => seen.push(s.service?.lan));
+    await w.controller.applyLanAccess(true);
+    expect(seen.at(-1)).toBe(true);
+  });
+
   it('restarts a detached server with the new bind address', async () => {
     const w = new World();
     w.service = { ...noUnit, systemd: false };
     w.probe = { state: 'agentdeck' };
     w.detachedOurs = true;
-    w.settings = { ...w.settings, lanAccess: true };
+    // the setting itself is stored only after the change was applied — the new value must come from the call
+    expect(w.settings.lanAccess).toBe(false);
     await w.controller.applyLanAccess(true);
-    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'detached-start host=0.0.0.0']);
+    expect(w.calls.filter((c) => c !== 'status')).toEqual(['detached-stop', 'detached-start host=0.0.0.0 port=4317']);
   });
 });
 

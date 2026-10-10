@@ -101,13 +101,13 @@ describe('createCli', () => {
     await cli.serviceStop();
     await cli.serviceRestart();
     expect(calls).toEqual([
-      ['service', 'install'],
-      ['service', 'install', '--lan'],
-      ['service', 'install', '--lan', '--port', '4400', '--no-start'],
-      ['service', 'uninstall'],
-      ['service', 'start'],
-      ['service', 'stop'],
-      ['service', 'restart'],
+      ['service', 'install', '--json'],
+      ['service', 'install', '--lan', '--json'],
+      ['service', 'install', '--lan', '--port', '4400', '--no-start', '--json'],
+      ['service', 'uninstall', '--json'],
+      ['service', 'start', '--json'],
+      ['service', 'stop', '--json'],
+      ['service', 'restart', '--json'],
     ]);
   });
 
@@ -117,6 +117,12 @@ describe('createCli', () => {
     expect(err).toBeInstanceOf(CliError);
     expect((err as CliError).message).toContain('use --force');
     expect((err as CliError).exitCode).toBe(1);
+  });
+
+  it('prefers the {"error": …} document of a --json call over stderr noise', async () => {
+    const { exec } = execReturning('{"error":"An AgentDeck server is already running outside the service (pid 7)."}', 1, 'copying runtime…\nAn AgentDeck server is already running\n');
+    const err = await createCli({ bin: '/bin/x', exec }).serviceStart().catch((e: unknown) => e);
+    expect((err as CliError).message).toBe('agentdeck-server service start failed: An AgentDeck server is already running outside the service (pid 7).');
   });
 
   it('wraps a program that cannot be started', async () => {

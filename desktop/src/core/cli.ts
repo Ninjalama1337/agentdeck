@@ -39,8 +39,14 @@ export interface InstallOptions {
   noStart?: boolean;
 }
 
-/** Last non-empty stderr lines — what the CLI prints when it fails. */
+/** What failed: the `{"error": …}` document a `--json` call prints, else the last stderr lines. */
 function errorText(result: ExecResult): string {
+  try {
+    const body = JSON.parse(result.stdout.trim()) as { error?: unknown } | null;
+    if (typeof body?.error === 'string' && body.error) return body.error;
+  } catch {
+    /* not JSON */
+  }
   const text = (result.stderr || result.stdout).trim().split('\n').slice(-6).join('\n').trim();
   return text || `exit code ${result.code}`;
 }
@@ -123,7 +129,10 @@ export interface ServerCli {
   serviceRestart(): Promise<void>;
 }
 
-/** Thin wrapper over the `agentdeck-server` CLI (docs: the plan's CLI section). */
+/**
+ * Thin wrapper over the `agentdeck-server` CLI. Every call asks for `--json`: stdout carries one
+ * document (the service status, or `{"error": …}` on failure), progress goes to stderr.
+ */
 export function createCli(options: { bin: string; exec: Exec; env?: NodeJS.ProcessEnv }): ServerCli {
   const { bin, exec, env } = options;
 
@@ -153,19 +162,19 @@ export function createCli(options: { bin: string; exec: Exec; env?: NodeJS.Proce
       if (opts.lan) args.push('--lan');
       if (opts.port !== undefined) args.push('--port', String(opts.port));
       if (opts.noStart) args.push('--no-start');
-      await run(args, INSTALL_TIMEOUT_MS);
+      await run([...args, '--json'], INSTALL_TIMEOUT_MS);
     },
     async serviceUninstall() {
-      await run(['service', 'uninstall'], SERVICE_TIMEOUT_MS);
+      await run(['service', 'uninstall', '--json'], SERVICE_TIMEOUT_MS);
     },
     async serviceStart() {
-      await run(['service', 'start'], SERVICE_TIMEOUT_MS);
+      await run(['service', 'start', '--json'], SERVICE_TIMEOUT_MS);
     },
     async serviceStop() {
-      await run(['service', 'stop'], SERVICE_TIMEOUT_MS);
+      await run(['service', 'stop', '--json'], SERVICE_TIMEOUT_MS);
     },
     async serviceRestart() {
-      await run(['service', 'restart'], SERVICE_TIMEOUT_MS);
+      await run(['service', 'restart', '--json'], SERVICE_TIMEOUT_MS);
     },
   };
 }
