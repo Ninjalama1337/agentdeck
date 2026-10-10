@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DESKTOP_MIN_WIDTH, desktopFrame, isDesktopLayout } from '../src/hooks/useDesktopLayout';
+import { DESKTOP_APP_MIN_WIDTH, DESKTOP_MIN_WIDTH, desktopFrame, isDesktopLayout } from '../src/hooks/useDesktopLayout';
 import { isMacPlatform, matchShortcut, shortcutLabel, TAB_ROUTES, type KeyLike } from '../src/util/shortcuts';
 
 describe('desktop layout decision', () => {
@@ -11,6 +11,22 @@ describe('desktop layout decision', () => {
     expect(isDesktopLayout({ width: 1280, finePointer: false })).toBe(false);
     expect(isDesktopLayout({ width: 390, finePointer: false })).toBe(false);
     expect(isDesktopLayout({ width: 390, finePointer: true })).toBe(false);
+  });
+
+  it('inside the desktop app a zoomed window stays on the desktop layout', () => {
+    // Ctrl+Plus shrinks the CSS width: a 1280px window at 200% is 640 CSS px.
+    expect(isDesktopLayout({ width: 1067, finePointer: true, desktopApp: true })).toBe(true);
+    expect(isDesktopLayout({ width: 889, finePointer: true, desktopApp: true })).toBe(true);
+    expect(isDesktopLayout({ width: 640, finePointer: true, desktopApp: true })).toBe(true);
+    expect(isDesktopLayout({ width: DESKTOP_APP_MIN_WIDTH - 1, finePointer: true, desktopApp: true })).toBe(false);
+    // The same widths in a browser are phone layout — the 1024px rule is unchanged there.
+    expect(isDesktopLayout({ width: 889, finePointer: true })).toBe(false);
+    expect(isDesktopLayout({ width: 889, finePointer: true, desktopApp: false })).toBe(false);
+    expect(isDesktopLayout({ width: 1067, finePointer: true })).toBe(true);
+  });
+
+  it('the desktop app still needs a precise pointer', () => {
+    expect(isDesktopLayout({ width: 1280, finePointer: false, desktopApp: true })).toBe(false);
   });
 
   it('lets chat and code use the whole window, the other screens a centered column', () => {

@@ -118,7 +118,7 @@ export class ServerController {
    * The pairing code and the bridge only go to pages of an AgentDeck server (src/ipc.ts).
    */
   async identify(maxAgeMs = 5000): Promise<ServerHolder> {
-    if (this.current && this.deps.now() - this.currentAt <= maxAgeMs) return this.current.holder;
+    if (this.current && this.deps.now() - this.currentAt < maxAgeMs) return this.current.holder;
     try {
       return (await this.refresh()).holder;
     } catch {
