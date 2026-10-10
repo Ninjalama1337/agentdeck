@@ -26,6 +26,10 @@ export interface KeyLike {
 /**
  * What a key press asks for, or null. `inTerminal`: the key was typed into a
  * terminal, where Ctrl+K is "kill line" — only the tab shortcuts apply there.
+ *
+ * Ctrl+1…5 are taken even inside a terminal, on purpose: xterm would turn
+ * Ctrl+2/3/4/5 into NUL/ESC/FS/GS — control characters nobody types by hand —
+ * so a terminal user loses nothing, and the tabs stay reachable from the keyboard.
  */
 export function matchShortcut(e: KeyLike, opts: { inTerminal?: boolean } = {}): ShortcutAction | null {
   if (!(e.ctrlKey || e.metaKey) || (e.ctrlKey && e.metaKey) || e.altKey || e.shiftKey) return null;
