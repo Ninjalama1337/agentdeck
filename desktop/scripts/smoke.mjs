@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHarness, freePort, healthy, root, sleep, until } from './smoke-lib.mjs';
 
-const fake = path.join(root, 'test/fixtures/fake-agentdeck-server.mjs');
+const fake = path.join(root, 'test/fixtures/fake-bundle/bin/agentdeck-server');
 const port = await freePort();
 const dataDir = path.join(os.tmpdir(), `agentdeck-smoke-data-${process.pid}`);
 const h = await createHarness({

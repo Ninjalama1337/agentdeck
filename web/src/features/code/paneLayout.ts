@@ -14,9 +14,14 @@ export interface PaneState {
   slots: (string | null)[];
   /** Pane that receives new terminals; its terminal is the app's active one. */
   focus: number;
+  /**
+   * Panes the user emptied on purpose. They stay empty — no spare terminal
+   * moves in — until a terminal is started or the user shows one there.
+   */
+  cleared: number[];
 }
 
-export const DEFAULT_PANES: PaneState = { count: 1, slots: [null], focus: 0 };
+export const DEFAULT_PANES: PaneState = { count: 1, slots: [null], focus: 0, cleared: [] };
 
 function toCount(value: unknown): PaneCount {
   const n = typeof value === 'number' && Number.isInteger(value) ? value : 1;
@@ -24,13 +29,24 @@ function toCount(value: unknown): PaneCount {
 }
 
 function sameState(a: PaneState, b: PaneState): boolean {
-  return a.count === b.count && a.focus === b.focus && a.slots.every((id, i) => id === b.slots[i]);
+  return (
+    a.count === b.count &&
+    a.focus === b.focus &&
+    a.slots.every((id, i) => id === b.slots[i]) &&
+    a.cleared.length === b.cleared.length &&
+    a.cleared.every((index, i) => index === b.cleared[i])
+  );
 }
 
 /** Reads untrusted JSON (storage, other versions) into a consistent state. */
 export function normalizePanes(raw: unknown): PaneState {
   if (!raw || typeof raw !== 'object') return DEFAULT_PANES;
-  const { count: rawCount, slots: rawSlots, focus: rawFocus } = raw as { count?: unknown; slots?: unknown; focus?: unknown };
+  const { count: rawCount, slots: rawSlots, focus: rawFocus, cleared: rawCleared } = raw as {
+    count?: unknown;
+    slots?: unknown;
+    focus?: unknown;
+    cleared?: unknown;
+  };
   const count = toCount(rawCount);
   const input = Array.isArray(rawSlots) ? (rawSlots as unknown[]) : [];
   const seen = new Set<string>();
@@ -45,7 +61,11 @@ export function normalizePanes(raw: unknown): PaneState {
     }
   }
   const focus = typeof rawFocus === 'number' && Number.isInteger(rawFocus) && rawFocus >= 0 && rawFocus < count ? rawFocus : 0;
-  return { count, slots, focus };
+  // Only empty panes can be "cleared"; anything else in there is stale.
+  const cleared = Array.isArray(rawCleared)
+    ? [...new Set((rawCleared as unknown[]).filter((i): i is number => Number.isInteger(i) && (i as number) >= 0 && (i as number) < count && slots[i as number] === null))].sort((a, b) => a - b)
+    : [];
+  return { count, slots, focus, cleared };
 }
 
 /** Changes the number of panes; panes that stay keep their terminal, the others are dropped (the terminals keep running). */
@@ -53,7 +73,7 @@ export function setPaneCount(state: PaneState, requested: number): PaneState {
   const count = toCount(requested);
   if (count === state.count) return state;
   const slots = Array.from({ length: count }, (_, i) => state.slots[i] ?? null);
-  return { count, slots, focus: Math.min(state.focus, count - 1) };
+  return { count, slots, focus: Math.min(state.focus, count - 1), cleared: state.cleared.filter((i) => i < count) };
 }
 
 export function focusPane(state: PaneState, index: number): PaneState {
@@ -61,17 +81,22 @@ export function focusPane(state: PaneState, index: number): PaneState {
   return { ...state, focus: index };
 }
 
-/** Shows `id` in a pane (null empties it). A terminal already shown elsewhere swaps places with this pane's. */
+/**
+ * Shows `id` in a pane. A terminal already shown elsewhere swaps places with
+ * this pane's. `null` empties the pane on purpose: it stays empty (see `cleared`).
+ */
 export function assignTerminal(state: PaneState, index: number, id: string | null): PaneState {
   if (!Number.isInteger(index) || index < 0 || index >= state.count) return state;
-  if (state.slots[index] === id) return state;
+  const isCleared = state.cleared.includes(index);
+  if (state.slots[index] === id && (id !== null ? !isCleared : isCleared)) return state;
   const slots = [...state.slots];
   if (id !== null) {
     const from = slots.indexOf(id);
     if (from >= 0) slots[from] = slots[index] ?? null;
   }
   slots[index] = id;
-  return { ...state, slots };
+  const cleared = id === null ? [...state.cleared.filter((i) => i !== index), index].sort((a, b) => a - b) : state.cleared.filter((i) => i !== index);
+  return { ...state, slots, cleared };
 }
 
 /** Makes `id` the focused terminal: focuses the pane that shows it, else shows it in the focused pane. */
@@ -82,16 +107,24 @@ export function revealTerminal(state: PaneState, id: string): PaneState {
 
 /**
  * Brings the panes in line with the terminals that exist: ended ones leave,
- * empty panes pick up terminals no pane shows yet (in list order). Returns
- * the same object when nothing changes.
+ * empty panes pick up terminals no pane shows yet (in list order). A pane the
+ * user emptied on purpose only takes a `fresh` terminal — one that was just
+ * started. Returns the same object when nothing changes.
  */
-export function reconcilePanes(state: PaneState, liveIds: readonly string[]): PaneState {
+export function reconcilePanes(state: PaneState, liveIds: readonly string[], fresh: readonly string[] = []): PaneState {
   const alive = new Set(liveIds);
   const slots = state.slots.map((id) => (id !== null && alive.has(id) ? id : null));
   const shown = new Set(slots.filter((id): id is string => id !== null));
   const spare = liveIds.filter((id) => !shown.has(id));
-  const filled = slots.map((id) => id ?? spare.shift() ?? null);
-  const next = { ...state, slots: filled };
+  const cleared = new Set(state.cleared);
+  const filled = slots.map((id, index) => {
+    if (id !== null) return id;
+    const at = cleared.has(index) ? spare.findIndex((candidate) => fresh.includes(candidate)) : spare.length > 0 ? 0 : -1;
+    if (at < 0) return null;
+    cleared.delete(index);
+    return spare.splice(at, 1)[0] ?? null;
+  });
+  const next = { ...state, slots: filled, cleared: [...cleared].filter((i) => filled[i] === null).sort((a, b) => a - b) };
   return sameState(state, next) ? state : next;
 }
 
