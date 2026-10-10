@@ -401,8 +401,9 @@ describe('install judges by the running process, not by the files', () => {
     await install('1.2.0');
     expect((await serviceStatus(base)).runtimeVersion).toBe('1.2.0');
     expect(sys.calls).toContain('restart agentdeck.service');
-    expect(fs.readdirSync(base.paths.runtimeRoot)).not.toContain('1.0.0');
-    expect(fs.readdirSync(base.paths.runtimeRoot)).toContain('1.2.0');
+    // (the old directory stays as the previous version — keep=2 — and goes with the next update)
+    await install('1.3.0');
+    expect(fs.readdirSync(base.paths.runtimeRoot).sort()).toEqual(['1.2.0', '1.3.0', 'current']);
   });
 
   it('status falls back to the symlink when the process cannot be inspected', async () => {
@@ -434,7 +435,7 @@ describe('a server running outside the service', () => {
 
   it('blocks install: a second server would fight for the port', async () => {
     const ctx = withDataDir(makeBundle('1.2.3'), alive());
-    await expect(serviceInstall(ctx, { lan: false })).rejects.toThrow(/already running outside the service \(pid 777/);
+    await expect(serviceInstall(ctx, { lan: false })).rejects.toThrow(/\(pid 777, listed in .*server\.pid\) is already running outside the service/);
     // nothing was changed
     expect(fs.existsSync(ctx.paths.unitPath)).toBe(false);
     expect(fs.existsSync(ctx.paths.runtimeRoot)).toBe(false);
@@ -452,7 +453,7 @@ describe('a server running outside the service', () => {
   it('blocks start, but not restart or stop', async () => {
     const ctx = withDataDir(makeBundle('1.2.3'), alive());
     await serviceInstall({ ...ctx, dataDir: undefined }, { lan: false, start: false });
-    await expect(serviceControl(ctx, 'start')).rejects.toThrow(/already running outside the service/);
+    await expect(serviceControl(ctx, 'start')).rejects.toThrow(/is already running outside the service/);
     expect(sys.active).toBe(false);
     await expect(serviceControl(ctx, 'stop')).resolves.toMatchObject({ active: false });
   });
