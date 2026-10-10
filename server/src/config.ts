@@ -195,13 +195,18 @@ export interface LoadConfigOptions {
   configDir?: string;
 }
 
+/** Where the config file lives (it need not exist): `configDir`, else `AGENTDECK_CONFIG`, else the XDG default. */
+export function resolveConfigPath(opts: LoadConfigOptions = {}): string {
+  const env = opts.env ?? process.env;
+  return opts.configDir !== undefined
+    ? path.join(expandHome(opts.configDir), 'config.json')
+    : path.resolve(expandHome(env.AGENTDECK_CONFIG || '~/.config/agentdeck/config.json'));
+}
+
 export function loadConfig(opts: LoadConfigOptions = {}): Config {
   const env = opts.env ?? process.env;
   let fileJson: Record<string, unknown> = {};
-  const configFile =
-    opts.configDir !== undefined
-      ? path.join(expandHome(opts.configDir), 'config.json')
-      : path.resolve(expandHome(env.AGENTDECK_CONFIG || '~/.config/agentdeck/config.json'));
+  const configFile = resolveConfigPath(opts);
   if (fs.existsSync(configFile)) {
     const raw = fs.readFileSync(configFile, 'utf8');
     try {

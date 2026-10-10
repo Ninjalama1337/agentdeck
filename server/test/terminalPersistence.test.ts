@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { TerminalManager } from '../src/term/manager.js';
 import type { Logger } from '../src/logging.js';
 import {
+  getTmuxBinary,
   isTmuxAvailable,
   hasTmuxSession,
   killTmuxSession,
@@ -55,7 +56,7 @@ describe('Terminal Persistence (tmux backed)', () => {
       expect(info.persistent).toBe(true);
       const session = tmuxSessionName(info.id);
       const mouseOption = () =>
-        execFileSync('tmux', ['-S', tmuxSocketPath(), 'show-options', '-t', session, 'mouse'], {
+        execFileSync(getTmuxBinary() as string, ['-S', tmuxSocketPath(), 'show-options', '-t', session, 'mouse'], {
           encoding: 'utf-8',
         }).trim();
 
@@ -63,7 +64,7 @@ describe('Terminal Persistence (tmux backed)', () => {
 
       // Simulate a session created before the option existed, then a server
       // restart: restoring must re-apply session options.
-      execFileSync('tmux', ['-S', tmuxSocketPath(), 'set-option', '-t', session, 'mouse', 'off'], { stdio: 'ignore' });
+      execFileSync(getTmuxBinary() as string, ['-S', tmuxSocketPath(), 'set-option', '-t', session, 'mouse', 'off'], { stdio: 'ignore' });
       manager1.detachAll();
       expect(hasTmuxSession(session)).toBe(true);
 

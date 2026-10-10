@@ -16,7 +16,11 @@ export async function loadOrCreateSecret(dataDir: string, name: string): Promise
   const file = path.join(dataDir, name);
   try {
     const existing = (await fsp.readFile(file, 'utf8')).trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) {
+      // Files from before the mode was set (or restored from a backup) are tightened too.
+      await fsp.chmod(file, 0o600).catch(() => undefined);
+      return existing;
+    }
   } catch {
     // fall through to creation
   }
@@ -63,10 +67,16 @@ export class PairingCodeManager {
     }
   }
 
-  /** Returns the stored code or creates a fresh one (first startup). */
+  /**
+   * Returns the stored code or creates a fresh one (first startup). The file is
+   * (re)set to 0600 — the desktop app reads the code from it, nobody else may.
+   */
   async readOrCreate(): Promise<string> {
     const existing = await this.read();
-    if (existing) return existing;
+    if (existing) {
+      await fsp.chmod(this.file, 0o600).catch(() => undefined);
+      return existing;
+    }
     return this.rotate();
   }
 

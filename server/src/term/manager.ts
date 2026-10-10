@@ -25,6 +25,7 @@ import type { DeckNotificationState } from '@agentdeck/shared';
 import { interpretClaudeHook, removeClaudeHookSettings, withClaudeHooks, writeClaudeHookSettings } from './claudeHooks.js';
 import {
   isTmuxAvailable,
+  tmuxCommand,
   tmuxSocketPath,
   tmuxSessionName,
   createTmuxSession,
@@ -355,7 +356,7 @@ export class TerminalManager {
     }
 
     const proc: import('node-pty').IPty = tmuxSession
-      ? pty.spawn('tmux', ['-S', tmuxSocketPath(), 'attach-session', '-t', tmuxSession], {
+      ? pty.spawn(tmuxCommand(), ['-S', tmuxSocketPath(), 'attach-session', '-t', tmuxSession], {
           name: 'xterm-256color',
           cols,
           rows,
@@ -484,7 +485,7 @@ export class TerminalManager {
     // Session may predate options added since it was created (e.g. mouse on).
     applyTmuxSessionOptions(tmuxSession);
 
-    const proc = pty.spawn('tmux', ['-S', tmuxSocketPath(), 'attach-session', '-t', tmuxSession], {
+    const proc = pty.spawn(tmuxCommand(), ['-S', tmuxSocketPath(), 'attach-session', '-t', tmuxSession], {
       name: 'xterm-256color',
       cols: info.cols,
       rows: info.rows,

@@ -9,6 +9,10 @@
  * - The script restarts the server as its last step, so a successful job
  *   ends with this process being replaced; the new process reports the new
  *   version and has no job.
+ * - A packaged server (part of the desktop app bundle) never updates itself —
+ *   the app brings the new server. It still reports the latest release (via
+ *   `gh` or the public GitHub API), and a failed lookup stays quiet there:
+ *   it is not something the user can act on from the server.
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -18,7 +22,13 @@ import type { UpdateInfo, UpdateJob } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import type { Broadcaster } from '../ws/gateway.js';
 import { httpError } from '../http/errors.js';
-import { fetchLatestRelease, isNewerRelease, type FetchRelease, type ReleaseInfo } from './release.js';
+import {
+  fetchLatestRelease,
+  fetchLatestReleasePackaged,
+  isNewerRelease,
+  type FetchRelease,
+  type ReleaseInfo,
+} from './release.js';
 
 const CHECK_TTL_MS = 10 * 60_000;
 const OUTPUT_CAP = 400;
@@ -33,6 +43,10 @@ export interface UpdateChild {
   done: Promise<{ exitCode?: number; failed?: boolean }>;
 }
 
+/** Shown instead of the git message when the server ships inside the desktop app. */
+export const PACKAGED_BLOCKED_REASON =
+  'This server is part of the AgentDeck desktop app — update the app (Settings → Desktop).';
+
 export type UpdateSpawn = (script: string, tag: string, env: Record<string, string>) => UpdateChild;
 
 export interface UpdateManagerOptions {
@@ -43,6 +57,8 @@ export interface UpdateManagerOptions {
   localUrl: string;
   log: Logger;
   broadcast: Broadcaster;
+  /** Runs from the desktop app bundle: no self-update, release check without a checkout. */
+  packaged?: boolean;
   fetchRelease?: FetchRelease;
   spawn?: UpdateSpawn;
 }
@@ -61,7 +77,7 @@ export class UpdateManager {
   private trailingTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly opts: UpdateManagerOptions) {
-    this.fetchRelease = opts.fetchRelease ?? fetchLatestRelease;
+    this.fetchRelease = opts.fetchRelease ?? (opts.packaged ? fetchLatestReleasePackaged : fetchLatestRelease);
     this.script = path.join(opts.repoRoot, 'scripts', 'update.sh');
     this.logFile = path.join(opts.dataDir, 'update.log');
     this.spawnFn =
@@ -96,6 +112,7 @@ export class UpdateManager {
 
   /** Why this install cannot update itself, if so. */
   private blockedReason(): string | undefined {
+    if (this.opts.packaged) return PACKAGED_BLOCKED_REASON;
     if (!fs.existsSync(path.join(this.opts.repoRoot, '.git'))) {
       return 'This server does not run from a git checkout, so it cannot update itself.';
     }
@@ -108,7 +125,14 @@ export class UpdateManager {
       this.latest = await this.fetchRelease(this.opts.repoRoot);
       this.checkError = undefined;
     } catch (err) {
-      this.checkError = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (this.opts.packaged) {
+        // Nothing the user could fix on the server (no gh, offline, rate limit) — no error banner.
+        this.checkError = undefined;
+        this.opts.log.debug?.({ err: message }, 'release check failed');
+      } else {
+        this.checkError = message;
+      }
     }
     this.checkedAt = Date.now();
   }
