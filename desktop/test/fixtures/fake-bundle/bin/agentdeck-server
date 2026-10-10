@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stand-in for the bundle launcher (scripts/build-server-bundle.sh), same shape: a launcher script that
+# execs node on app/server/dist/cli.js — so the running process is recognized as an AgentDeck server
+# (src/core/pidfile.ts) exactly like the real one. The fake server itself lives in dist/cli.js.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$ROOT/app/server/dist/cli.js" "$@"

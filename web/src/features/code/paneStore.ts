@@ -42,7 +42,7 @@ export function readPanes(key: string, storage: PaneStorage | null = browserStor
 
 export function writePanes(key: string, state: PaneState, storage: PaneStorage | null = browserStorage()): void {
   try {
-    storage?.setItem(key, JSON.stringify({ count: state.count, slots: state.slots, focus: state.focus }));
+    storage?.setItem(key, JSON.stringify({ count: state.count, slots: state.slots, focus: state.focus, cleared: state.cleared }));
   } catch {
     /* storage unavailable */
   }
@@ -57,14 +57,14 @@ interface PaneStore extends PaneState {
   assign(index: number, id: string | null): void;
   /** Focus the pane that shows the terminal, or show it in the focused pane. */
   reveal(id: string): void;
-  /** Drop ended terminals, fill empty panes with terminals no pane shows. */
-  reconcile(liveIds: readonly string[]): void;
+  /** Drop ended terminals, fill empty panes with terminals no pane shows (`fresh`: just started, may fill a pane the user emptied). */
+  reconcile(liveIds: readonly string[], fresh?: readonly string[]): void;
 }
 
 export const usePanes = create<PaneStore>()((set, get) => {
   const apply = (change: (state: PaneState) => PaneState) => {
-    const { count, slots, focus } = get();
-    const before: PaneState = { count, slots, focus };
+    const { count, slots, focus, cleared } = get();
+    const before: PaneState = { count, slots, focus, cleared };
     const after = change(before);
     if (after === before) return;
     set(after);
@@ -75,7 +75,7 @@ export const usePanes = create<PaneStore>()((set, get) => {
     focusPane: (index) => apply((s) => focusPane(s, index)),
     assign: (index, id) => apply((s) => assignTerminal(s, index, id)),
     reveal: (id) => apply((s) => revealTerminal(s, id)),
-    reconcile: (liveIds) => apply((s) => reconcilePanes(s, liveIds)),
+    reconcile: (liveIds, fresh) => apply((s) => reconcilePanes(s, liveIds, fresh)),
   };
 });
 

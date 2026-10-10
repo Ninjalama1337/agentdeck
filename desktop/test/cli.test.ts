@@ -180,7 +180,7 @@ describe('nodeExec with a CLI script', () => {
   });
 
   it('runs the fake agentdeck-server and parses its info', async () => {
-    const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agentdeck-server.mjs');
+    const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-bundle', 'bin', 'agentdeck-server');
     const cli = createCli({
       bin: fake,
       exec: nodeExec,

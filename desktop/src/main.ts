@@ -399,7 +399,10 @@ async function main(): Promise<void> {
       }
     });
     // Back in front: look at the server again right away.
-    for (const event of ['focus', 'restore', 'show'] as const) current.on(event, () => void controller.refresh().catch(() => undefined));
+    const lookAgain = (): void => void controller.refresh().catch(() => undefined);
+    current.on('focus', lookAgain);
+    current.on('restore', lookAgain);
+    current.on('show', lookAgain);
     void current.loadURL(statusPageUrl({ origin, title: 'AgentDeck startet …' }));
     await loadApp().catch((err: unknown) => log(`cannot load the app: ${String(err)}`));
 
