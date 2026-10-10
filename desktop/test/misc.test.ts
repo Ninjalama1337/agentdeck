@@ -190,17 +190,20 @@ describe('fetchActivity', () => {
 });
 
 describe('status page', () => {
-  it('escapes its text and targets the server origin', () => {
+  it('escapes its text', () => {
     const html = statusPageHtml({ origin: ORIGIN, title: '<b>x</b>', detail: 'a & "b"' });
     expect(html).not.toContain('<b>x</b>');
     expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
     expect(html).toContain('a &amp; &quot;b&quot;');
-    expect(html).toContain(JSON.stringify(`${ORIGIN}/`));
     expect(statusPageUrl({ origin: ORIGIN, title: 't' }).startsWith('data:text/html;charset=utf-8,')).toBe(true);
   });
 
-  it('cannot be broken out of the script by the origin', () => {
-    const html = statusPageHtml({ origin: 'http://x/</script><script>alert(1)', title: 't' });
-    expect(html.match(/<\/script>/g)).toHaveLength(1);
+  // A page that moves on by itself would follow a foreign program on the port just the same:
+  // the main process loads the app once it has found an AgentDeck server.
+  it('never navigates, runs no script and contacts nothing', () => {
+    const html = statusPageHtml({ origin: ORIGIN, title: 'AgentDeck startet …' });
+    expect(html).not.toMatch(/<script/i);
+    expect(html).not.toMatch(/location|fetch|XMLHttpRequest|WebSocket|http-equiv/i);
+    expect(html).not.toContain(ORIGIN);
   });
 });
