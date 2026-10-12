@@ -3,7 +3,9 @@
  *
  * - claude: `claude -p "/usage"` for session/week limits and request stats.
  * - antigravity: `agy -p /usage` for subscription limits and model quotas.
- * - opencode: `opencode stats` for total cost, tokens, sessions and messages.
+ * - opencode: `opencode stats` for total cost, tokens, sessions and messages,
+ *   overlaid with the OpenCode Go subscription quota (rolling 5h / weekly /
+ *   monthly) from the official usage API when a Go key exists.
  * - codex: local app-server `account/rateLimits/read`, with login fallback.
  * - zcode: plan data and local usage statistics.
  *
@@ -16,6 +18,7 @@ import { createInterface } from 'node:readline';
 import { execa } from 'execa';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import type { AgentService } from '../agents/registry.js';
+import { collectOpenCodeGoUsage, type OpenCodeGoUsage } from '../agents/opencodeGo.js';
 import { getZcodePlanInfo, readZcodeSqliteStats } from '../agents/zcode.js';
 
 export const USAGE_TTL_MS = 30_000;
@@ -58,6 +61,8 @@ export interface CollectorOptions {
   ttlMs?: number;
   /** Optional ZCode collector override (tests). */
   zcodeCollector?: () => Promise<Partial<AgentUsage>>;
+  /** OpenCode Go subscription overlay override (tests). */
+  opencodeGoCollector?: () => Promise<OpenCodeGoUsage>;
 }
 
 interface CacheEntry {
@@ -525,6 +530,7 @@ export class UsageCollector {
   private inflight?: Promise<AgentUsage[]>;
 
   private readonly zcodeCollector?: () => Promise<Partial<AgentUsage>>;
+  private readonly readOpenCodeGo?: () => Promise<OpenCodeGoUsage>;
 
   constructor(opts: CollectorOptions) {
     this.spawn = opts.spawn ?? defaultSpawn;
@@ -533,6 +539,8 @@ export class UsageCollector {
       opts.readCodexRateLimits ?? (opts.spawn ? undefined : readCodexRateLimitsFromAppServer);
     this.ttlMs = opts.ttlMs ?? USAGE_TTL_MS;
     this.zcodeCollector = opts.zcodeCollector;
+    // Network read of the OpenCode Go quota — off when a custom spawn is used (tests).
+    this.readOpenCodeGo = opts.opencodeGoCollector ?? (opts.spawn ? undefined : collectOpenCodeGoUsage);
   }
 
   /** Clears cached usage snapshots (e.g. after a plan switch). */
@@ -644,28 +652,44 @@ export class UsageCollector {
     if (!this.isAvailableFn('opencode')) {
       return { ...base, reason: 'OpenCode CLI not available' };
     }
-    let res: SpawnResult;
+
+    // The Go subscription overlay is independent of the local stats CLI: even
+    // when `opencode stats` fails, a Go plan should still show its quota.
+    const go: OpenCodeGoUsage = this.readOpenCodeGo
+      ? await this.readOpenCodeGo().catch((err): OpenCodeGoUsage => ({ available: false, reason: errorMessage(err) }))
+      : { available: false };
+
+    let res: SpawnResult | undefined;
+    let parsed: OpenCodeUsageParse | undefined;
     try {
       res = await this.spawn('opencode', ['stats'], {
         timeoutMs: OPENCODE_TIMEOUT_MS,
         cwd: os.homedir(),
       });
+      parsed = parseOpenCodeUsage(res.stdout);
     } catch (err) {
-      return { ...base, reason: `opencode stats failed: ${errorMessage(err)}`, fetchedAt };
+      if (!go.available) {
+        return { ...base, reason: `opencode stats failed: ${errorMessage(err)}`, fetchedAt };
+      }
     }
-    const raw = capRaw(res.stdout || res.stderr);
-    const parsed = parseOpenCodeUsage(res.stdout);
-    if (!parsed.available) {
-      return { ...base, reason: parsed.reason, ...(raw ? { raw } : {}), fetchedAt };
+
+    const raw = res ? capRaw(res.stdout || res.stderr) : undefined;
+    const local = parsed?.available ? parsed : undefined;
+    if (!go.available && !local) {
+      return { ...base, reason: parsed?.reason ?? 'Could not read OpenCode usage', ...(raw ? { raw } : {}), fetchedAt };
     }
+
     return {
       agentId: 'opencode',
       available: true,
-      ...(parsed.plan ? { plan: parsed.plan } : {}),
-      ...(parsed.cost ? { cost: parsed.cost } : {}),
-      ...(parsed.tokens ? { tokens: parsed.tokens } : {}),
-      ...(parsed.session ? { session: parsed.session } : {}),
-      ...(parsed.last24h ? { last24h: parsed.last24h } : {}),
+      // A Go subscription is the plan users care about; local stats stay the fallback.
+      ...(go.plan ? { plan: go.plan } : local?.plan ? { plan: local.plan } : {}),
+      ...(go.session ?? local?.session ? { session: (go.session ?? local!.session) } : {}),
+      ...(go.week ? { week: go.week } : {}),
+      ...(go.monthly ? { rateLimits: [{ name: 'Monthly limit', window: go.monthly }] } : {}),
+      ...(local?.cost ? { cost: local.cost } : {}),
+      ...(local?.tokens ? { tokens: local.tokens } : {}),
+      ...(local?.last24h ?? local?.session ? { last24h: (local!.last24h ?? local!.session) } : {}),
       ...(raw ? { raw } : {}),
       fetchedAt,
     };

@@ -277,9 +277,11 @@ function UsageCard({
             label={
               usage.agentId === 'antigravity'
                 ? '5-Hour quota'
-                : usage.agentId === 'zcode'
-                  ? '5h-Limit (Sitzung)'
-                  : 'Session limit'
+                : usage.agentId === 'opencode'
+                  ? '5-hour limit'
+                  : usage.agentId === 'zcode'
+                    ? '5h-Limit (Sitzung)'
+                    : 'Session limit'
             }
             win={usage.session}
             accent={accent}

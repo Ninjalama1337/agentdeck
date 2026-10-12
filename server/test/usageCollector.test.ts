@@ -245,6 +245,45 @@ describe('UsageCollector', () => {
     expect(zcode?.plans).toHaveLength(2);
   });
 
+  it('overlays the OpenCode Go subscription on local stats', async () => {
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'opencode',
+      spawn: async (cmd: string) => (cmd === 'opencode' ? ok(OPENCODE_SAMPLE) : ok('')),
+      opencodeGoCollector: async () => ({
+        available: true,
+        plan: 'OpenCode Go subscription',
+        session: { pct: 1, resetsAt: '2026-10-12T20:02:30.000Z' },
+        week: { pct: 8 },
+        monthly: { pct: 6 },
+      }),
+    });
+    const result = await c.collect();
+    const opencode = result.find((r) => r.agentId === 'opencode');
+    expect(opencode?.plan).toBe('OpenCode Go subscription');
+    expect(opencode?.session?.pct).toBe(1);
+    expect(opencode?.week?.pct).toBe(8);
+    expect(opencode?.rateLimits?.[0]).toEqual({ name: 'Monthly limit', window: { pct: 6 } });
+    // Local stats stay visible alongside the subscription quota.
+    expect(opencode?.cost).toBe('$30.54');
+    expect(opencode?.last24h?.requests).toBe(8282);
+  });
+
+  it('shows the Go subscription even when opencode stats fails', async () => {
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'opencode',
+      spawn: async () => {
+        throw new Error('no cli');
+      },
+      opencodeGoCollector: async () => ({ available: true, session: { pct: 12 } }),
+    });
+    const result = await c.collect();
+    const opencode = result.find((r) => r.agentId === 'opencode');
+    expect(opencode?.available).toBe(true);
+    expect(opencode?.session?.pct).toBe(12);
+  });
+
   it('clears cache on clearCache()', async () => {
     let callCount = 0;
     const c = new UsageCollector({
