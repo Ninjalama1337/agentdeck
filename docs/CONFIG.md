@@ -34,6 +34,10 @@ Server neu starten — es gibt kein Hot-Reload.
   // Sandbox-Root für ALLE Dateizugriffe (Browser, Download, Upload).
   "projectsRoot": "<dataDir>/projects",
 
+  // Wurzel, die der Ordner-Explorer („New project" → „Open") durchsuchen darf,
+  // um bereits vorhandene Repos als Projekt zu übernehmen. Default: Home-Dir.
+  "browseRoot": "~",
+
   // Log-Ausgabe: "debug" | "info" | "warn" | "error".
   "logLevel": "info",
 
@@ -89,6 +93,7 @@ Server neu starten — es gibt kein Hot-Reload.
 | `port` | number | `8787` | Port (REST, WS, Web-App) |
 | `dataDir` | string | `~/.local/share/agentdeck` | State, Secrets, Attachments |
 | `projectsRoot` | string | `<dataDir>/projects` | Sandbox-Root aller Dateizugriffe |
+| `browseRoot` | string | `~` (Home) | Wurzel des Ordner-Explorers (bestehendes Repo als Projekt öffnen) |
 | `logLevel` | string | `"info"` | `debug`/`info`/`warn`/`error` |
 | `maxRunMs` | number | `1800000` | Hard-Kill eines Agent-Runs (ms) |
 | `maxUploadBytes` | number | `20971520` | Upload-Limit pro Anhang (Bytes) |
@@ -145,6 +150,7 @@ Chat-Auswahl und bleibt nur als „Projekt öffnen“-Button.
 | `AGENTDECK_PORT` | `port` | `8787` |
 | `AGENTDECK_DATA_DIR` | `dataDir` | `~/.local/share/agentdeck` |
 | `AGENTDECK_PROJECTS_ROOT` | `projectsRoot` | `~/projekte` |
+| `AGENTDECK_BROWSE_ROOT` | `browseRoot` | `~` |
 | `AGENTDECK_LOG_LEVEL` | `logLevel` | `debug` |
 | `AGENTDECK_TUNNEL` | `tunnel.provider` | `cloudflared` (aktiviert) \| `off` |
 | `AGENTDECK_TUNNEL_TOKEN` | `tunnel.token` (impliziert `mode: "token"`) | `<tunnel-token>` |
