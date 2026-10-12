@@ -12,6 +12,7 @@ import type {
   ApkInfo,
   ApkUploadResponse,
   Attachment,
+  BrowseResponse,
   CloneProjectRequest,
   CreateAccountRequest,
   CreateEntryRequest,
@@ -40,6 +41,7 @@ import type {
   GithubRepo,
   GitCommitRequest,
   ModelPreset,
+  OpenProjectRequest,
   PairCodeResponse,
   PairPendingResponse,
   PairRequest,
@@ -298,6 +300,18 @@ export const api = {
 
   cloneProject(body: CloneProjectRequest): Promise<Project> {
     return request('POST', '/api/projects/clone', { json: body });
+  },
+
+  /** Register an existing directory on the server as a project. */
+  openProject(body: OpenProjectRequest): Promise<Project> {
+    return request('POST', '/api/projects/open', { json: body });
+  },
+
+  /** Folder picker: list directories under `path` (defaults to the browse root). */
+  browseFs(path?: string, all?: boolean): Promise<BrowseResponse> {
+    return request('GET', '/api/fs/browse', {
+      query: { path, all: all ? 1 : undefined },
+    });
   },
 
   deleteProject(id: string): Promise<void> {

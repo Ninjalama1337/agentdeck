@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { FolderPlus, Github, Loader2, Search } from 'lucide-react';
+import { FolderOpen, FolderPlus, Github, Loader2, Search } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAppStore, errorMessage } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { RepoPicker } from '../github/RepoPicker';
+import { FolderPicker } from './FolderPicker';
 
 interface NewProjectSheetProps {
   open: boolean;
@@ -13,11 +14,12 @@ interface NewProjectSheetProps {
 export function NewProjectSheet({ open, onClose }: NewProjectSheetProps) {
   const createProject = useAppStore((s) => s.createProject);
   const cloneProject = useAppStore((s) => s.cloneProject);
+  const openExistingProject = useAppStore((s) => s.openExistingProject);
   const openProject = useAppStore((s) => s.openProject);
   const navigate = useAppStore((s) => s.navigate);
   const toast = useAppStore((s) => s.toast);
 
-  const [tab, setTab] = useState<'blank' | 'clone'>('blank');
+  const [tab, setTab] = useState<'blank' | 'clone' | 'open'>('blank');
   const [name, setName] = useState('');
   const [initGit, setInitGit] = useState(true);
   const [cloneUrl, setCloneUrl] = useState('');
@@ -67,14 +69,31 @@ export function NewProjectSheet({ open, onClose }: NewProjectSheetProps) {
     }
   };
 
+  const openExisting = async (path: string, folderName: string) => {
+    if (!path.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const project = await openExistingProject({ path: path.trim(), name: folderName });
+      await openProject(project.id);
+      onClose();
+      navigate({ name: 'home' });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Sheet open={open} onClose={onClose} title="New project" subtitle="Blank workspace or clone from GitHub">
+    <Sheet open={open} onClose={onClose} title="New project" subtitle="Blank workspace, clone, or open a folder">
       {/* tabs */}
       <div className="mb-4 flex rounded-2xl border border-line bg-white/[0.04] p-1">
         {(
           [
             { key: 'blank', label: 'Blank', icon: FolderPlus },
             { key: 'clone', label: 'Clone', icon: Github },
+            { key: 'open', label: 'Open', icon: FolderOpen },
           ] as const
         ).map(({ key, label, icon: Icon }) => (
           <button
@@ -122,7 +141,7 @@ export function NewProjectSheet({ open, onClose }: NewProjectSheetProps) {
             Create project
           </button>
         </div>
-      ) : (
+      ) : tab === 'clone' ? (
         <div className="flex flex-col gap-3">
           <div>
             <label className="mb-1.5 block text-[12px] font-medium uppercase tracking-wider text-dim">
@@ -155,6 +174,14 @@ export function NewProjectSheet({ open, onClose }: NewProjectSheetProps) {
           </div>
 
           <RepoPicker onPick={(repo) => void clone(repo.url ?? `https://github.com/${repo.nameWithOwner}.git`, repo.nameWithOwner.split('/')[1])} />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-[12.5px] leading-relaxed text-dim">
+            Pick a folder that already exists on the server — for example a repository you
+            checked out yourself. It becomes a project in place; nothing is moved or copied.
+          </p>
+          <FolderPicker onPick={(path, folderName) => void openExisting(path, folderName)} />
         </div>
       )}
     </Sheet>

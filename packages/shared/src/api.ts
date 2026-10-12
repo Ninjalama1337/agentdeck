@@ -65,7 +65,7 @@ export interface ProjectGitInfo {
 export interface Project {
   id: string;
   name: string;
-  /** Absolute path on the remote machine (sandboxed to projectsRoot). */
+  /** Absolute path on the remote machine (inside the project sandbox). */
   path: string;
   createdAt: number;
   updatedAt: number;
@@ -265,6 +265,35 @@ export interface CreateProjectRequest {
 export interface CloneProjectRequest {
   url: string;
   name?: string;
+}
+
+/**
+ * Adopt a directory that already exists on the server machine as a project
+ * (e.g. a repo checked out elsewhere). `path` must be inside the browse root.
+ */
+export interface OpenProjectRequest {
+  path: string;
+  name?: string;
+}
+
+/** One directory inside the server's browse root (folder picker). */
+export interface BrowseEntry {
+  name: string;
+  /** Absolute path on the server. */
+  path: string;
+  /** True when the directory itself is a git working tree. */
+  isGitRepo?: boolean;
+}
+
+/** Listing for the folder picker (`GET /api/fs/browse`). */
+export interface BrowseResponse {
+  /** Absolute path of the directory being listed. */
+  path: string;
+  /** Absolute path of the parent directory, when inside the root. */
+  parent?: string;
+  /** Absolute path of the browse root; navigation never goes above it. */
+  root: string;
+  entries: BrowseEntry[];
 }
 
 export interface CreateSessionRequest {

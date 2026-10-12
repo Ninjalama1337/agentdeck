@@ -51,6 +51,8 @@ export const ConfigSchema = z.object({
   port: z.number().int().min(0).max(65535).default(8787),
   dataDir: z.string().default('~/.local/share/agentdeck'),
   projectsRoot: z.string().optional(),
+  /** Root the folder picker may browse (adopting existing repos); defaults to the home dir. */
+  browseRoot: z.string().optional(),
   serverName: z.string().default(os.hostname()),
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   maxRunMs: z.number().int().min(1000).default(1_800_000),
@@ -80,9 +82,10 @@ export type ResolvedAgentConfig = z.infer<typeof AgentConfigSchema>;
 export type ResolvedTunnelConfig = z.infer<typeof TunnelConfigSchema>;
 
 /** Fully resolved configuration (paths absolutized, projectsRoot defaulted). */
-export interface Config extends Omit<z.infer<typeof ConfigSchema>, 'dataDir' | 'projectsRoot'> {
+export interface Config extends Omit<z.infer<typeof ConfigSchema>, 'dataDir' | 'projectsRoot' | 'browseRoot'> {
   dataDir: string;
   projectsRoot: string;
+  browseRoot: string;
 }
 
 /** Plain-object deep merge; override values win. Arrays are replaced wholesale. */
@@ -126,6 +129,8 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
   if (dataDir !== undefined) o.dataDir = dataDir;
   const projectsRoot = str('AGENTDECK_PROJECTS_ROOT');
   if (projectsRoot !== undefined) o.projectsRoot = projectsRoot;
+  const browseRoot = str('AGENTDECK_BROWSE_ROOT');
+  if (browseRoot !== undefined) o.browseRoot = browseRoot;
   const serverName = str('AGENTDECK_SERVER_NAME');
   if (serverName !== undefined) o.serverName = serverName;
   const logLevel = str('AGENTDECK_LOG_LEVEL');
@@ -237,5 +242,6 @@ export function loadConfig(opts: LoadConfigOptions = {}): Config {
   }
   const dataDir = path.resolve(expandHome(parsed.dataDir));
   const projectsRoot = path.resolve(expandHome(parsed.projectsRoot ?? path.join(dataDir, 'projects')));
-  return { ...parsed, dataDir, projectsRoot };
+  const browseRoot = path.resolve(expandHome(parsed.browseRoot ?? os.homedir()));
+  return { ...parsed, dataDir, projectsRoot, browseRoot };
 }

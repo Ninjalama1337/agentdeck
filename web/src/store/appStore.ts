@@ -15,6 +15,7 @@ import type {
   ApkInfo,
   UpdateInfo,
   Attachment,
+  BrowseResponse,
   ChatMessage,
   CreateAccountRequest,
   CreateProjectRequest,
@@ -24,6 +25,7 @@ import type {
   CloneProjectRequest,
   DeckNotification,
   DeviceInfo,
+  OpenProjectRequest,
   PairPendingResponse,
   PairRequestInfo,
   PairResponse,
@@ -355,6 +357,10 @@ export interface AppStore {
   refreshSessions(projectId: string): Promise<void>;
   createProject(req: CreateProjectRequest): Promise<Project>;
   cloneProject(req: CloneProjectRequest): Promise<Project>;
+  /** Adopt an existing directory on the server as a project (folder picker). */
+  openExistingProject(req: OpenProjectRequest): Promise<Project>;
+  /** Folder picker: list directories under `path` (defaults to the browse root). */
+  browseFs(path?: string, all?: boolean): Promise<BrowseResponse>;
   deleteProject(id: string): Promise<void>;
   createSession(req: CreateSessionRequest): Promise<Session>;
   openSession(id: string): Promise<void>;
@@ -1189,6 +1195,16 @@ export const useAppStore = create<AppStore>()((set, get) => {
       const project = await api.cloneProject(req);
       get().upsertProject(project);
       return project;
+    },
+
+    async openExistingProject(req) {
+      const project = await api.openProject(req);
+      get().upsertProject(project);
+      return project;
+    },
+
+    browseFs(path, all) {
+      return api.browseFs(path, all);
     },
 
     async deleteProject(id) {

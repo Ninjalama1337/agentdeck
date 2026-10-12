@@ -7,6 +7,7 @@ import { httpError, notFound } from '../http/errors.js';
 import { EnhanceError, runEnhance } from '../agents/enhance.js';
 import { sanitizeFileName, ensureDir } from '../util/paths.js';
 import { newProjectId } from '../util/ids.js';
+import { listBrowseDirs, resolveBrowseDir, resolveBrowseRoot } from '../files/explorer.js';
 import {
   cloneRepo,
   findFreeCloneTarget,
@@ -125,6 +126,49 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     })();
 
     reply.code(202).send(project);
+  });
+
+  // Adopt an existing directory on this machine (e.g. a repo checked out
+  // elsewhere) as a project, via the folder picker.
+  fastify.post('/projects/open', async (req, reply) => {
+    const body = z
+      .object({
+        path: z.string().min(1).max(4096),
+        name: z.string().min(1).max(120).optional(),
+      })
+      .parse(req.body ?? {});
+    const rootReal = await resolveBrowseRoot(deps.config.browseRoot);
+    const dir = await resolveBrowseDir(rootReal, body.path);
+
+    const existing = deps.store.listProjects().find((p) => path.resolve(p.path) === dir);
+    if (existing) {
+      reply.code(200).send(existing);
+      return;
+    }
+
+    const name = (body.name?.trim() || path.basename(dir) || 'project').slice(0, 120);
+    const now = Date.now();
+    const project: Project = {
+      id: newProjectId(),
+      name,
+      path: dir,
+      createdAt: now,
+      updatedAt: now,
+    };
+    project.git = await gitStatus(dir);
+    await deps.store.saveProject(project, { touch: false });
+    deps.broadcast('notify', { level: 'info', text: `Opened ${name} at ${dir}` });
+    reply.code(201).send(project);
+  });
+
+  // Folder picker: directories under the configured browse root.
+  fastify.get('/fs/browse', async (req) => {
+    const query = z
+      .object({ path: z.string().max(4096).optional(), all: z.string().optional() })
+      .parse(req.query ?? {});
+    const rootReal = await resolveBrowseRoot(deps.config.browseRoot);
+    const dir = await resolveBrowseDir(rootReal, query.path);
+    return listBrowseDirs(rootReal, dir, { all: query.all === '1' });
   });
 
   fastify.delete('/projects/:id', async (req, reply) => {
