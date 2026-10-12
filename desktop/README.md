@@ -147,8 +147,19 @@ Ubuntu 24.04 sperrt Benutzer-Namensräume für Programme ohne AppArmor-Profil.
 
 ## Updates
 
-Die App prüft nach dem Start (nur gepackt) das neueste GitHub-Release und weist
-mit einem Hinweis samt Link auf die Release-Seite hin; sie ersetzt sich nicht selbst.
-Der Dienst wird von der neuen App beim ersten Start aktualisiert. `latest-linux.yml`
-liegt am Release, damit ein späterer Wechsel auf `electron-updater` (AppImage) nur
-Code in `src/updates.ts` braucht.
+Die App lädt und installiert Updates selbst (`electron-updater`, nur gepackt):
+
+- **AppImage:** lädt das neue AppImage (Delta über die eingebettete Blockmap) und
+  ersetzt es beim Neustart an seiner Stelle — ohne Passwort.
+- **deb:** lädt das neue Paket; die Installation läuft über die Paketverwaltung
+  und fragt per `pkexec`/sudo nach Rechten.
+
+Der Ablauf (`src/core/autoUpdate.ts`, Electron-frei und getestet) fragt zuerst
+(Herunterladen & installieren / Später / Diese Version ignorieren), lädt dann und
+bietet den Neustart an. `src/updates.ts` verdrahtet `electron-updater`, die Dialoge
+und die `prepareRestart`-Rückfrage aus `main.ts` (Storage flushen, Quit als
+Update-Neustart markieren). `electron-updater` liest `app-update.yml`/`package-type`
+aus dem Bundle; `latest-linux.yml` liegt am Release. Die Version muss beim Bauen
+gesetzt sein (CI: `npm version`), sonst stimmen Update-Vergleich und Dateinamen nicht.
+
+Der Dienst wird von der neuen App beim ersten Start aktualisiert.

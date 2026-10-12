@@ -4,7 +4,6 @@ import { childEnv } from '../src/core/env';
 import { desktopPaths, xdgPaths } from '../src/core/paths';
 import { isVolatilePath, stageRuntime } from '../src/core/runtimeStage';
 import { statusPageHtml, statusPageUrl } from '../src/core/statusPage';
-import { fetchLatestRelease, isUpdateWorthNoticing } from '../src/core/updateCheck';
 import { classifyNavigation, isPermissionAllowed, isTrustedSender } from '../src/core/urlPolicy';
 import { compareVersions, parseVersion, runtimeNeedsUpdate } from '../src/core/versions';
 import { MemFs } from './helpers/memFs';
@@ -127,34 +126,6 @@ describe('versions', () => {
     expect(runtimeNeedsUpdate('2.0.0', '2.0.1')).toBe(false);
     expect(runtimeNeedsUpdate('2.0.0', '2.0.0-3-gabc1234')).toBe(true);
     expect(runtimeNeedsUpdate('2.0.0', 'weird')).toBe(true);
-  });
-});
-
-describe('update check', () => {
-  const answer = (body: unknown, ok = true) => async () => ({ ok, json: async () => body });
-
-  it('reads the latest release from the GitHub API', async () => {
-    const release = await fetchLatestRelease(answer({ tag_name: 'v1.4.0', html_url: 'https://github.com/Ninjalama1337/agentdeck/releases/tag/v1.4.0' }));
-    expect(release).toEqual({ version: '1.4.0', url: 'https://github.com/Ninjalama1337/agentdeck/releases/tag/v1.4.0' });
-  });
-
-  it('ignores drafts, prereleases, errors and foreign links', async () => {
-    expect(await fetchLatestRelease(answer({ tag_name: 'v1.4.0', draft: true }))).toBeNull();
-    expect(await fetchLatestRelease(answer({ tag_name: 'v1.4.0', prerelease: true }))).toBeNull();
-    expect(await fetchLatestRelease(answer({}, false))).toBeNull();
-    expect(await fetchLatestRelease(async () => { throw new Error('offline'); })).toBeNull();
-    expect((await fetchLatestRelease(answer({ tag_name: 'v1.4.0', html_url: 'https://evil.example/' })))?.url).toBe(
-      'https://github.com/Ninjalama1337/agentdeck/releases/latest',
-    );
-  });
-
-  it('notices only a newer release that was not waved off', () => {
-    const latest = { version: '1.4.0', url: 'u' };
-    expect(isUpdateWorthNoticing('1.3.0', latest, undefined)).toBe(true);
-    expect(isUpdateWorthNoticing('1.4.0', latest, undefined)).toBe(false);
-    expect(isUpdateWorthNoticing('1.5.0', latest, undefined)).toBe(false);
-    expect(isUpdateWorthNoticing('1.3.0', latest, '1.4.0')).toBe(false);
-    expect(isUpdateWorthNoticing('dev', latest, undefined)).toBe(false);
   });
 });
 

@@ -201,12 +201,14 @@ Server seine eigene letzte Ansicht.
 
 ## Updates
 
-- **App:** Die App prüft beim Start über die GitHub-API auf eine neuere Version
-  und zeigt einen Hinweis mit Link zur Release-Seite; sie ersetzt sich nicht
-  selbst. Das geht nur, solange die Releases ohne Anmeldung lesbar sind: Ist das
-  Repository privat, sieht die App kein Release und zeigt nie einen Hinweis —
-  dann die Release-Seite von Hand ansehen. Neues `.deb` mit `sudo apt install ./…` einspielen, AppImage
-  austauschen.
+- **App:** Die App aktualisiert sich selbst (`electron-updater`, nur gepackt).
+  Beim Start prüft sie das neueste Release, fragt (Herunterladen & installieren /
+  Später / Diese Version ignorieren), lädt und bietet den Neustart an.
+  **AppImage:** das neue AppImage ersetzt das alte an seiner Stelle (Delta-Update,
+  kein Passwort). **deb:** das Paket wird über die Paketverwaltung installiert
+  (pkexec/sudo-Prompt). Das geht nur, solange die Releases ohne Anmeldung lesbar
+  sind: Ist das Repository privat, findet der Updater kein Release — dann das neue
+  `.deb` mit `sudo apt install ./…` einspielen bzw. das AppImage austauschen.
 - **Dienst:** Beim ersten Start der neuen App erkennt sie, dass die installierte
   Laufzeit älter ist als die mitgelieferte, kopiert die neue
   (`runtime/current` zeigt darauf; die letzten zwei Versionen bleiben) und startet den

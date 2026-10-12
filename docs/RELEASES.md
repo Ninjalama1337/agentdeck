@@ -32,7 +32,8 @@ dort Typecheck oder Tests fehl, entsteht kein Release.
 `ubuntu-22.04` das Server-Bundle (`scripts/build-server-bundle.sh`: Node 22,
 `node-pty`, statisches tmux, gebauter Server und Web-App) und daraus
 `AgentDeck-<version>-linux-x64.AppImage`, das `.deb` und `latest-linux.yml`
-für das Auto-Update des AppImage. Der Workflow legt **kein** Release an: Er
+für das Selbst-Update der Desktop-App (`electron-updater`: AppImage wird ersetzt,
+deb über die Paketverwaltung). Der Workflow legt **kein** Release an: Er
 wartet (bis zu 60 min), bis `android.yml` es nach grünen Tests erzeugt hat, und
 lädt die Pakete dann hoch. Fehlen sie, meldet `scripts/release.sh --wait` eine
 Warnung — Server und APK des Releases sind davon nicht betroffen.

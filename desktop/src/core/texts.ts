@@ -41,11 +41,17 @@ export const TEXTS = {
     detail: 'AgentDeck lädt die Seite nicht noch einmal automatisch. Neu laden mit Strg+Umschalt+R, oder die App neu starten.',
   },
   update: {
-    message: (version: string) => `AgentDeck ${version} ist verfügbar`,
-    detail:
-      'Eine neuere Version dieser App ist erschienen. Der Dienst wird beim nächsten Start der neuen Version automatisch aktualisiert; Terminals bleiben dabei erhalten.',
-    open: 'Release-Seite öffnen',
+    availableMessage: (version: string) => `AgentDeck ${version} ist verfügbar`,
+    availableDetail:
+      'Eine neuere Version dieser App ist erschienen. AgentDeck lädt sie jetzt herunter und ersetzt sich beim Neustart selbst. ' +
+      'Der Dienst wird von der neuen Version automatisch aktualisiert; Terminals bleiben dabei erhalten.',
+    install: 'Herunterladen & installieren',
+    readyMessage: (version: string) => `AgentDeck ${version} ist bereit`,
+    readyDetail:
+      'Das Update wurde heruntergeladen. Jetzt neu starten? Der Dienst wird von der neuen Version automatisch aktualisiert; Terminals bleiben dabei erhalten.',
+    restart: 'Jetzt neu starten',
     later: 'Später',
     ignore: 'Diese Version ignorieren',
+    failed: 'Das Update konnte nicht installiert werden',
   },
 } as const;

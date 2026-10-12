@@ -70,18 +70,41 @@ export async function showError(win: BrowserWindow | null, message: string, deta
   await box(win, { type: 'error', title: TEXTS.appName, message, detail, buttons: ['OK'] });
 }
 
-export type UpdateAnswer = 'open' | 'later' | 'ignore';
+export type UpdateAnswer = 'install' | 'later' | 'ignore';
 
-export async function updateNotice(win: BrowserWindow | null, version: string): Promise<UpdateAnswer> {
+/** A newer release exists: download it now, ask again next start, or skip this version. */
+export async function updateAvailable(win: BrowserWindow | null, version: string): Promise<UpdateAnswer> {
   const t = TEXTS.update;
   const result = await box(win, {
     type: 'info',
     title: TEXTS.appName,
-    message: t.message(version),
-    detail: t.detail,
-    buttons: [t.open, t.later, t.ignore],
+    message: t.availableMessage(version),
+    detail: t.availableDetail,
+    buttons: [t.install, t.later, t.ignore],
     defaultId: 0,
     cancelId: 1,
   });
-  return (['open', 'later', 'ignore'] as const)[result.response] ?? 'later';
+  return (['install', 'later', 'ignore'] as const)[result.response] ?? 'later';
+}
+
+export type UpdateReadyAnswer = 'restart' | 'later';
+
+/** The update is downloaded: restart into it now, or wait for the next start. */
+export async function updateReady(win: BrowserWindow | null, version: string): Promise<UpdateReadyAnswer> {
+  const t = TEXTS.update;
+  const result = await box(win, {
+    type: 'info',
+    title: TEXTS.appName,
+    message: t.readyMessage(version),
+    detail: t.readyDetail,
+    buttons: [t.restart, t.later],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  return result.response === 0 ? 'restart' : 'later';
+}
+
+/** The chosen install could not be prepared (offline, or no permission to write). */
+export async function updateFailed(win: BrowserWindow | null, message: string): Promise<void> {
+  await box(win, { type: 'error', title: TEXTS.appName, message: TEXTS.update.failed, detail: message, buttons: ['OK'] });
 }

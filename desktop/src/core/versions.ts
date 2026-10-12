@@ -1,8 +1,3 @@
-export interface ReleaseInfo {
-  version: string;
-  url: string;
-}
-
 /** `v1.2.3` / `1.2.3` / `1.2.3-4-gabc` → [1,2,3]; null when it does not start like a version. */
 export function parseVersion(text: string): [number, number, number] | null {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(text.trim());

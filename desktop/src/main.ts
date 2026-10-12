@@ -220,7 +220,9 @@ async function main(): Promise<void> {
     }
   }
 
-  async function finalQuit(): Promise<void> {
+  // Flushes state and flips the quitting flag so the window close no longer asks questions.
+  // Shared by a normal quit and an update restart (electron-updater quits for us there).
+  async function flushAndMarkQuitting(): Promise<void> {
     if (quitting) return;
     quitting = true;
     if (poller) clearInterval(poller);
@@ -235,6 +237,10 @@ async function main(): Promise<void> {
     } catch (err) {
       log(`flush before quit failed: ${String(err)}`);
     }
+  }
+
+  async function finalQuit(): Promise<void> {
+    await flushAndMarkQuitting();
     app.quit();
   }
 
@@ -416,7 +422,13 @@ async function main(): Promise<void> {
     }
     if (app.isPackaged && process.env.AGENTDECK_NO_UPDATE_CHECK !== '1') {
       setTimeout(
-        () => void checkForUpdate({ currentVersion: app.getVersion(), state: stateStore, window: () => win, log }),
+        () =>
+          void checkForUpdate({
+            state: stateStore,
+            window: () => win,
+            log,
+            prepareRestart: flushAndMarkQuitting,
+          }),
         20_000,
       ).unref();
     }

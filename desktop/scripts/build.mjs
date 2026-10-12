@@ -20,12 +20,14 @@ const common = {
   legalComments: 'none',
 };
 
-// Main process: Node built-ins stay external automatically, Electron is provided at runtime.
+// Main process: Node built-ins stay external automatically; Electron and
+// electron-updater are provided at runtime (electron-updater resolves its
+// platform updater and the app-update.yml dynamically, so it must not be bundled).
 await build({
   ...common,
   entryPoints: [resolve(root, 'src/main.ts')],
   outfile: resolve(dist, 'main.js'),
-  external: ['electron'],
+  external: ['electron', 'electron-updater'],
 });
 
 // Preload runs sandboxed: one self-contained file, only `electron` may be required.
