@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { writeFileAtomic } from '../util/atomicWrite.js';
 import { ensureDir } from '../util/paths.js';
 
 function randomHex(bytes = 32): string {
@@ -16,18 +17,16 @@ export async function loadOrCreateSecret(dataDir: string, name: string): Promise
   const file = path.join(dataDir, name);
   try {
     const existing = (await fsp.readFile(file, 'utf8')).trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) {
+      // Files from before the mode was set (or restored from a backup) are tightened too.
+      await fsp.chmod(file, 0o600).catch(() => undefined);
+      return existing;
+    }
   } catch {
     // fall through to creation
   }
   const secret = randomHex(32);
-  const handle = await fsp.open(file, 'w', 0o600);
-  try {
-    await handle.writeFile(secret, 'utf8');
-  } finally {
-    await handle.close();
-  }
-  await fsp.chmod(file, 0o600).catch(() => undefined);
+  await writeFileAtomic(file, secret, 0o600);
   return secret;
 }
 
@@ -63,23 +62,24 @@ export class PairingCodeManager {
     }
   }
 
-  /** Returns the stored code or creates a fresh one (first startup). */
+  /**
+   * Returns the stored code or creates a fresh one (first startup). The file is
+   * (re)set to 0600 — the desktop app reads the code from it, nobody else may.
+   */
   async readOrCreate(): Promise<string> {
     const existing = await this.read();
-    if (existing) return existing;
+    if (existing) {
+      await fsp.chmod(this.file, 0o600).catch(() => undefined);
+      return existing;
+    }
     return this.rotate();
   }
 
   async rotate(): Promise<string> {
     const code = PairingCodeManager.generate();
     await ensureDir(path.dirname(this.file));
-    const handle = await fsp.open(this.file, 'w', 0o600);
-    try {
-      await handle.writeFile(code + '\n', 'utf8');
-    } finally {
-      await handle.close();
-    }
-    await fsp.chmod(this.file, 0o600).catch(() => undefined);
+    // Atomic: the desktop shell reads this file while a pairing rotates it.
+    await writeFileAtomic(this.file, code + '\n', 0o600);
     return code;
   }
 }

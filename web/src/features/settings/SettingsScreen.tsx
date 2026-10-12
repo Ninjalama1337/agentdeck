@@ -32,6 +32,9 @@ import { PreferencesSection } from './PreferencesSection';
 import { PairCodeCard } from '../pairing/PairCodeCard';
 import { ServerUpdateSection } from './ServerUpdateSection';
 import { ArrowLeft } from 'lucide-react';
+import { DesktopSection } from './DesktopSection';
+import { useDesktopLayout } from '../../hooks/useDesktopLayout';
+import { desktopBridge } from '../../util/desktop';
 
 /** Dot + label colors for the tunnel status row. */
 const TUNNEL_DOTS: Record<TunnelStatus, string> = {
@@ -202,22 +205,24 @@ export function SettingsScreen() {
     }
   };
 
-  return (
-    <div className="flex min-h-full flex-col px-4 pb-8">
-      <header className="flex items-center gap-1 py-3">
-        <button
-          type="button"
-          aria-label="Back"
-          onClick={() => useAppStore.getState().navigate({ name: 'home' })}
-          className="press tap -ml-2 flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08]"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="min-w-0 flex-1 text-[20px] font-bold tracking-tight">Settings</h1>
-      </header>
+  const desktop = useDesktopLayout();
+  const bridge = desktopBridge();
+  const inDesktopApp = bridge !== null;
 
+  const desktopSection = (
+    <>
+      {bridge && <DesktopSection bridge={bridge} />}
+    </>
+  );
+
+  const preferencesSection = (
+    <>
       <PreferencesSection />
+    </>
+  );
 
+  const serverSection = (
+    <>
       {/* server */}
       <section className="glass mb-4 p-4" aria-label="Server">
         <h2 className="mb-3 flex items-center gap-2 text-[14px] font-semibold">
@@ -314,7 +319,11 @@ export function SettingsScreen() {
       </section>
 
       <ServerUpdateSection />
+    </>
+  );
 
+  const savedServersSection = (
+    <>
       {/* saved servers: one login each, switch without pairing again */}
       <section className="glass mb-4 p-4" aria-label="Saved servers">
         <h2 className="mb-1 flex items-center gap-2 text-[14px] font-semibold">
@@ -376,14 +385,24 @@ export function SettingsScreen() {
           </button>
         </div>
       </section>
+    </>
+  );
 
+  const androidSection = (
+    <>
       {/* android app: info + manual APK publish */}
       <section className="glass mb-4 p-4" aria-label="Android app">
         <h2 className="mb-3 flex items-center gap-2 text-[14px] font-semibold">
           <Smartphone size={15} className="text-accent" /> Android app
         </h2>
 
-        {apkInfo ? (
+        {inDesktopApp ? (
+          <p className="text-[13px] leading-snug text-dim">
+            {apkInfo?.available
+              ? `Phones install the Android app (v${apkInfo.version ?? '?'}) from this server's address, in their browser.`
+              : 'No Android app has been published to this server yet.'}
+          </p>
+        ) : apkInfo ? (
           <ApkCard info={apkInfo} />
         ) : (
           <p className="text-[13px] text-dim">APK info unavailable — server not reachable.</p>
@@ -465,7 +484,11 @@ export function SettingsScreen() {
           </p>
         </div>
       </section>
+    </>
+  );
 
+  const usageSection = (
+    <>
       {/* subscription usage */}
       <section className="glass mb-4 p-4" aria-label="Subscription usage">
         <h2 className="mb-2 text-[14px] font-semibold">Subscription usage</h2>
@@ -484,7 +507,11 @@ export function SettingsScreen() {
           <ChevronRight size={16} className="shrink-0 text-dim" />
         </button>
       </section>
+    </>
+  );
 
+  const agentsSection = (
+    <>
       {/* agents */}
       <section className="glass mb-4 p-4" aria-label="Agents">
         <h2 className="mb-3 text-[14px] font-semibold">Agents</h2>
@@ -552,7 +579,11 @@ export function SettingsScreen() {
           {agentOrder.length === 0 && <p className="text-[13px] text-dim">No agents reported.</p>}
         </div>
       </section>
+    </>
+  );
 
+  const accountsSection = (
+    <>
       {/* accounts (multi-account switching) */}
       <section className="glass mb-4 p-4" aria-label="Accounts">
         <h2 className="mb-1 text-[14px] font-semibold">Accounts</h2>
@@ -589,7 +620,11 @@ export function SettingsScreen() {
           </button>
         </div>
       </section>
+    </>
+  );
 
+  const devicesSection = (
+    <>
       {/* devices */}
       <section className="glass mb-4 p-4" aria-label="Devices">
         <h2 className="mb-3 text-[14px] font-semibold">Paired devices</h2>
@@ -623,7 +658,11 @@ export function SettingsScreen() {
         </div>
         <PairCodeCard />
       </section>
+    </>
+  );
 
+  const dangerSection = (
+    <>
       {/* danger + about */}
       <section className="glass mb-4 p-4" aria-label="Danger zone">
         <h2 className="mb-3 text-[14px] font-semibold text-danger">Danger zone</h2>
@@ -653,6 +692,55 @@ export function SettingsScreen() {
           Remote control deck for coding agents{serverInfo?.version ? ` · server v${serverInfo.version}` : ''}
         </p>
       </section>
+    </>
+  );
+
+  return (
+    <div className="flex min-h-full flex-col px-4 pb-8">
+      <header className="flex items-center gap-1 py-3">
+        <button
+          type="button"
+          aria-label="Back"
+          onClick={() => useAppStore.getState().navigate({ name: 'home' })}
+          className="press tap -ml-2 flex h-11 w-11 items-center justify-center rounded-xl text-dim active:bg-white/[0.08]"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <h1 className="min-w-0 flex-1 text-[20px] font-bold tracking-tight">Settings</h1>
+      </header>
+
+      {desktop ? (
+        // Desktop: two columns — this app and the server on the left, preferences and the Android app on the right.
+        <div className="grid grid-cols-2 items-start gap-x-6">
+          <div className="min-w-0">
+            {desktopSection}
+            {serverSection}
+            {savedServersSection}
+            {agentsSection}
+            {accountsSection}
+            {devicesSection}
+            {dangerSection}
+          </div>
+          <div className="min-w-0">
+            {preferencesSection}
+            {usageSection}
+            {androidSection}
+          </div>
+        </div>
+      ) : (
+        <>
+          {desktopSection}
+          {preferencesSection}
+          {serverSection}
+          {savedServersSection}
+          {androidSection}
+          {usageSection}
+          {agentsSection}
+          {accountsSection}
+          {devicesSection}
+          {dangerSection}
+        </>
+      )}
 
       <AgentSheet agentId={agentSheetId} open={agentSheetId !== null} onClose={() => setAgentSheetId(null)} />
       <AgentAdminSheet agentId={adminSheetId} open={adminSheetId !== null} onClose={() => setAdminSheetId(null)} />

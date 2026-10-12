@@ -181,6 +181,11 @@ img {
   }
 }
 
+/* Desktop layout (>= 1024px, fine pointer — see hooks/useDesktopLayout): sidebar and content side by side. */
+.app-shell-desktop {
+  flex-direction: row;
+}
+
 /* Screen area: whatever the top bar leaves, minus the fixed bottom tab bar. */
 .screen-h {
   flex: 1 1 0;
@@ -699,4 +704,51 @@ textarea.field {
   *::after {
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ------------------------------------------------------------ desktop layout */
+
+/* Rules for the desktop layout (html[data-layout='desktop'], set by App.tsx).
+   Unlayered on purpose: they have to beat the utility classes on the components. */
+
+/* Sheets on the desktop: a centered dialog instead of a phone-style bottom sheet. */
+html[data-layout='desktop'] .sheet-panel {
+  top: 0;
+  display: flex;
+  align-items: center;
+  padding: 24px;
+  pointer-events: none;
+  animation: modal-in 200ms var(--ad-ease);
+}
+html[data-layout='desktop'] .sheet-card {
+  pointer-events: auto;
+  max-height: min(88dvh, 760px);
+  border-bottom: 1px solid var(--ad-line);
+  border-radius: 22px;
+  padding-top: 18px;
+}
+html[data-layout='desktop'] .sheet-handle {
+  display: none;
+}
+
+/* Toasts span the whole width on a phone; on a wide window they stay a readable size. */
+html[data-layout='desktop'] .toast-card {
+  max-width: 36rem;
+}
+
+/* Hover feedback for the cards and rows that are buttons (the UI was made for touch: it only had :active). */
+@media (hover: hover) {
+  html[data-layout='desktop'] .glass.press:hover {
+    background: var(--ad-surface-2);
+  }
+  html[data-layout='desktop'] .glass-soft.press:hover {
+    background: var(--ad-surface-3);
+  }
+}
+
+/* The sticky screen header spans the centered content column only — let its
+   background run to the edges of the content area. */
+html[data-layout='desktop'] .appbar {
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--ad-bg) 88%, transparent);
+  clip-path: inset(0 -100vmax);
 }

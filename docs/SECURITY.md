@@ -127,6 +127,30 @@ Aufrufer von **localhost** mit dem Token aus `dataDir/bridge-token` (Datei
 die Bridge also nur nutzen, wenn er ohnehin bereits lokal auf deinem Rechner
 läuft.
 
+## Desktop-App
+
+Die [Desktop-App](DESKTOP.md) ändert das Bedrohungsmodell nicht, setzt aber
+andere Standardwerte, weil sie auf einem Rechner läuft, der auch in fremden
+Netzen hängt:
+
+- Der von der App eingerichtete Dienst hört standardmäßig nur auf
+  `127.0.0.1`. „Phone access in the local network“ in den Settings schaltet auf
+  `0.0.0.0` — dann genügt im LAN der Pairing-Code. In fremden WLANs aus lassen.
+- Das Fenster pairt sich selbst: Es liest den Code aus
+  `pairing-code.txt`. Die Datei (und `jwt-secret`, `bridge-token`) erzwingt der
+  Server beim Start auf `0600`; wer sie lesen kann, kann ohnehin alles.
+- Die Chromium-Sandbox bleibt an. Ohne funktionierende Sandbox startet die App
+  nicht; `--no-sandbox` gibt es nur mit ausdrücklichem
+  `AGENTDECK_NO_SANDBOX=1`.
+- Das Fenster lädt nur den Server-Origin; externe Links öffnen im
+  System-Browser, Navigation weg vom Server wird blockiert. Die Fenster-Bridge
+  (Dienst steuern, LAN schalten, App beenden) und das Auto-Pairing gibt es nur,
+  solange der Server auf `/api/health` als AgentDeck antwortet: Ein fremdes
+  Programm auf dem festen Port bekommt weder die Bridge noch den Pairing-Code.
+  Ein Prozess desselben Benutzers, der AgentDeck täuschend nachahmt, ist damit
+  nicht ausgeschlossen — er könnte ohnehin alles, was dieser Benutzer darf.
+- Der Dienst läuft als dein Benutzer (`systemd --user`), nicht als root.
+
 ## Betriebsempfehlungen
 
 **1. Nur LAN oder VPN.** Der Normalfall: Server lauscht im Heimnetz

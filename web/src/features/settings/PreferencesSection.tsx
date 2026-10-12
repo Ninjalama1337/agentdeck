@@ -21,19 +21,30 @@ const KIND_LABELS: Record<DeckNotificationKind, string> = {
   info: 'Other',
 };
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => {
         haptic();
         onChange(!checked);
       }}
       className={clsx(
-        'relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200',
+        'relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-45',
         checked ? 'bg-accent' : 'bg-surface-3',
       )}
     >
@@ -47,7 +58,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
-function Row({ icon, title, hint, children }: { icon?: React.ReactNode; title: string; hint?: string; children: React.ReactNode }) {
+export function Row({ icon, title, hint, children }: { icon?: React.ReactNode; title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-12 items-center gap-3 py-1.5">
       {icon && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-dim">{icon}</span>}
@@ -60,15 +71,29 @@ function Row({ icon, title, hint, children }: { icon?: React.ReactNode; title: s
   );
 }
 
-function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
   return (
     <div className="grid rounded-xl border border-line bg-bg-raise p-0.5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          disabled={disabled}
           onClick={() => onChange(o.value)}
-          className={clsx('press h-8 rounded-[10px] px-2 text-[12.5px] font-semibold', value === o.value ? 'bg-surface-3 text-ink' : 'text-dim')}
+          className={clsx(
+            'press h-8 rounded-[10px] px-2 text-[12.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-60',
+            value === o.value ? 'bg-surface-3 text-ink' : 'text-dim',
+          )}
         >
           {o.label}
         </button>

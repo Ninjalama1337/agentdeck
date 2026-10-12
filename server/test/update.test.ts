@@ -5,8 +5,15 @@ import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { UpdateInfo } from '@agentdeck/shared';
 import { REPO_ROOT, versionFromDescribe } from '../src/version.js';
-import { isNewerRelease, parseVersion, type ReleaseInfo } from '../src/update/release.js';
-import { UpdateManager, type UpdateChild } from '../src/update/manager.js';
+import {
+  fetchLatestReleasePublic,
+  isNewerRelease,
+  packagedReleaseFetcher,
+  parseVersion,
+  RELEASE_REPO,
+  type ReleaseInfo,
+} from '../src/update/release.js';
+import { PACKAGED_BLOCKED_REASON, UpdateManager, type UpdateChild } from '../src/update/manager.js';
 import { loadConfig } from '../src/config.js';
 import { buildApp } from '../src/http/app.js';
 import { signDeviceToken } from '../src/auth/jwt.js';
@@ -64,7 +71,7 @@ interface FakeRun {
   env: Record<string, string>;
 }
 
-function makeManager(opts: { current: string; latest: ReleaseInfo | null | Error; repoRoot?: string }) {
+function makeManager(opts: { current: string; latest: ReleaseInfo | null | Error; repoRoot?: string; packaged?: boolean }) {
   const broadcasts: UpdateInfo[] = [];
   const runs: FakeRun[] = [];
   const fetchRelease = vi.fn(async () => {
@@ -74,9 +81,10 @@ function makeManager(opts: { current: string; latest: ReleaseInfo | null | Error
   const manager = new UpdateManager({
     repoRoot: opts.repoRoot ?? REPO_ROOT,
     currentVersion: opts.current,
+    ...(opts.packaged ? { packaged: true } : {}),
     dataDir: tmp,
     localUrl: 'http://127.0.0.1:8787',
-    log: { info: () => undefined, warn: () => undefined, error: () => undefined } as never,
+    log: { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined } as never,
     broadcast: ((event: string, payload: { update: UpdateInfo }) => {
       if (event === 'update:state') broadcasts.push(payload.update);
     }) as never,
@@ -183,6 +191,97 @@ describe('UpdateManager', () => {
     expect((await manager.info()).blockedReason).toMatch(/git checkout/);
     await expect(manager.start()).rejects.toMatchObject({ statusCode: 409, code: 'UPDATE_UNAVAILABLE' });
     expect(runs).toHaveLength(0);
+  });
+});
+
+describe('UpdateManager in the desktop app bundle', () => {
+  it('points to the app instead of the git checkout, but still reports the latest release', async () => {
+    const { manager, runs } = makeManager({ current: '0.11.0', latest: release('0.12.0'), repoRoot: tmp, packaged: true });
+    const info = await manager.info();
+    expect(info.blockedReason).toBe(PACKAGED_BLOCKED_REASON);
+    expect(info.blockedReason).toBe('This server is part of the AgentDeck desktop app — update the app (Settings → Desktop).');
+    expect(info).toMatchObject({ current: '0.11.0', updateAvailable: true, latest: { version: '0.12.0' } });
+    await expect(manager.start()).rejects.toMatchObject({ statusCode: 409, code: 'UPDATE_UNAVAILABLE', message: PACKAGED_BLOCKED_REASON });
+    expect(runs).toHaveLength(0);
+  });
+
+  it('keeps quiet when the release lookup fails (no gh, offline, rate limit)', async () => {
+    const { manager } = makeManager({ current: '0.11.0', latest: new Error('GitHub CLI is not logged in'), packaged: true });
+    const info = await manager.info();
+    expect(info.checkError).toBeUndefined();
+    expect(info.updateAvailable).toBe(false);
+    expect(info.checkedAt).toBeDefined();
+    expect(info.blockedReason).toBe(PACKAGED_BLOCKED_REASON);
+  });
+
+  it('a checkout still reports the failure', async () => {
+    const { manager } = makeManager({ current: '0.11.0', latest: new Error('GitHub CLI is not logged in') });
+    expect((await manager.info()).checkError).toMatch(/not logged in/);
+  });
+});
+
+describe('release lookup without a checkout', () => {
+  const apiRelease = {
+    tag_name: 'v0.12.0',
+    html_url: 'https://github.com/x/y/releases/tag/v0.12.0',
+    published_at: '2026-01-02T03:04:05Z',
+    body: 'notes',
+  };
+  const answer = (status: number, body: unknown = {}) => async () => ({
+    status,
+    ok: status >= 200 && status < 300,
+    json: async () => body,
+  });
+
+  it('reads the latest release from the public GitHub API', async () => {
+    let requested = '';
+    let headers: Record<string, string> = {};
+    const fetched = await fetchLatestReleasePublic('o/r', async (url, init) => {
+      requested = url;
+      headers = init.headers;
+      return answer(200, apiRelease)();
+    });
+    expect(requested).toBe('https://api.github.com/repos/o/r/releases/latest');
+    expect(headers.authorization).toBeUndefined();
+    expect(fetched).toEqual({
+      tag: 'v0.12.0',
+      version: '0.12.0',
+      url: apiRelease.html_url,
+      publishedAt: apiRelease.published_at,
+      notes: 'notes',
+    });
+  });
+
+  it('treats 404 as "no release", other statuses and network errors as failures', async () => {
+    expect(await fetchLatestReleasePublic('o/r', answer(404))).toBeNull();
+    await expect(fetchLatestReleasePublic('o/r', answer(403))).rejects.toThrow(/GitHub answered 403/);
+    await expect(
+      fetchLatestReleasePublic('o/r', async () => {
+        throw new Error('getaddrinfo ENOTFOUND');
+      }),
+    ).rejects.toThrow(/Could not reach GitHub/);
+    await expect(fetchLatestReleasePublic('o/r', answer(200, { tag_name: 'nightly' }))).rejects.toThrow(/unexpected tag/);
+  });
+
+  it('asks gh about the public repo first and falls back to the API when gh is unusable', async () => {
+    const gh = vi.fn(async () => release('0.13.0'));
+    const publicApi = vi.fn(async () => release('0.12.0'));
+    expect((await packagedReleaseFetcher({ gh, publicApi })('/app'))?.version).toBe('0.13.0');
+    expect(gh).toHaveBeenCalledWith('/app', RELEASE_REPO);
+    expect(publicApi).not.toHaveBeenCalled();
+
+    const noGh = vi.fn(async () => {
+      throw new Error('GitHub CLI (gh) is not installed on the server.');
+    });
+    expect((await packagedReleaseFetcher({ gh: noGh, publicApi })('/app'))?.version).toBe('0.12.0');
+    expect(publicApi).toHaveBeenCalledWith(RELEASE_REPO);
+  });
+
+  it('reports the API failure when both ways fail', async () => {
+    const fail = async (): Promise<never> => {
+      throw new Error('boom');
+    };
+    await expect(packagedReleaseFetcher({ gh: fail, publicApi: fail })('/app')).rejects.toThrow('boom');
   });
 });
 

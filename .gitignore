@@ -16,3 +16,4 @@ mobile/android/local.properties
 mobile/dist/
 mobile/android/.idea/
 mobile/android/*.iml
+dist-bundle/

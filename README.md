@@ -113,6 +113,14 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   bietet Updates mit einem Tap zum Download an.
 - **PWA + APK** — installierbar als Progressive Web App oder als echte
   Android-APK (Capacitor 7, via GitHub Actions gebaut).
+- **Desktop-App (Linux)** — AppImage und `.deb` bringen Server, Node und tmux
+  mit. Der Server läuft wahlweise unsichtbar als Hintergrund-Dienst
+  (`agentdeck-server service install`), die App ist nur ein Fenster darauf und
+  zeigt denselben Stand wie das Handy. Beim Schließen fragt sie, ob der Dienst
+  weiterlaufen oder stoppen soll; Terminals, Chats und die zuletzt offene
+  Ansicht bleiben erhalten. Ab 1024 px Breite gibt es ein Desktop-Layout mit
+  Seitenleiste und mehreren Terminals nebeneinander
+  ([docs/DESKTOP.md](docs/DESKTOP.md)).
 
 ## Quickstart
 
@@ -244,7 +252,8 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `server/` | server | Fastify + socket.io, Agent-Adapter, MCP-Bridge |
 | `web/` | web | React-PWA (mobil-first), wird vom Server ausgeliefert |
 | `mobile/` | agentdeck-mobile | Capacitor-7-Wrapper → Android-APK ([mobile/README.md](mobile/README.md)) |
-| `docs/` | — | [Architektur](docs/ARCHITECTURE.md) · [Sicherheit](docs/SECURITY.md) · [Remote-Zugriff](docs/REMOTE.md) · [Android](docs/ANDROID.md) · [Releases & Updates](docs/RELEASES.md) · [MCP-Bridge](docs/MCP-BRIDGE.md) · [Konfiguration](docs/CONFIG.md) |
+| `desktop/` | — (eigenes npm-Projekt) | Electron-Fenster auf den Server → AppImage/deb ([docs/DESKTOP.md](docs/DESKTOP.md)) |
+| `docs/` | — | [Architektur](docs/ARCHITECTURE.md) · [Sicherheit](docs/SECURITY.md) · [Remote-Zugriff](docs/REMOTE.md) · [Android](docs/ANDROID.md) · [Desktop-App](docs/DESKTOP.md) · [Releases & Updates](docs/RELEASES.md) · [MCP-Bridge](docs/MCP-BRIDGE.md) · [Konfiguration](docs/CONFIG.md) |
 | `scripts/` | — | Helfer-Skripte (siehe unten) |
 
 ## Skripte
@@ -255,6 +264,7 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `scripts/dev.sh` | Server (Hot Reload) + Vite-Dev-Server parallel, mit `[server]`/`[web]`-Präfixen |
 | `scripts/build-android.sh` | Android-APK bauen (prüft SDK und `android/`-Ordner) |
 | `scripts/upload-apk.sh` | gebaute APK an den Server hochladen (`POST /api/apk/upload`) |
+| `scripts/build-server-bundle.sh` | Server als eigenständiges Bundle bauen (Node, tmux, node-pty, Web-App) — Grundlage der Desktop-Pakete |
 | `scripts/release.sh` | Release anlegen: testen, `vX.Y.Z` taggen und pushen — GitHub baut APK und Release (`--wait` wartet darauf) |
 | `scripts/update.sh` | diesen Checkout auf das neueste Release bringen, bauen, APK hinterlegen, Server neu starten |
 | `scripts/restart.sh` | laufenden Server neu starten (Terminals in tmux bleiben); Log: `~/.local/state/agentdeck/server.log` oder `AGENTDECK_LOG_FILE` |

@@ -1,10 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { clsx } from 'clsx';
 import { useAppStore } from './store/appStore';
+import type { Route } from './store/appStore';
 import { usePrefs } from './store/prefs';
 import { Aurora } from './components/Aurora';
 import { TabBar } from './components/TabBar';
 import { TopBar } from './components/TopBar';
+import { Sidebar } from './components/Sidebar';
 import { ToastStack } from './components/ui/Toast';
 import { Lightbox } from './components/Lightbox';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -24,6 +27,10 @@ import { ShareSheet } from './features/share/ShareSheet';
 import { listenForNativeShares, takeStashedShare } from './util/shareTarget';
 import { useUsageTracking } from './hooks/useUsageTracking';
 import { Spinner } from './components/ui/Spinner';
+import { desktopFrame, useDesktopLayout } from './hooks/useDesktopLayout';
+import { matchShortcut, OPEN_PROJECT_SWITCHER } from './util/shortcuts';
+import { attachPaneSync } from './features/code/paneSync';
+import { usePanes } from './features/code/paneStore';
 
 // Home and chat are in the first download; the heavier tabs (terminal
 // emulator, git, files, settings) come as their own chunks, so the app is on
@@ -84,13 +91,48 @@ export default function App() {
   const booted = useAppStore((s) => s.booted);
   const route = useAppStore((s) => s.route);
   const apkInfo = useAppStore((s) => s.apkInfo);
-  const keyboardOpen = useAppStore((s) => s.keyboardOpen);
+  const desktop = useDesktopLayout();
+  // The soft keyboard only exists on the phone layout (pinch-zoom on a desktop must not hide anything).
+  const keyboardOpen = useAppStore((s) => s.keyboardOpen) && !desktop;
 
   useEffect(() => {
     useAppStore.getState().init();
     listenForNativeTaps();
-    return installExternalLinkHandler();
+    const stopPaneSync = attachPaneSync(useAppStore, usePanes);
+    const stopLinks = installExternalLinkHandler();
+    return () => {
+      stopPaneSync();
+      stopLinks();
+    };
   }, []);
+
+  // CSS hook for the few desktop-only rules in global.css.
+  useEffect(() => {
+    document.documentElement.dataset.layout = desktop ? 'desktop' : 'mobile';
+    return () => {
+      delete document.documentElement.dataset.layout;
+    };
+  }, [desktop]);
+
+  // Desktop shortcuts: Ctrl/Cmd+1…5 tabs, Ctrl/Cmd+, settings, Ctrl/Cmd+K project switcher.
+  // Capture phase, so they win over the terminal while it has focus.
+  useEffect(() => {
+    if (!desktop || !booted) return;
+    const onKey = (e: KeyboardEvent) => {
+      const inTerminal = e.target instanceof Element && e.target.closest('.xterm') !== null;
+      const action = matchShortcut(e, { inTerminal });
+      if (!action) return;
+      const store = useAppStore.getState();
+      // A sheet is open: the shortcuts wait until it is closed.
+      if (store.overlayDepth > 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (action.type === 'route') store.navigate(action.route);
+      else window.dispatchEvent(new Event(OPEN_PROJECT_SWITCHER));
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [desktop, booted]);
 
   // Usage button: follow the agent in use, refresh every minute.
   useUsageTracking();
@@ -268,39 +310,57 @@ export default function App() {
     );
   }
 
+  const frame = desktopFrame(route.name);
+
   return (
     <>
       <Aurora />
       {/* APK self-update: only inside the native shell, when the server hosts a
           newer build than the one bundled into this WebView (see UpdateBanner). */}
       <UpdateBanner apk={apkInfo} />
-      <div className="app-shell">
-        <TopBar />
-        <main
-          className={[
-            keyboardOpen ? 'screen-h-kb' : 'screen-h',
-            'relative z-10 mx-auto w-full max-w-xl',
-            route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
-          ].join(' ')}
-        >
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-dim">
-                <Spinner />
-              </div>
-            }
-          >
-            {route.name === 'home' && <HomeScreen />}
-            {route.name === 'chat' && <ChatScreen />}
-            {route.name === 'code' && <CodeScreen />}
-            {route.name === 'files' && <FilesScreen />}
-            {route.name === 'git' && <GitScreen />}
-            {route.name === 'settings' && <SettingsScreen />}
-            {route.name === 'team' && <TeamScreen runId={route.runId} />}
-          </Suspense>
-        </main>
-      </div>
-      <TabBar />
+      {desktop ? (
+        // Desktop: sidebar + a wide content area (no top/tab bar).
+        <div className="app-shell app-shell-desktop">
+          <Sidebar />
+          <main className={clsx('relative z-10 h-full min-w-0 flex-1', frame.scroll && 'overflow-y-auto overscroll-contain')}>
+            <div className={clsx('mx-auto w-full', frame.scroll ? 'min-h-full' : 'h-full', frame.width)}>
+              <Suspense
+                fallback={
+                  <div className="flex h-full min-h-[40vh] items-center justify-center text-dim">
+                    <Spinner />
+                  </div>
+                }
+              >
+                <Screen route={route} />
+              </Suspense>
+            </div>
+          </main>
+        </div>
+      ) : (
+        <>
+          <div className="app-shell">
+            <TopBar />
+            <main
+              className={[
+                keyboardOpen ? 'screen-h-kb' : 'screen-h',
+                'relative z-10 mx-auto w-full max-w-xl',
+                route.name === 'chat' || route.name === 'code' ? '' : 'overflow-y-auto overscroll-contain',
+              ].join(' ')}
+            >
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-dim">
+                    <Spinner />
+                  </div>
+                }
+              >
+                <Screen route={route} />
+              </Suspense>
+            </main>
+          </div>
+          <TabBar />
+        </>
+      )}
       <UsageSheet />
       <ActivityHost />
       <ShareSheet />
@@ -309,6 +369,26 @@ export default function App() {
       <ToastStack />
     </>
   );
+}
+
+/** The screen of a route. */
+function Screen({ route }: { route: Route }) {
+  switch (route.name) {
+    case 'home':
+      return <HomeScreen />;
+    case 'chat':
+      return <ChatScreen />;
+    case 'code':
+      return <CodeScreen />;
+    case 'files':
+      return <FilesScreen />;
+    case 'git':
+      return <GitScreen />;
+    case 'settings':
+      return <SettingsScreen />;
+    case 'team':
+      return <TeamScreen runId={route.runId} />;
+  }
 }
 
 /** The Activity sheet, opened from Home and from the usage sheet. */

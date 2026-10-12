@@ -12,12 +12,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<NonNullable<ButtonProps['variant']>, string> = {
   primary:
-    'text-white shadow-glass bg-[linear-gradient(135deg,#7C5CFF_0%,#4E8CFF_100%)] active:brightness-110',
+    'text-white shadow-glass bg-[linear-gradient(135deg,#7C5CFF_0%,#4E8CFF_100%)] hover:brightness-110 active:brightness-110',
   glass:
-    'bg-surface-2 border border-line text-ink active:bg-surface-3',
-  ghost: 'text-dim active:text-ink active:bg-white/[0.06]',
-  danger: 'bg-danger/15 text-danger border border-danger/30 active:bg-danger/25',
-  subtle: 'bg-bg-raise text-ink active:bg-surface-2',
+    'bg-surface-2 border border-line text-ink hover:bg-surface-3 active:bg-surface-3',
+  ghost: 'text-dim hover:bg-white/[0.06] hover:text-ink active:text-ink active:bg-white/[0.06]',
+  danger: 'bg-danger/15 text-danger border border-danger/30 hover:bg-danger/25 active:bg-danger/25',
+  subtle: 'bg-bg-raise text-ink hover:bg-surface-2 active:bg-surface-2',
 };
 
 const SIZES: Record<NonNullable<ButtonProps['size']>, string> = {
@@ -70,7 +70,7 @@ export function IconButton({
       aria-label={label}
       className={clsx(
         'press tap flex h-11 w-11 items-center justify-center rounded-xl text-dim',
-        'active:bg-white/[0.08] active:text-ink',
+        'hover:bg-white/[0.08] hover:text-ink active:bg-white/[0.08] active:text-ink',
         className,
       )}
       {...rest}

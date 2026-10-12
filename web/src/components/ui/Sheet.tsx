@@ -85,7 +85,7 @@ export function Sheet({ open, onClose, title, subtitle, children }: SheetProps) 
       >
         <div className="sheet-card mx-auto flex max-h-[88dvh] w-full max-w-xl flex-col px-4">
           <div
-            className="flex shrink-0 cursor-grab justify-center py-2.5"
+            className="sheet-handle flex shrink-0 cursor-grab justify-center py-2.5"
             onTouchStart={onTouchStart}
             onTouchMove={onTouchMove}
             onTouchEnd={onTouchEnd}

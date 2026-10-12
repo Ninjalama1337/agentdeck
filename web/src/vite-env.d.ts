@@ -15,4 +15,6 @@ interface Window {
     /** Native plugins registered in the APK (LocalNotifications, Haptics, …). */
     Plugins?: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>> | undefined>;
   };
+  /** Desktop shell bridge (preload script of the Electron app) — absent in browsers, the PWA and the APK. */
+  agentdeckDesktop?: import('@agentdeck/shared').DesktopBridge;
 }
