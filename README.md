@@ -106,11 +106,10 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 - **Server-Update per Tipp** — Releases entstehen auf GitHub (Tag `vX.Y.Z`,
   getestet und mit APK gebaut). Die App zeigt unter Settings, welche Version
   der Server fährt und ob es eine neuere gibt; ein Tipp bringt den Server auf
-  das Release, hinterlegt die passende APK und startet ihn neu
-  ([docs/RELEASES.md](docs/RELEASES.md)).
-- **APK-Self-Update** — der Server verteilt die Android-App selbst
-  (`/api/apk/latest`); die App prüft beim Start gegen `/api/apk/info` und
-  bietet Updates mit einem Tap zum Download an.
+  das Release und startet ihn neu ([docs/RELEASES.md](docs/RELEASES.md)).
+- **APK-Self-Update** — die Android-App kommt vom öffentlichen GitHub-Release;
+  die App prüft beim Start gegen das neueste Release und bietet Updates mit
+  einem Tap an, der das APK-Asset direkt von GitHub lädt.
 - **PWA + APK** — installierbar als Progressive Web App oder als echte
   Android-APK (Capacitor 7, via GitHub Actions gebaut).
 - **Desktop-App (Linux)** — AppImage und `.deb` bringen Server, Node und tmux
@@ -202,12 +201,10 @@ mit fester Adresse wie `agentdeck.deinedomain.de`) oder Tailscale (feste
 Tailnet-IP). Übergangsweise: Der QR-Code in der Server-Konsole öffnet die App
 gleich mit richtiger Adresse (`?server=…` wird automatisch übernommen).
 
-Derselbe Server verteilt auch die **Android-APK**: Pairing-Seite und Settings
-bieten den Download an (`/api/apk/latest`), und gepaarte Geräte zeigen beim
-Start ein Update-Banner, sobald der Server eine neuere APK hält. Neue Builds
-landen automatisch per CI (Repo-Secrets `AGENTDECK_URL` +
-`AGENTDECK_BRIDGE_TOKEN`) oder lokal per
-`scripts/upload-apk.sh <apk> [version]` auf dem Server — Details in
+Die **Android-APK** kommt direkt vom öffentlichen GitHub-Release: Pairing-Seite
+und Settings bieten den Download des `app-debug.apk`-Assets an, und die
+installierte App zeigt beim Start ein Update-Banner, sobald ein neueres Release
+existiert. Kein Server hostet die APK. Details in
 [docs/ANDROID.md](docs/ANDROID.md#updates--apk-verteilung).
 
 ## MCP-Bridge einrichten
@@ -263,10 +260,9 @@ damit weiter. Alle Details (Tools, Tokens, Codex-Registrierung):
 | `scripts/install.sh` | Abhängigkeiten installieren + alles bauen, mit Hinweisen |
 | `scripts/dev.sh` | Server (Hot Reload) + Vite-Dev-Server parallel, mit `[server]`/`[web]`-Präfixen |
 | `scripts/build-android.sh` | Android-APK bauen (prüft SDK und `android/`-Ordner) |
-| `scripts/upload-apk.sh` | gebaute APK an den Server hochladen (`POST /api/apk/upload`) |
 | `scripts/build-server-bundle.sh` | Server als eigenständiges Bundle bauen (Node, tmux, node-pty, Web-App) — Grundlage der Desktop-Pakete |
 | `scripts/release.sh` | Release anlegen: testen, `vX.Y.Z` taggen und pushen — GitHub baut APK und Release (`--wait` wartet darauf) |
-| `scripts/update.sh` | diesen Checkout auf das neueste Release bringen, bauen, APK hinterlegen, Server neu starten |
+| `scripts/update.sh` | diesen Checkout auf das neueste Release bringen, bauen, Server neu starten |
 | `scripts/restart.sh` | laufenden Server neu starten (Terminals in tmux bleiben); Log: `~/.local/state/agentdeck/server.log` oder `AGENTDECK_LOG_FILE` |
 | `npm start` | gebauten Server starten (`server/dist/index.js`) |
 | `npm test` | Tests (Server und Web-App) |

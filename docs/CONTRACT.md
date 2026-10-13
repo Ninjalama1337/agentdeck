@@ -104,7 +104,6 @@ Env prefix `AGENTDECK_`, optional JSON config at `~/.config/agentdeck/config.jso
   "logLevel": "info",
   "maxRunMs": 1800000,                        // hard kill for agent runs
   "maxUploadBytes": 20971520,                 // 20 MB per attachment
-  "maxApkBytes": 209715200,                   // 200 MB per APK upload
   "corsOrigins": ["http://localhost:5173", "capacitor://localhost", "http://localhost"],
   "agents": {
     "claude":      { "mode": "headless", "command": "claude" },
@@ -131,8 +130,8 @@ Tunnel env overrides: `AGENTDECK_TUNNEL=cloudflared|off`,
 Storage layout under `dataDir`:
 `projects.json`, `devices.json`, `jwt-secret` (0600), `bridge-token` (0600),
 `pairing-code.txt`, `sessions/<id>/meta.json`, `sessions/<id>/messages.jsonl`,
-`attachments/<sessionId>/<fileId>__<safe-name>`, `apk/agentdeck-latest.apk`
-+ `apk/apk.json` (metadata: version, size, sha256, builtAt, channel).
+`attachments/<sessionId>/<fileId>__<safe-name>`. The Android APK is not stored
+here — it is downloaded from the public GitHub release.
 ```
 
 Adapter `mode`: `headless` (always try), `ide` (never headless),
@@ -158,13 +157,10 @@ Storage layout under `dataDir`:
    `POST /api/pair/requests/:id {approve}`. Requests expire after 5 min, at
    most 3 wait at once; all remote clients share 10 failed attempts / 10 min;
    while no device is paired, remote requests are refused (403).
-3. Every `/api/*` route except `/api/health`, `/api/apk/info` and
-   `/api/apk/latest` requires `Authorization: Bearer`. socket.io handshake
-   requires `auth.token`. `/api/pair` and `/api/pair/status` are public by
-   nature. When a tunnel is enabled, pairing remains the only way in; the two
-   public APK routes are read-only, rate-limited and serve no secrets.
-   APK uploads additionally accept `x-bridge-token` (bridge token) from
-   localhost so CI/scripts can push builds.
+3. Every `/api/*` route except `/api/health` requires `Authorization: Bearer`.
+   socket.io handshake requires `auth.token`. `/api/pair` and
+   `/api/pair/status` are public by nature. When a tunnel is enabled, pairing
+   remains the only way in.
 4. File downloads use **signed one-time tokens** because Android download
    managers cannot send headers:
    `GET /api/projects/:id/files/raw?path=...&token=<base64url(payload).sig>`,
@@ -191,7 +187,7 @@ Storage layout under `dataDir`:
 | GET | `/api/server` | `ServerInfo` `{name,version,host}` (authed) — same object as `server` in the pairing response |
 | GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached 30 s; the app polls every minute while an agent is in use). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
 | GET | `/api/update` | `UpdateInfo` `{current,latest?,updateAvailable,checkedAt?,checkError?,blockedReason?,job?}` (authed). `current` comes from `git describe` (`1.2.3`, or `1.2.3-4-gabc1234` past a release); `latest` is the newest GitHub release via `gh` (cached 10 min, `?refresh=1` asks again). |
-| POST | `/api/update` | `→ UpdateInfo` (202). Runs `scripts/update.sh <tag>`: fast-forward to the release tag, build, publish the release APK, restart. 409 `UPDATE_RUNNING` / `UPDATE_NOT_NEEDED` / `UPDATE_UNAVAILABLE`, 502 `UPDATE_CHECK_FAILED`. Progress streams via WS `update:state` `{update: UpdateInfo}`; a successful job ends with the server restarting. |
+| POST | `/api/update` | `→ UpdateInfo` (202). Runs `scripts/update.sh <tag>`: fast-forward to the release tag, build, restart. 409 `UPDATE_RUNNING` / `UPDATE_NOT_NEEDED` / `UPDATE_UNAVAILABLE`, 502 `UPDATE_CHECK_FAILED`. Progress streams via WS `update:state` `{update: UpdateInfo}`; a successful job ends with the server restarting. |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |
@@ -218,9 +214,6 @@ start when a sign-in is already stored — the server sets
 `hasCompletedOnboarding` in Claude Code's config (`~/.claude.json`), otherwise
 a new `claude` terminal would run the first-start setup and ask to sign in
 again. `AgentInfo.admin` lists the per-agent actions.
-| GET | `/api/apk/info` | `ApkInfo` (no auth) |
-| GET | `/api/apk/latest` | APK binary stream, `Content-Type: application/vnd.android.package-archive`, `Content-Disposition: attachment; filename="agentdeck-<version>.apk"` (no auth, rate-limited) |
-| POST | `/api/apk/upload` | multipart `apk` + fields `version`, `channel` → `ApkUploadResponse` (device JWT or `x-bridge-token`) |
 | GET | `/api/agents` | `AgentInfo[]` |
 | GET | `/api/devices` | `DeviceInfo[]` |
 | DELETE | `/api/devices/:id` | `204` |
@@ -307,14 +300,17 @@ SPA fallback for non-`/api` routes). Dev mode: Vite on :5173 with proxy for
 `/api` + `/socket.io`. All types come from `@agentdeck/shared`.
 UI language: English. Docs language: German.
 
-**APK distribution / self-update (frontend):** the pairing screen and
-settings render an "Android app" card from `GET /api/apk/info` with a direct
-download link to `GET /api/apk/latest`. APK builds inject their version via
-`VITE_AGENTDECK_APK_VERSION` (default `0.0.0-web` for browser/PWA builds);
-when running inside Capacitor native (`window.Capacitor?.isNativePlatform()`)
-and the installed version is older than `apk.info.version`, a dismissible
-update banner with a download button appears. The PWA keeps updating itself
-via the service worker (already implemented).
+**APK distribution / self-update (frontend):** the APK lives on the public
+GitHub release — no server hosts it. The pairing screen and settings render an
+"Android app" card from `GET https://api.github.com/repos/<repo>/releases/latest`
+(the repo is injected at build time as `__RELEASE_REPO__`, default
+`Ninjalama1337/agentdeck`) and link straight to the `app-debug.apk` asset. APK
+builds inject their version via `VITE_AGENTDECK_APK_VERSION` (default
+`0.0.0-web` for browser/PWA builds); when running inside Capacitor native
+(`window.Capacitor?.isNativePlatform()`) and the installed version is older
+than the release version, a dismissible update banner with a download button
+appears. The PWA keeps updating itself via the service worker (already
+implemented).
 
 ## BridgeMind ports (v0.9.0)
 

@@ -10,7 +10,6 @@ import { sessionRoutes } from './sessions.js';
 import { teamRoutes } from './team.js';
 import { bridgeRoutes } from './bridge.js';
 import { tunnelRoutes } from './tunnel.js';
-import { apkRoutes } from './apk.js';
 import { usageRoutes } from './usage.js';
 import { statsRoutes } from './stats.js';
 import { adminRoutes } from './admin.js';
@@ -27,7 +26,6 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await healthRoutes(fastify, deps);
   await pairRoutes(fastify, deps);
   await tunnelRoutes(fastify, deps);
-  await apkRoutes(fastify, deps);
   await usageRoutes(fastify, deps);
   await statsRoutes(fastify, deps);
   await adminRoutes(fastify, deps);

@@ -12,9 +12,14 @@ const sharedSource = new URL('../packages/shared/src/index.ts', import.meta.url)
 // default to '0.0.0-web', which always compares older than a real APK version.
 const apkVersion = process.env.VITE_AGENTDECK_APK_VERSION ?? '0.0.0-web';
 
+// GitHub repo the APK is downloaded from (the public release). Overridable for
+// forks via VITE_AGENTDECK_RELEASE_REPO.
+const releaseRepo = process.env.VITE_AGENTDECK_RELEASE_REPO ?? 'Ninjalama1337/agentdeck';
+
 export default defineConfig({
   define: {
     __APK_VERSION__: JSON.stringify(apkVersion),
+    __RELEASE_REPO__: JSON.stringify(releaseRepo),
   },
   plugins: [
     react(),

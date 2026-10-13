@@ -461,7 +461,7 @@ export interface UpdateInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Remote access (tunnel) + APK distribution
+// Remote access (tunnel)
 // ---------------------------------------------------------------------------
 
 export type TunnelProvider = 'cloudflared' | 'off';
@@ -473,20 +473,6 @@ export interface TunnelInfo {
   /** Public HTTPS URL (e.g. https://xxx.trycloudflare.com) once connected. */
   publicUrl?: string;
   error?: string;
-}
-
-export interface ApkInfo {
-  available: boolean;
-  version?: string;
-  size?: number;
-  sha256?: string;
-  builtAt?: number;
-  channel?: string;
-  fileName?: string;
-}
-
-export interface ApkUploadResponse extends ApkInfo {
-  message: string;
 }
 
 // ---------------------------------------------------------------------------

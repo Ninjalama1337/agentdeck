@@ -57,7 +57,6 @@ export const ConfigSchema = z.object({
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   maxRunMs: z.number().int().min(1000).default(1_800_000),
   maxUploadBytes: z.number().int().min(1024).default(20 * 1024 * 1024),
-  maxApkBytes: z.number().int().min(1024).default(200 * 1024 * 1024),
   tunnel: TunnelConfigSchema.default({}),
   voice: VoiceConfigSchema.default({}),
   corsOrigins: z
@@ -139,8 +138,6 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
   if (maxRunMs !== undefined) o.maxRunMs = maxRunMs;
   const maxUploadBytes = num('AGENTDECK_MAX_UPLOAD_BYTES');
   if (maxUploadBytes !== undefined) o.maxUploadBytes = maxUploadBytes;
-  const maxApkBytes = num('AGENTDECK_MAX_APK_BYTES');
-  if (maxApkBytes !== undefined) o.maxApkBytes = maxApkBytes;
   const tunnel: Record<string, unknown> = {};
   const tunnelProvider = str('AGENTDECK_TUNNEL');
   if (tunnelProvider !== undefined) tunnel.provider = tunnelProvider;

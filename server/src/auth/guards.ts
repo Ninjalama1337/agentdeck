@@ -23,17 +23,15 @@ export function bearerToken(req: FastifyRequest): string | undefined {
 
 /**
  * Fastify onRequest hook enforcing device-JWT auth on every /api route except
- * the explicitly public ones (health, pair, pair/status, apk info/latest), the bridge scope
- * (own guard), apk upload (own guard: device JWT or bridge token) and
- * signed-token file downloads (the HMAC token in the query IS the credential;
- * the route verifies signature, expiry and path binding).
+ * the explicitly public ones (health, pair, pair/status), the bridge scope
+ * (own guard) and signed-token file downloads (the HMAC token in the query IS
+ * the credential; the route verifies signature, expiry and path binding).
  */
 export function makeDeviceAuthHook(secretHex: string, touchDevice: (deviceId: string) => Promise<void>) {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const path = req.url.split('?')[0] ?? '';
     if (!path.startsWith('/api/')) return;
     if (path === '/api/health' || path === '/api/pair' || path === '/api/pair/status') return;
-    if (path === '/api/apk/info' || path === '/api/apk/latest' || path === '/api/apk/upload') return;
     if (path.startsWith('/api/bridge/')) return;
     // Routine webhooks carry their own secret in the URL.
     if (path.startsWith('/api/hooks/')) return;
@@ -69,32 +67,5 @@ export function makeBridgeGuard(bridgeToken: string) {
     if (!token || token !== bridgeToken) {
       throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
     }
-  };
-}
-
-/**
- * Guard for POST /api/apk/upload: a device JWT (any peer, this is how the app
- * pushes builds) OR the bridge token — the latter only from localhost peers
- * so CI/scripts can push builds without pairing a device.
- */
-export function makeApkUploadGuard(secretHex: string, bridgeToken: string, touchDevice: (deviceId: string) => Promise<void>) {
-  return async (req: FastifyRequest): Promise<void> => {
-    const token = bearerToken(req);
-    if (token) {
-      const payload = await verifyDeviceToken(secretHex, token);
-      if (payload) {
-        req.device = payload;
-        void touchDevice(payload.deviceId);
-        return;
-      }
-    }
-    const bridge = req.headers['x-bridge-token'];
-    if (typeof bridge === 'string' && bridge.length > 0 && bridge === bridgeToken) {
-      if (!isLocalAddress(req.socket.remoteAddress)) {
-        throw httpError(403, 'FORBIDDEN', 'Bridge-token APK upload is restricted to localhost.');
-      }
-      return;
-    }
-    throw httpError(401, 'UNAUTHORIZED', 'Unauthorized');
   };
 }

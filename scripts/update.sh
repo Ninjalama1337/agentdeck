@@ -7,14 +7,11 @@
 #   scripts/update.sh v1.2.3     ein bestimmtes Release
 #
 # Ablauf: Checkout per Fast-Forward auf das Tag, bei geaendertem Lockfile
-# `npm ci`, `npm run build`, Release-APK beim laufenden Server hinterlegen,
-# Server neu starten (scripts/restart.sh). Schlaegt der Build fehl, geht der
-# Checkout auf den alten Stand zurueck — der laufende Server bleibt unberuehrt.
+# `npm ci`, `npm run build`, Server neu starten (scripts/restart.sh). Schlaegt
+# der Build fehl, geht der Checkout auf den alten Stand zurueck — der laufende
+# Server bleibt unberuehrt. Die Android-App verteilt GitHub selbst.
 #
 # Umgebungsvariablen (der Server setzt sie selbst):
-#   AGENTDECK_URL         lokale Adresse des Servers (Default: Port des laufenden
-#                         Servers, sonst http://127.0.0.1:8787)
-#   AGENTDECK_DATA_DIR    Datenverzeichnis (fuer den Bridge-Token des APK-Uploads)
 #   AGENTDECK_SERVER_PID  welcher Prozess neu gestartet wird
 #   AGENTDECK_UPDATE_LOG  Logdatei fuer den Neustart am Ende
 set -euo pipefail
@@ -81,39 +78,6 @@ main() {
       install_and_build "$TAG" || warn "Auch der alte Stand baut nicht mehr — bitte von Hand pruefen."
       die "Update auf $TAG abgebrochen; der laufende Server ist unveraendert."
     fi
-  fi
-
-  # Release-APK beim (noch laufenden) Server hinterlegen: gepaarte Handys sehen
-  # danach das Update-Banner. Fehlt die APK am Release, geht es ohne weiter.
-  local URL VERSION HOSTED TMP SPID SPORT SDATA
-  URL="${AGENTDECK_URL:-}"
-  if [[ -z "$URL" ]]; then
-    # Von Hand gestartet: Port und Datenverzeichnis vom laufenden Server ablesen.
-    SPID="$(pgrep -f "node.*server/dist/index.js" | head -n 1 || true)"
-    if [[ -n "$SPID" && -r "/proc/$SPID/environ" ]]; then
-      SPORT="$(grep -z '^AGENTDECK_PORT=' "/proc/$SPID/environ" 2>/dev/null | cut -z -d= -f2 | tr -d '\0' || true)"
-      SDATA="$(grep -z '^AGENTDECK_DATA_DIR=' "/proc/$SPID/environ" 2>/dev/null | cut -z -d= -f2 | tr -d '\0' || true)"
-      [[ -n "$SDATA" && -z "${AGENTDECK_DATA_DIR:-}" ]] && export AGENTDECK_DATA_DIR="$SDATA"
-    fi
-    URL="http://127.0.0.1:${SPORT:-${AGENTDECK_PORT:-8787}}"
-  fi
-  VERSION="${TAG#v}"
-  HOSTED="$(curl -sf --max-time 10 "$URL/api/apk/info" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
-  if [[ "$HOSTED" == "$VERSION" ]]; then
-    info "APK $VERSION liegt schon auf dem Server."
-  else
-    TMP="$(mktemp -d)"
-    if gh release download "$TAG" --pattern 'app-debug.apk' --dir "$TMP" 2>/dev/null; then
-      if AGENTDECK_URL="$URL" AGENTDECK_APK_CHANNEL=release NO_COLOR=1 \
-          "$ROOT/scripts/upload-apk.sh" "$TMP/app-debug.apk" "$VERSION" >/dev/null; then
-        info "APK $VERSION beim Server hinterlegt."
-      else
-        warn "APK konnte nicht hochgeladen werden (laeuft der Server unter $URL?)."
-      fi
-    else
-      warn "Release $TAG hat keine APK (app-debug.apk) — ueberspringe."
-    fi
-    rm -rf "$TMP"
   fi
 
   if (( CHANGED )); then

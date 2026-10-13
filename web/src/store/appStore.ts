@@ -12,7 +12,6 @@ import type {
   AgentInfo,
   AgentUsage,
   AnswerPermissionRequest,
-  ApkInfo,
   UpdateInfo,
   Attachment,
   BrowseResponse,
@@ -61,6 +60,7 @@ import {
   scopedKey,
   updateActiveServer,
 } from '../api/servers';
+import { fetchLatestApkRelease, type ApkRelease } from '../util/apkRelease';
 import { usePrefs } from './prefs';
 import {
   draftFromSnapshot,
@@ -274,8 +274,8 @@ export interface AppStore {
    */
   share: (IncomingShare & { target: string | null }) | null;
   modelPrefs: Partial<Record<AgentId, string>>;
-  /** Metadata of the latest APK on the server (null = unknown / unreachable). */
-  apkInfo: ApkInfo | null;
+  /** Latest APK release from GitHub (null = unknown / unreachable). */
+  apkRelease: ApkRelease | null;
   /** Server version, latest release and the running update job (null = not fetched / older server). */
   update: UpdateInfo | null;
   /** Subscription usage per agent (null = not fetched yet). */
@@ -335,8 +335,8 @@ export interface AppStore {
   removeServer(id: string): void;
   refreshDevices(): Promise<void>;
   refreshPairRequests(): Promise<void>;
-  /** One-shot fetch of GET /api/apk/info (app start, settings screen). */
-  refreshApkInfo(): Promise<void>;
+  /** One-shot fetch of the latest GitHub release (app start, settings screen). */
+  refreshApkRelease(): Promise<void>;
   /** Fetch GET /api/update; `force` makes the server ask GitHub again. */
   refreshUpdate(force?: boolean): Promise<void>;
   /** Update the server to the latest release (progress arrives via WS). */
@@ -883,7 +883,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
     lightbox: null,
     share: null,
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
-    apkInfo: null,
+    apkRelease: null,
     update: null,
     usage: null,
     currentUsageAgent: 'claude',
@@ -952,9 +952,9 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         void get().refreshPushActive();
       }
 
-      // Public route — also fetched while unpaired so the pairing screen can
-      // offer the APK download. One shot, no polling loop.
-      void get().refreshApkInfo();
+      // The Android app ships on GitHub — also fetched while unpaired so the
+      // pairing screen can offer the download. One shot, no polling loop.
+      void get().refreshApkRelease();
     },
 
     navigate(route) {
@@ -1127,7 +1127,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         if (before && before.current !== update.current) {
           // The server came back as another version: an update just finished.
           get().toast('info', `Server updated to v${update.current}`);
-          void get().refreshApkInfo();
+          void get().refreshApkRelease();
         } else if (update.updateAvailable && update.latest) {
           // Announce each release once per server, not on every app start.
           if (readJson<string>(UPDATE_NOTIFIED_KEY, '') !== update.latest.version) {
@@ -1150,12 +1150,9 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       }
     },
 
-    async refreshApkInfo() {
-      try {
-        set({ apkInfo: await api.getApkInfo() });
-      } catch {
-        /* non-fatal — card/banner stay hidden when the server is unreachable */
-      }
+    async refreshApkRelease() {
+      // Never throws — card/banner stay hidden when GitHub is unreachable.
+      set({ apkRelease: await fetchLatestApkRelease() });
     },
 
     async refreshUsage(opts) {

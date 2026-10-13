@@ -8,6 +8,13 @@
  */
 declare const __APK_VERSION__: string;
 
+/**
+ * Compile-time constant injected by vite.config.ts (`define`): the GitHub repo
+ * (`owner/name`) the APK is downloaded from. Defaults to the upstream repo,
+ * overridable via VITE_AGENTDECK_RELEASE_REPO.
+ */
+declare const __RELEASE_REPO__: string;
+
 /** Capacitor native bridge — only present inside the Android APK shell. */
 interface Window {
   Capacitor?: {

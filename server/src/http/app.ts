@@ -23,9 +23,8 @@ import { TeamOrchestrator } from '../team/orchestrator.js';
 import { PairingCodeManager, loadOrCreateSecret } from '../auth/secrets.js';
 import { AttemptLimiter } from '../auth/attemptLimiter.js';
 import { PairRequests } from '../auth/pairRequests.js';
-import { makeApkUploadGuard, makeBridgeGuard, makeDeviceAuthHook } from '../auth/guards.js';
+import { makeBridgeGuard, makeDeviceAuthHook } from '../auth/guards.js';
 import { TunnelManager } from '../tunnel/manager.js';
-import { ApkStore } from '../apk/store.js';
 import { UsageCollector } from '../usage/collector.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
@@ -290,8 +289,6 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
 
   agents.onInfo((info) => broadcast('agent:update', { agent: info }));
 
-  const apk = new ApkStore(config.dataDir);
-  await apk.init();
   const adminJobRunner = new AdminJobRunner({ agents, log, broadcast });
   const updateManager = new UpdateManager({
     repoRoot: REPO_ROOT,
@@ -325,19 +322,16 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     remoteLimiter: new AttemptLimiter(10),
     pairRequests: new PairRequests(),
     tunnel: tunnelManager,
-    apk,
     adminJobs: adminJobRunner,
     update: updateManager,
     terminals,
     routines,
     notifications,
     voice: new VoiceService({ config, log }),
-    apkLimiter: new RateLimiter(30, 60_000),
     hookLimiter: new RateLimiter(30, 60_000),
     jwtSecret,
     bridgeToken,
     bridgeGuard: makeBridgeGuard(bridgeToken),
-    apkUploadGuard: makeApkUploadGuard(jwtSecret, bridgeToken, (deviceId) => store.touchDevice(deviceId)),
     broadcast,
     fileWatchers,
     pairingCode,

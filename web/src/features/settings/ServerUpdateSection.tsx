@@ -7,7 +7,7 @@ import { relTime } from '../../util/format';
 /**
  * Server self-update: the version this server runs, the latest GitHub
  * release, and one tap to move the server onto it. The server fast-forwards
- * its checkout, builds, fetches the release APK and restarts — the socket
+ * its checkout, builds and restarts — the socket
  * drops for a moment and the app reconnects to the new version.
  */
 export function ServerUpdateSection() {

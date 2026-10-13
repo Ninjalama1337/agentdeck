@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   ChevronRight,
   Copy,
   Gauge,
   Globe,
-  Loader2,
   LogOut,
   Monitor,
   Plus,
@@ -13,11 +12,10 @@ import {
   Settings2,
   Smartphone,
   Trash2,
-  Upload,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentId, TunnelStatus } from '@agentdeck/shared';
-import { api, getApiBase, uploadApk } from '../../api/client';
+import { api, getApiBase } from '../../api/client';
 import { ADMIN_KIND_LABELS, agentDisplayName, errorMessage, serverLabel, useAppStore } from '../../store/appStore';
 import { serverAddress } from '../../components/SavedServers';
 import { AgentAvatar } from '../../components/ui/Avatar';
@@ -27,7 +25,7 @@ import { AgentSheet } from '../home/AgentSheet';
 import { AgentAdminSheet, ElapsedLabel } from './AgentAdminSheet';
 import { UsageSheet } from './UsageSheet';
 import { AccountSheet } from './AccountSheet';
-import { bytes, relTime } from '../../util/format';
+import { relTime } from '../../util/format';
 import { PreferencesSection } from './PreferencesSection';
 import { PairCodeCard } from '../pairing/PairCodeCard';
 import { ServerUpdateSection } from './ServerUpdateSection';
@@ -43,12 +41,6 @@ const TUNNEL_DOTS: Record<TunnelStatus, string> = {
   connected: '#34D399',
   error: '#F43F5E',
 };
-
-/** Pull the version out of filenames like agentdeck-1.2.3.apk / agentdeck-0.1.42-debug.apk. */
-function versionFromFilename(name: string): string {
-  const m = name.match(/agentdeck-([0-9][0-9A-Za-z._-]*)\.apk$/i);
-  return m ? (m[1] ?? '') : '';
-}
 
 export function SettingsScreen() {
   const serverInfo = useAppStore((s) => s.serverInfo);
@@ -66,8 +58,8 @@ export function SettingsScreen() {
   const agentOrder = useAppStore((s) => s.agentOrder);
   const unpair = useAppStore((s) => s.unpair);
   const toast = useAppStore((s) => s.toast);
-  const apkInfo = useAppStore((s) => s.apkInfo);
-  const refreshApkInfo = useAppStore((s) => s.refreshApkInfo);
+  const apkRelease = useAppStore((s) => s.apkRelease);
+  const refreshApkRelease = useAppStore((s) => s.refreshApkRelease);
   const adminJobs = useAppStore((s) => s.adminJobs);
   const refreshAdminJobs = useAppStore((s) => s.refreshAdminJobs);
   const startAdminJob = useAppStore((s) => s.startAdminJob);
@@ -89,19 +81,13 @@ export function SettingsScreen() {
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [tunnel, setTunnel] = useState<{ status: TunnelStatus; publicUrl?: string } | null>(null);
 
-  // APK upload state
-  const apkInput = useRef<HTMLInputElement | null>(null);
-  const [apkFile, setApkFile] = useState<File | null>(null);
-  const [apkVersion, setApkVersion] = useState('');
-  const [apkProgress, setApkProgress] = useState<number | null>(null);
-
   useEffect(() => {
     setBaseUrl(serverBase);
   }, [serverBase]);
 
   // One-shot refresh when settings opens (no polling loop).
   useEffect(() => {
-    void refreshApkInfo();
+    void refreshApkRelease();
     void refreshAdminJobs();
     void (async () => {
       try {
@@ -117,7 +103,7 @@ export function SettingsScreen() {
         }
       }
     })();
-  }, [refreshApkInfo, refreshAdminJobs]);
+  }, [refreshApkRelease, refreshAdminJobs]);
 
   const saveBase = () => {
     setServerBase(baseUrl);
@@ -172,36 +158,6 @@ export function SettingsScreen() {
       toast('info', 'Remote access URL copied');
     } catch {
       toast('error', 'Clipboard unavailable');
-    }
-  };
-
-  const pickApk = (file: File | null) => {
-    setApkFile(file);
-    setApkProgress(null);
-    if (file) {
-      const guessed = versionFromFilename(file.name);
-      setApkVersion(guessed);
-      if (!guessed) toast('info', 'Version not found in filename — enter it manually');
-    }
-  };
-
-  const submitApk = async () => {
-    if (!apkFile || apkProgress !== null) return;
-    // Filename guess wins; empty falls back to the server's current version so
-    // a re-upload of an unversioned build still lands somewhere sensible.
-    const version = apkVersion.trim() || apkInfo?.version || '0.0.0-manual';
-    setApkProgress(0);
-    try {
-      const res = await uploadApk(apkFile, version, (fraction) => setApkProgress(fraction));
-      toast('info', res.message || `APK v${res.version ?? version} published`);
-      setApkFile(null);
-      setApkVersion('');
-      if (apkInput.current) apkInput.current.value = '';
-      void refreshApkInfo();
-    } catch (err) {
-      toast('error', errorMessage(err));
-    } finally {
-      setApkProgress(null);
     }
   };
 
@@ -390,99 +346,28 @@ export function SettingsScreen() {
 
   const androidSection = (
     <>
-      {/* android app: info + manual APK publish */}
+      {/* android app: the APK ships on the public GitHub release */}
       <section className="glass mb-4 p-4" aria-label="Android app">
         <h2 className="mb-3 flex items-center gap-2 text-[14px] font-semibold">
           <Smartphone size={15} className="text-accent" /> Android app
         </h2>
 
-        {inDesktopApp ? (
-          <p className="text-[13px] leading-snug text-dim">
-            {apkInfo?.available
-              ? `Phones install the Android app (v${apkInfo.version ?? '?'}) from this server's address, in their browser.`
-              : 'No Android app has been published to this server yet.'}
-          </p>
-        ) : apkInfo ? (
-          <ApkCard info={apkInfo} />
+        {apkRelease ? (
+          <>
+            {inDesktopApp && (
+              <p className="mb-3 text-[13px] leading-snug text-dim">
+                Phones install the Android app from GitHub, in their browser.
+              </p>
+            )}
+            <ApkCard release={apkRelease} />
+          </>
         ) : (
-          <p className="text-[13px] text-dim">APK info unavailable — server not reachable.</p>
-        )}
-
-        {/* publish: multipart upload to /api/apk/upload (device JWT) */}
-        <div className="mt-4 border-t border-line pt-3.5">
-          <label className="mb-1.5 block text-[12px] font-medium uppercase tracking-wider text-dim">
-            Publish a new build
-          </label>
-          <input
-            ref={apkInput}
-            type="file"
-            accept=".apk,application/vnd.android.package-archive"
-            className="hidden"
-            onChange={(e) => pickApk(e.target.files?.[0] ?? null)}
-          />
-          <div className="flex gap-2">
-            <input
-              className="field flex-1 font-mono text-[13px]"
-              value={apkVersion}
-              onChange={(e) => setApkVersion(e.target.value)}
-              placeholder="Version, e.g. 1.2.3"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              onClick={() => apkInput.current?.click()}
-              className="press tap flex h-[46px] shrink-0 items-center gap-1.5 rounded-[14px] border border-line bg-white/[0.06] px-3.5 text-[13px] font-medium active:bg-white/[0.1]"
-            >
-              <Upload size={14} />
-              APK…
-            </button>
-          </div>
-          {apkFile && (
-            <p className="mt-2 truncate text-[12px] text-dim" title={apkFile.name}>
-              {apkFile.name} · {bytes(apkFile.size)}
-            </p>
-          )}
-          {apkProgress !== null && (
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{
-                  width: `${Math.round(apkProgress * 100)}%`,
-                  background: 'linear-gradient(90deg,#7C5CFF,#4E8CFF)',
-                }}
-              />
-            </div>
-          )}
-          <button
-            type="button"
-            disabled={!apkFile || apkProgress !== null}
-            onClick={() => void submitApk()}
-            className={clsx(
-              'press tap mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border text-[14px] font-semibold',
-              apkFile && apkProgress === null
-                ? 'border-accent/40 bg-accent/15 text-accent'
-                : 'border-line bg-white/[0.04] text-dim',
-              'disabled:cursor-not-allowed disabled:opacity-45',
-            )}
-          >
-            {apkProgress !== null ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                Uploading {Math.round(apkProgress * 100)}%
-              </>
-            ) : (
-              <>
-                <Upload size={15} />
-                Upload to server
-              </>
-            )}
-          </button>
-          <p className="mt-2 text-[11.5px] leading-relaxed text-dim">
-            Replaces the served APK — paired phones see the update banner on next start. CI can push
-            builds itself via the bridge token.
+          <p className="text-[13px] text-dim">
+            {inDesktopApp
+              ? 'Phones install the Android app from the public GitHub releases.'
+              : 'Could not read the latest app release from GitHub.'}
           </p>
-        </div>
+        )}
       </section>
     </>
   );

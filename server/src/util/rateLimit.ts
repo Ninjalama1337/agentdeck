@@ -1,6 +1,6 @@
 /**
  * Minimal sliding-window rate limiter keyed by arbitrary strings (client IPs).
- * Used for public, unauthenticated endpoints (e.g. APK downloads).
+ * Used for public, unauthenticated endpoints and per-caller request caps.
  */
 export class RateLimiter {
   private readonly hits = new Map<string, number[]>();

@@ -103,11 +103,14 @@ siehe dort „Signatur".
 Jeder CI- und Local-Build brennt seine Version in die App ein
 (`VITE_AGENTDECK_APK_VERSION`; Browser-/PWA-Builds bekommen `0.0.0-web` und
 sehen das Banner nie — die PWA aktualisiert sich ohnehin selbst über den
-Service Worker). Beim Start fragt die APK `GET /api/apk/info` ab: Ist die auf
-dem Server liegende APK **neuer** als die installierte, erscheint oben das
-Banner **„Update available — v<version>“** mit einem **Install**-Button
-(`GET /api/apk/latest`) und einem × zum Ausblenden (pro Server-Version, im
-`sessionStorage` — die nächste Version blendet es wieder ein).
+Service Worker). Beim Start liest die APK das neueste **GitHub-Release**
+(`GET https://api.github.com/repos/<repo>/releases/latest`): Ist die Release-APK
+**neuer** als die installierte, erscheint oben das Banner **„Update available —
+v<version>“** mit einem **Install**-Button (lädt das `app-debug.apk`-Asset
+direkt von GitHub) und einem × zum Ausblenden (pro Release-Version, im
+`sessionStorage` — die nächste Version blendet es wieder ein). Das Repo ist beim
+Bauen als `__RELEASE_REPO__` eingebrannt (Default `Ninjalama1337/agentdeck`;
+für Forks `VITE_AGENTDECK_RELEASE_REPO` setzen).
 
 In der App lädt der Button die APK selbst herunter (Fortschritt im Button)
 und öffnet danach Androids Installer (natives `ApkInstall`-Plugin, Recht
@@ -118,25 +121,17 @@ bleiben erhalten. APKs vor v0.11.6 kennen das Plugin noch nicht und legen die
 Datei stattdessen in den Downloads-Ordner (dort antippen). Im Browser/PWA ist
 der Button ein schlichter Download-Link.
 
-### APK auf den Server bringen
+### Verteilung
 
-Die aktuell gebaute APK liegt unter `<dataDir>/apk/` und wird vom Server
-unter `/api/apk/latest` verteilt (Download-Buttons auf der Pairing-Seite und
-unter Settings → *Android app*). Drei Wege, sie dorthin zu bringen:
+Die APK hängt als `app-debug.apk` am GitHub-Release und wird von dort verteilt
+— **kein Server hostet sie mehr**. Install-Buttons (Pairing-Seite und
+Settings → *Android app*) sowie das Update-Banner verlinken direkt auf das
+Release-Asset. Der Server lädt oder speichert die APK nicht.
 
-1. **CI automatisch:** Repo-Secrets `AGENTDECK_URL` (Server-Basis-URL) und
-   `AGENTDECK_BRIDGE_TOKEN` (Inhalt von
-   `~/.local/share/agentdeck/bridge-token`) setzen — dann pushed der
-   Workflow nach jedem Build die APK an den Server (Header
-   `x-bridge-token`).
-2. **Lokal per Skript:** `scripts/upload-apk.sh <apk> [version]` (liest den
-   Token default aus `dataDir`, `--help` zeigt alle Optionen).
-3. **In der App:** Settings → *Android app* → *Publish a new build* — Datei
-   wählen, Version wird aus dem Dateinamen (`agentdeck-<version>.apk`)
-   übernommen, Upload läuft über das Geräte-JWT.
+Voraussetzung: Das Repo (bzw. das Release) muss **öffentlich** abrufbar sein,
+sonst findet die App kein Release und zeigt weder Karte noch Banner.
 
-Grenzen und Details (Channels, `maxApkBytes`, Auto-Update-Konzept,
-„remote UI“-Variante): [docs/REMOTE.md](REMOTE.md).
+Konzept und „remote UI“-Variante: [docs/REMOTE.md](REMOTE.md).
 
 ## F-Droid
 

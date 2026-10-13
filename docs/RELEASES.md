@@ -10,7 +10,7 @@ derselben Version, und die App bekommt die passende APK.
 scripts/release.sh ──► Tag vX.Y.Z ──► GitHub Actions: Tests + APK ──► GitHub-Release
                                                                          │
         App: Settings → Server update   oder   scripts/update.sh  ◄──────┘
-        (Checkout auf das Tag, bauen, APK hinterlegen, Neustart)
+        (Checkout auf das Tag, bauen, Neustart)
 ```
 
 ## Release anlegen
@@ -64,10 +64,9 @@ Was dabei passiert:
    `npm run build`.
 3. Baut das Release nicht, geht der Checkout auf den alten Stand zurück — der
    laufende Server bleibt, wie er ist.
-4. Die APK des Releases wird beim Server hinterlegt (`/api/apk/latest`);
-   gepaarte Handys sehen danach das Update-Banner.
-5. Neustart über `scripts/restart.sh` (systemd-Unit oder direkter Prozess).
-   Terminals laufen in tmux weiter.
+4. Neustart über `scripts/restart.sh` (systemd-Unit oder direkter Prozess).
+   Terminals laufen in tmux weiter. Die Android-App lädt ihr Update selbst vom
+   Release (kein Server-Hosting).
 
 Das Protokoll liegt in `<dataDir>/update.log`.
 

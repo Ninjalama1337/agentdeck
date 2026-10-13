@@ -17,8 +17,8 @@ export function PairScreen() {
   const finishPairing = useAppStore((s) => s.finishPairing);
   // Paired from outside the server's network: waiting for a paired device to allow it.
   const [pending, setPending] = useState<PairPendingResponse['pending'] | null>(null);
-  const refreshApkInfo = useAppStore((s) => s.refreshApkInfo);
-  const apkInfo = useAppStore((s) => s.apkInfo);
+  const refreshApkRelease = useAppStore((s) => s.refreshApkRelease);
+  const apkRelease = useAppStore((s) => s.apkRelease);
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [deviceName, setDeviceName] = useState(guessDeviceName());
   const [serverUrl, setServerUrl] = useState(getApiBase());
@@ -95,8 +95,8 @@ export function PairScreen() {
     try {
       const h = await api.health();
       setHealth(`${h.name} v${h.version} · ${h.agents.filter((a) => a.available).length}/${h.agents.length} agents`);
-      // Server (maybe a different one) answered — refresh the APK card for it.
-      void refreshApkInfo();
+      // Server (maybe a different one) answered — refresh the app download card.
+      void refreshApkRelease();
     } catch (err) {
       setHealth(null);
       setError(
@@ -226,8 +226,8 @@ export function PairScreen() {
             autoComplete="off"
           />
 
-          {/* Android app: direct APK download (public route, no pairing needed) — for phones, not the desktop window */}
-          {apkInfo && !isDesktopApp() && <ApkCard info={apkInfo} className="mb-4" />}
+          {/* Android app: direct APK download from GitHub (no pairing needed) — for phones, not the desktop window */}
+          {apkRelease && !isDesktopApp() && <ApkCard release={apkRelease} className="mb-4" />}
 
           {error && (
             <div

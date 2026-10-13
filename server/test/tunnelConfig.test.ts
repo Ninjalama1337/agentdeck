@@ -29,11 +29,6 @@ describe('tunnel config', () => {
     });
   });
 
-  it('defaults maxApkBytes to 200 MB', () => {
-    const config = loadConfig({ env: {}, configDir: path.join(tmp, 'none') });
-    expect(config.maxApkBytes).toBe(200 * 1024 * 1024);
-  });
-
   it('AGENTDECK_TUNNEL=cloudflared enables the provider', () => {
     const config = loadConfig({
       env: { AGENTDECK_TUNNEL: 'cloudflared' },

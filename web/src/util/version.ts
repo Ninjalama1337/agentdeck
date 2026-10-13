@@ -1,7 +1,7 @@
 /**
  * Tolerant dotted-version comparison for the APK self-update banner
  * ("v1.2.3-beta" vs "1.2" vs "0.0.0-web"). Not a full semver implementation —
- * just enough to answer "is the server's APK newer than the installed one?".
+ * just enough to answer "is the release's APK newer than the installed one?".
  */
 
 interface ParsedVersion {

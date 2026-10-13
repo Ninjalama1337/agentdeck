@@ -4,8 +4,8 @@
  * - `info()` answers "what runs here, what is the latest release" — the
  *   release lookup is cached (CHECK_TTL_MS) so opening Settings is cheap.
  * - `start()` runs scripts/update.sh <tag> as a live job: fast-forward the
- *   checkout to the tag, build, fetch the release APK, restart. Output is
- *   streamed via WS `update:state` and appended to <dataDir>/update.log.
+ *   checkout to the tag, build, restart. Output is streamed via WS
+ *   `update:state` and appended to <dataDir>/update.log.
  * - The script restarts the server as its last step, so a successful job
  *   ends with this process being replaced; the new process reports the new
  *   version and has no job.
@@ -53,7 +53,7 @@ export interface UpdateManagerOptions {
   repoRoot: string;
   currentVersion: string;
   dataDir: string;
-  /** Where this server answers locally — the script publishes the release APK there. */
+  /** Where this server answers locally (used by the update script). */
   localUrl: string;
   log: Logger;
   broadcast: Broadcaster;

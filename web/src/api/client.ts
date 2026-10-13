@@ -9,8 +9,6 @@ import type {
   AnswerPermissionRequest,
   AgentInfo,
   AgentUsage,
-  ApkInfo,
-  ApkUploadResponse,
   Attachment,
   BrowseResponse,
   CloneProjectRequest,
@@ -241,14 +239,6 @@ export const api = {
     return request('GET', '/api/tunnel');
   },
 
-  /**
-   * Public APK metadata (no auth required; the bearer is sent when a token
-   * exists). Backs the "Android app" cards and the update banner.
-   */
-  getApkInfo(): Promise<ApkInfo> {
-    return request('GET', '/api/apk/info');
-  },
-
   /** Server version + latest GitHub release (`refresh` asks GitHub again). */
   update(refresh = false): Promise<UpdateInfo> {
     return request('GET', '/api/update', refresh ? { query: { refresh: 1 } } : {});
@@ -267,15 +257,6 @@ export const api = {
   /** Switch active plan / quota mode for an agent (e.g. ZCode subscription vs free tokens). */
   switchPlan(agentId: string, planId: string): Promise<{ ok: boolean; activePlanId: string }> {
     return request('POST', `/api/agents/${encodeURIComponent(agentId)}/plan`, { json: { planId } });
-  },
-
-  /**
-   * Direct download URL for the latest APK. Plain anchor href (no headers) so
-   * Android download managers and "open in browser" flows work — the server
-   * serves this route without auth on purpose.
-   */
-  apkLatestUrl(): string {
-    return `${base()}/api/apk/latest`;
   },
 
   agents(): Promise<AgentInfo[]> {
@@ -688,62 +669,6 @@ export function uploadFile(
     xhr.onabort = () => reject(new ApiError('Upload cancelled', 0));
     const form = new FormData();
     form.append('file', file);
-    xhr.send(form);
-  });
-}
-
-/**
- * Multipart APK upload to POST /api/apk/upload (multipart field `apk`, plus
- * `version` and `channel` fields). Accepts a device JWT (bearer when paired)
- * or — server-side — the bridge token, which is how CI pushes builds.
- */
-export function uploadApk(
-  file: File,
-  version: string,
-  onProgress?: (fraction: number) => void,
-): Promise<ApkUploadResponse> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${base()}/api/apk/upload`);
-    const token = getToken();
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(Math.min(1, e.loaded / e.total));
-    };
-    xhr.onload = () => {
-      if (xhr.status === 401) {
-        if (!getToken()) {
-          // Native app that was never paired: the unauthorized event would be
-          // a no-op (nothing to clear) — give an actionable message instead.
-          const native = Boolean(window.Capacitor?.isNativePlatform?.());
-          reject(new ApiError(native ? 'Pair first — this device is not paired with the server yet' : 'Unauthorized — pair again', 401));
-          return;
-        }
-        emitUnauthorized();
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText) as ApkUploadResponse);
-        } catch {
-          reject(new ApiError('Invalid upload response', xhr.status));
-        }
-      } else {
-        let message = `Upload failed (HTTP ${xhr.status})`;
-        try {
-          const data = JSON.parse(xhr.responseText) as { error?: { message?: string } };
-          if (data?.error?.message) message = data.error.message;
-        } catch {
-          /* not json */
-        }
-        reject(new ApiError(message, xhr.status));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError('Network error during upload', 0));
-    xhr.onabort = () => reject(new ApiError('Upload cancelled', 0));
-    const form = new FormData();
-    form.append('apk', file);
-    form.append('version', version);
-    form.append('channel', 'manual');
     xhr.send(form);
   });
 }

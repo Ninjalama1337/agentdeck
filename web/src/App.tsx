@@ -90,7 +90,7 @@ export default function App() {
   }, []);
   const booted = useAppStore((s) => s.booted);
   const route = useAppStore((s) => s.route);
-  const apkInfo = useAppStore((s) => s.apkInfo);
+  const apkRelease = useAppStore((s) => s.apkRelease);
   const desktop = useDesktopLayout();
   // The soft keyboard only exists on the phone layout (pinch-zoom on a desktop must not hide anything).
   const keyboardOpen = useAppStore((s) => s.keyboardOpen) && !desktop;
@@ -315,9 +315,9 @@ export default function App() {
   return (
     <>
       <Aurora />
-      {/* APK self-update: only inside the native shell, when the server hosts a
-          newer build than the one bundled into this WebView (see UpdateBanner). */}
-      <UpdateBanner apk={apkInfo} />
+      {/* APK self-update: only inside the native shell, when GitHub has a newer
+          build than the one bundled into this WebView (see UpdateBanner). */}
+      <UpdateBanner apk={apkRelease} />
       {desktop ? (
         // Desktop: sidebar + a wide content area (no top/tab bar).
         <div className="app-shell app-shell-desktop">

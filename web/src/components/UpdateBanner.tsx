@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Download, X } from 'lucide-react';
-import type { ApkInfo } from '@agentdeck/shared';
 import { ApkDownloadLink } from './ApkDownloadLink';
-import { compareVersions } from '../util/version';
+import { apkUpdateAvailable, type ApkRelease } from '../util/apkRelease';
 import { isNativePlatform } from '../util/platform';
 
 const DISMISS_KEY = 'agentdeck:apk-update-dismissed';
@@ -17,19 +16,20 @@ function readDismissed(): string | null {
 
 /**
  * Self-update banner for the native APK: when running inside the Capacitor
- * shell (isNativePlatform) and the server hosts a NEWER apk than the build
- * this WebView was bundled with, offer a one-tap download of /api/apk/latest.
- * Android then prompts to install the downloaded file as an app update.
- * Dismissal lives in sessionStorage and is per server version — a newer
- * upload makes the banner reappear. The PWA never sees this banner: its
- * version constant stays '0.0.0-web' and updates go through the service worker.
+ * shell (isNativePlatform) and the GitHub release has a NEWER APK than the
+ * build this WebView was bundled with, offer a one-tap download straight from
+ * GitHub. Android then prompts to install the downloaded file as an app
+ * update. Dismissal lives in sessionStorage and is per release version — a
+ * newer release makes the banner reappear. The PWA never sees this banner:
+ * its version constant stays '0.0.0-web' and updates go through the service
+ * worker.
  */
-export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
+export function UpdateBanner({ apk }: { apk: ApkRelease | null }) {
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(readDismissed);
 
   const native = isNativePlatform();
-  const version = apk?.available ? apk.version : undefined;
-  const updateAvailable = native && !!version && compareVersions(__APK_VERSION__, version) < 0;
+  const version = apk?.version;
+  const updateAvailable = native && apkUpdateAvailable(__APK_VERSION__, apk);
 
   if (!apk || !updateAvailable || !version || dismissedVersion === version) return null;
 
@@ -56,10 +56,10 @@ export function UpdateBanner({ apk }: { apk: ApkInfo | null }) {
         </span>
         <p className="min-w-0 flex-1 text-[13.5px] leading-snug">
           <span className="font-semibold">Update available — v{version}</span>
-          <span className="block text-[12px] text-dim">Downloads it and opens the installer.</span>
+          <span className="block text-[12px] text-dim">Downloads it from GitHub and opens the installer.</span>
         </p>
         <ApkDownloadLink
-          info={apk}
+          release={apk}
           className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white btn-primary"
         >
           <Download size={14} />

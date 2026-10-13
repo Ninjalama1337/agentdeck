@@ -11,7 +11,6 @@ import type { PairingCodeManager } from '../auth/secrets.js';
 import type { AttemptLimiter } from '../auth/attemptLimiter.js';
 import type { PairRequests } from '../auth/pairRequests.js';
 import type { TunnelManager } from '../tunnel/manager.js';
-import type { ApkStore } from '../apk/store.js';
 import type { UsageCollector } from '../usage/collector.js';
 import type { StatsDb } from '../stats/db.js';
 import type { RateLimiter } from '../util/rateLimit.js';
@@ -43,7 +42,6 @@ export interface AppDeps {
   /** Pairing requests from outside the LAN awaiting approval on a paired device. */
   pairRequests: PairRequests;
   tunnel: TunnelManager;
-  apk: ApkStore;
   /** Runs the fixed agent admin recipes (update/install/login), one at a time. */
   adminJobs: AdminJobRunner;
   /** Self-update of this server to the latest GitHub release. */
@@ -56,12 +54,9 @@ export interface AppDeps {
   notifications: NotificationHub;
   /** Server-side dictation (Whisper API / local command). */
   voice: VoiceService;
-  /** Per-IP limiter for the public /api/apk/latest download route. */
-  apkLimiter: RateLimiter;
   jwtSecret: string;
   bridgeToken: string;
   bridgeGuard: (req: import('fastify').FastifyRequest) => Promise<void>;
-  apkUploadGuard: (req: import('fastify').FastifyRequest) => Promise<void>;
   broadcast: Broadcaster;
   /** Per-project recursive fs.watchers feeding the `files:changed` stream. */
   fileWatchers: FileWatchers;

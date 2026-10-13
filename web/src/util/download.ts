@@ -66,20 +66,20 @@ export async function downloadFile(
 }
 
 /**
- * APK only: lets Android's download manager fetch the server's latest app
- * build into Downloads. A plain link leaves the WebView for the system
+ * APK only: lets Android's download manager fetch an APK (the GitHub release
+ * asset) into Downloads. A plain link leaves the WebView for the system
  * browser, which opens a tab for every download and never closes it.
  *
  * Resolves `false` when the download could not be started natively (no
  * plugin, below Android 10) — the caller falls back to the link. Throws when
  * it started but failed.
  */
-export async function downloadApkNatively(fileName: string, onStarted?: () => void): Promise<boolean> {
+export async function downloadApkNatively(url: string, fileName: string, onStarted?: () => void): Promise<boolean> {
   const native = isNativePlatform() ? window.Capacitor?.Plugins?.FileDownload : undefined;
   if (!native?.download) return false;
   onStarted?.();
   try {
-    await native.download({ url: api.apkLatestUrl(), fileName, mimeType: 'application/vnd.android.package-archive' });
+    await native.download({ url, fileName, mimeType: 'application/vnd.android.package-archive' });
     return true;
   } catch (err) {
     const { code, message } = (err ?? {}) as { code?: string; message?: string };
@@ -89,14 +89,15 @@ export async function downloadApkNatively(fileName: string, onStarted?: () => vo
 }
 
 /**
- * APK only: downloads the server's latest app build and opens Android's
- * installer on it ("Update this app?"). `onProgress` gets 0..1 while it loads.
+ * APK only: downloads the APK at `url` (the GitHub release asset) and opens
+ * Android's installer on it ("Update this app?"). `onProgress` gets 0..1 while
+ * it loads.
  *
  * Resolves `false` when this APK cannot do it (built before the ApkInstall
  * plugin, below Android 7) — the caller falls back to a plain download.
  * Throws when the download or the installer failed.
  */
-export async function installApkUpdate(onProgress?: (fraction: number) => void): Promise<boolean> {
+export async function installApkUpdate(url: string, onProgress?: (fraction: number) => void): Promise<boolean> {
   const native = isNativePlatform() ? window.Capacitor?.Plugins?.ApkInstall : undefined;
   if (!native?.install) return false;
   // The bridge hands back a listener handle — directly or as a promise,
@@ -111,7 +112,7 @@ export async function installApkUpdate(onProgress?: (fraction: number) => void):
     /* no progress events — the update itself still works */
   }
   try {
-    await native.install({ url: api.apkLatestUrl() });
+    await native.install({ url });
     return true;
   } catch (err) {
     const { code, message } = (err ?? {}) as { code?: string; message?: string };

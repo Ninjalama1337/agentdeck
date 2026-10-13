@@ -20,10 +20,6 @@ jobs:
     permissions:
       contents: write
     env:
-      # Wenn beide Secrets gesetzt sind, published der letzte Schritt die APK
-      # automatisch an den eigenen Server (siehe Kommentar am Publish-Schritt).
-      AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
-      AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
       GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
       # Fester Signatur-Keystore (base64), siehe Schritt "Signatur-Keystore".
       ANDROID_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
@@ -185,23 +181,6 @@ jobs:
             mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
           generate_release_notes: true
 
-      # Optional: gebaute APK direkt an den eigenen AgentDeck-Server pushen,
-      # damit sie unter /api/apk/latest liegt (Pairing-Seite + Update-Banner).
-      # Benoetigt zwei Repo-Secrets (Settings > Secrets and variables > Actions):
-      #   AGENTDECK_URL          – Basis-URL des Servers, z. B. https://agentdeck.example.com
-      #   AGENTDECK_BRIDGE_TOKEN – Inhalt von <dataDir>/bridge-token
-      #                            (Standard: ~/.local/share/agentdeck/bridge-token)
-      # Fehlen sie, ist AGENTDECK_URL leer und der Schritt wird uebersprungen.
-      - name: Optional — APK an AgentDeck-Server publishen
-        if: env.AGENTDECK_URL != ''
-        run: |
-          curl -sf --max-time 300 -X POST "$AGENTDECK_URL/api/apk/upload" \
-            -H "x-bridge-token: $AGENTDECK_BRIDGE_TOKEN" \
-            -F "apk=@mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
-            -F "version=$VERSION" \
-            -F "channel=$CHANNEL"
-          echo "Debug-APK $VERSION (Channel: $CHANNEL) an den Server uebertragen."
-
   # Nur bei v*-Tags: Release-Variante. Ohne Keystore im Repo bleibt die APK
   # UNSIGNIERT (app-release-unsigned.apk) — vor der Verteilung selbst signieren
   # (apksigner/jarsigner). Fuer den Eigengebrauch reicht die Debug-APK oben.
@@ -209,11 +188,6 @@ jobs:
     name: Release-APK (unsigned)
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    env:
-      # Wenn beide Secrets gesetzt sind, published der letzte Schritt die APK
-      # automatisch an den eigenen Server (siehe Kommentar im Debug-Job).
-      AGENTDECK_URL: ${{ secrets.AGENTDECK_URL }}
-      AGENTDECK_BRIDGE_TOKEN: ${{ secrets.AGENTDECK_BRIDGE_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -274,13 +248,3 @@ jobs:
           name: AgentDeck-release-APK-unsigned
           path: mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
-
-      - name: Optional — APK an AgentDeck-Server publishen
-        if: env.AGENTDECK_URL != ''
-        run: |
-          curl -sf --max-time 300 -X POST "$AGENTDECK_URL/api/apk/upload" \
-            -H "x-bridge-token: $AGENTDECK_BRIDGE_TOKEN" \
-            -F "apk=@mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk" \
-            -F "version=$VERSION" \
-            -F "channel=$CHANNEL"
-          echo "Release-APK $VERSION an den Server uebertragen."

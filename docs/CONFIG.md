@@ -47,9 +47,6 @@ Server neu starten — es gibt kein Hot-Reload.
   // Max. Upload-Größe pro Anhang in Bytes (20 MB).
   "maxUploadBytes": 20971520,
 
-  // Max. Größe einer APK für /api/apk/upload in Bytes (200 MB).
-  "maxApkBytes": 209715200,
-
   // Zusätzliche CORS-Origins (Dev-Frontend, Capacitor-WebView). Wer in der
   // PWA eines Servers einen zweiten Server hinzufügt ("Saved servers"), trägt
   // beim zweiten Server die Adresse der PWA hier ein, z. B.
@@ -97,7 +94,6 @@ Server neu starten — es gibt kein Hot-Reload.
 | `logLevel` | string | `"info"` | `debug`/`info`/`warn`/`error` |
 | `maxRunMs` | number | `1800000` | Hard-Kill eines Agent-Runs (ms) |
 | `maxUploadBytes` | number | `20971520` | Upload-Limit pro Anhang (Bytes) |
-| `maxApkBytes` | number | `209715200` | Upload-Limit pro APK (Bytes) |
 | `corsOrigins` | string[] | siehe oben | erlaubte CORS-Origins |
 | `tunnel.provider` | string | `"off"` | `off` \| `cloudflared` |
 | `tunnel.mode` | string | `"quick"` | `quick` (kein Konto) \| `token` (Named Tunnel) |
@@ -234,7 +230,6 @@ Kurzreferenz (Details: [ARCHITECTURE.md](ARCHITECTURE.md)):
 ├── server.pid               # PID des laufenden Servers (beim sauberen Beenden entfernt)
 ├── vapid.json               # Web-Push-Schlüssel (0600) — löschen = Geräte müssen Push neu aktivieren
 ├── push-subscriptions.json  # Push-Abos pro Gerät (0600)
-├── apk/                     # agentdeck-latest.apk + apk.json (Version, SHA-256, …)
 ├── projects/                # Standard-projectsRoot
 ├── sessions/<id>/…          # meta.json + messages.jsonl
 └── attachments/<sessionId>/…

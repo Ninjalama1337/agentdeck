@@ -143,43 +143,21 @@ laufen durch dieselbe Access-Schutzzone (einmal pro Browser/Gerät freigeben).
 
 ## APK-Verteilung
 
-Die App muss man nicht aus einem Store laden — der eigene Server liefert sie
-selbst aus (`GET /api/apk/latest`, öffentlich aber gedrosselt; Metadaten unter
-`GET /api/apk/info`). Der Download-Button sitzt an zwei Stellen: direkt auf
+Die App muss man nicht aus einem Store laden — sie hängt als `app-debug.apk`
+am **öffentlichen GitHub-Release** und wird von dort geladen. Der Server hostet
+die APK **nicht** mehr. Der Download-Button sitzt an zwei Stellen: direkt auf
 der **Pairing-Seite** („Android app"-Karte) und unter **Settings → Android
 app**. Downloads laufen als schlichter `<a download>`-Link, damit Androids
 Download-Manager ohne Header klarkommen — Chrome fragt dann beim ersten Mal,
 ob die Installation aus **unbekannten Quellen** für den Browser erlaubt ist.
 
-Zwei Wege, die APK auf den Server zu bekommen:
+Die APK liegt am GitHub-Releases des Repos; die App lädt sie von dort. Der
+Workflow [`.github/workflows/android.yml`](../.github/workflows/android.yml)
+baut bei jedem `v*`-Tag (und manuell per *Run workflow*) die APK und hängt sie
+ans Release. Die Version wird automatisch gesetzt: Tag `v1.2.3` → `1.2.3`.
 
-**1. CI lädt automatisch hoch (empfohlen).** Der Workflow
-[`.github/workflows/android.yml`](../.github/workflows/android.yml) baut bei
-jedem `v*`-Tag (und manuell per *Run workflow*) die APK und pushed sie an
-deinen Server, sobald zwei Repo-Secrets gesetzt sind
-(*Settings → Secrets and variables → Actions*):
-
-| Secret | Inhalt |
-|---|---|
-| `AGENTDECK_URL` | Basis-URL deines Servers, z. B. `https://deck.example.com` |
-| `AGENTDECK_BRIDGE_TOKEN` | Inhalt von `~/.local/share/agentdeck/bridge-token` |
-
-Die Version wird automatisch gesetzt: Tag `v1.2.3` → `1.2.3` (Channel
-`release`), sonst CI-Lauf → `0.1.<laufnummer>` (Channel `ci`). Zusätzlich
-erscheint die APK bei Tags als GitHub Release.
-
-**2. Lokal hochladen.** Nach einem eigenen Build
-(`scripts/build-android.sh`, siehe [ANDROID.md](ANDROID.md)):
-
-```bash
-scripts/upload-apk.sh mobile/android/app/build/outputs/apk/debug/app-debug.apk 0.1.42
-```
-
-Das Skript liest den Bridge-Token standardmäßig aus
-`~/.local/share/agentdeck/bridge-token` und nimmt als Server
-`http://127.0.0.1:8787` an (`AGENTDECK_URL`/`AGENTDECK_BRIDGE_TOKEN`
-überschreiben; `--help` zeigt alles). Grenze: pro APK gelten
-`maxApkBytes` (Default 200 MB, siehe [CONFIG.md](CONFIG.md)).
+Für **Forks** bzw. eigene Repos: `VITE_AGENTDECK_RELEASE_REPO=<owner>/<name>`
+beim Web-/APK-Build setzen, damit die App das richtige Release liest.
 
 ## Auto-Update — wie es wirklich funktioniert
 
@@ -189,11 +167,12 @@ Zwei der drei Wege aktualisieren sich trotzdem von selbst:
 - **PWA:** Der Service Worker holt die neueste UI automatisch vom Server —
   ein `npm run build -w web` auf dem Server genügt, alle Browser-Instanzen
   ziehen beim nächsten Laden die neue Version. Nichts zu tun.
-- **APK:** Die eingebettete UI ist ein Snapshot. Beim Start fragt die App
-  `GET /api/apk/info` ab und vergleicht die eigene, im Build eingebrannte
-  Version (`VITE_AGENTDECK_APK_VERSION`) mit der auf dem Server. Ist die
-  Server-Version neuer, erscheint das **Update-Banner** („Update available —
-  v1.2.3“) mit Ein-Klick-Download. Die Installation selbst übernimmt Android:
+- **APK:** Die eingebettete UI ist ein Snapshot. Beim Start liest die App das
+  neueste **GitHub-Release** und vergleicht die eigene, im Build eingebrannte
+  Version (`VITE_AGENTDECK_APK_VERSION`) damit. Ist die Release-Version neuer,
+  erscheint das **Update-Banner** („Update available — v1.2.3“) mit
+  Ein-Klick-Download direkt von GitHub. Voraussetzung: das Repo/Release ist
+  öffentlich abrufbar. Die Installation selbst übernimmt Android:
   APK antippen → „App aktualisieren?“ bestätigen → fertig, Daten und Pairing
   bleiben. Voraussetzung: der Browser/Download-Manager durfte einmalig aus
   **unbekannten Quellen** installieren (fragt Android beim ersten Mal an).
@@ -222,7 +201,7 @@ flowchart LR
     E -- "Tunnel (outbound von dir)" --> C["cloudflared<br/>(dein Rechner)"]
     C -- "http://127.0.0.1:8787" --> A["AgentDeck-Server<br/>(Fastify + socket.io)"]
     A --> G["claude · codex · zcode · antigravity"]
-    A --> APK["/api/apk/latest<br/>(APK-Download)"]
+    H -. "APK-Asset" .-> GH["GitHub-Release<br/>(app-debug.apk)"]
 ```
 
 ## Security-Checkliste für öffentlichen Betrieb
@@ -232,9 +211,9 @@ Wenn der Tunnel (oder ein Proxy) AgentDeck ins Internet stellt:
 - [ ] **Pairing-Code** ist 6-stellig und **rotiert nach jeder erfolgreichen
       Paarung**; es gibt maximal 5 Versuche pro IP / 10 Minuten. Code niemals
       in Screenshots/Bildern teilen.
-- [ ] Nur `/api/health`, `/api/apk/info` und `/api/apk/latest` sind ohne JWT
-      erreichbar — und der APK-Download ist **gedrosselt**. Alles andere
-      verlangt das Geräte-JWT (30 Tage gültig).
+- [ ] Nur `/api/health` ist ohne JWT erreichbar. Alles andere verlangt das
+      Geräte-JWT (30 Tage gültig). Die APK kommt vom GitHub-Release, nicht vom
+      Server.
 - [ ] **Geräte-Widerruf** nutzen: unter Settings → *Paired devices* lassen
       sich verlorene/unverdächtige Geräte einzeln abmelden (JWT damit
       wirkungslos).
