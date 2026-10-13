@@ -97,7 +97,7 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
   fastify.post('/projects/:id/files/upload', async (req, reply) => {
     const projectId = (req.params as { id: string }).id;
     const query = z
-      .object({ sessionId: z.string().optional(), dir: z.string().optional() })
+      .object({ sessionId: z.string().optional(), terminalId: z.string().optional(), dir: z.string().optional() })
       .parse(req.query ?? {});
     const project = getProjectOr404(deps, projectId);
 
@@ -114,6 +114,14 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
       destDir = deps.store.attachmentsDirFor(session.id);
       signRoot = deps.store.attachmentsRoot;
       tokenProjectId = ATTACHMENTS_PROJECT_ID;
+    } else if (query.terminalId) {
+      // A file handed to the agent in a terminal: kept out of the project, the
+      // agent gets its absolute path typed into the prompt.
+      const term = deps.terminals.get(query.terminalId);
+      if (!term) throw notFound('Terminal not found');
+      destDir = deps.store.attachmentsDirFor(`terminal-${term.info.id}`);
+      signRoot = deps.store.attachmentsRoot;
+      tokenProjectId = ATTACHMENTS_PROJECT_ID;
     } else {
       const dir = query.dir ?? '';
       const resolved = await resolveInsideRoot(project.path, dir, { create: true });
@@ -124,7 +132,10 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
     await fsp.mkdir(destDir, { recursive: true });
 
     const fileId = newFileId();
-    const safeName = sanitizeFileName(file.filename);
+    // A terminal gets the path typed in: nothing in the name a shell or a TUI would split at.
+    const safeName = query.terminalId
+      ? sanitizeFileName(file.filename).replace(/[^A-Za-z0-9._-]+/g, '_')
+      : sanitizeFileName(file.filename);
     const dest = path.join(destDir, `${fileId}__${safeName}`);
     if (!dest.startsWith(destDir + path.sep)) {
       throw httpError(400, 'BAD_REQUEST', 'Invalid filename.');
@@ -159,6 +170,7 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
       size: stats.size,
       url: signedFileUrl(deps.jwtSecret, tokenProjectId, signRoot, dest),
       kind: mime.startsWith('image/') ? 'image' : 'file',
+      ...(query.terminalId ? { path: dest } : {}),
     };
     reply.code(201).send(attachment);
   });

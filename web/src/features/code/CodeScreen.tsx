@@ -11,6 +11,9 @@ import { TerminalView, type ModifierRef } from './TerminalView';
 import { KeyBar } from './KeyBar';
 import { ComposeBar } from './ComposeBar';
 import { sendRaw, sendText } from './termInput';
+import { attachToTerminal } from './termAttach';
+import { AttachSheet } from '../../components/AttachSheet';
+import { readClipboard, useIncomingFiles } from '../../util/incomingFiles';
 import { AgentChips, TerminalTab, useTerminalLauncher } from './terminalParts';
 import { CodePanes } from './CodePanes';
 
@@ -38,6 +41,7 @@ function CodePhone() {
   const compose = usePrefs((s) => s.termCompose);
 
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
   const modifier: ModifierRef = useRef({ ctrl: false, alt: false });
@@ -59,12 +63,19 @@ function CodePhone() {
   const paste = async () => {
     if (!active) return;
     try {
-      const text = await navigator.clipboard.readText();
-      if (text) sendText(active.id, text, false);
+      const clip = await readClipboard();
+      if (clip.files.length) void attachToTerminal(active.id, clip.files);
+      else if (clip.text) sendText(active.id, clip.text, false);
     } catch {
       toast('warn', 'Clipboard not readable — long-press the compose field to paste');
     }
   };
+
+  // A screenshot pasted, dropped or inserted by the keyboard — into the terminal
+  // or the compose field — goes to the agent of the terminal in front.
+  const inputArea = useRef<HTMLDivElement | null>(null);
+  const activeId = active?.id;
+  useIncomingFiles(inputArea, (files) => activeId && void attachToTerminal(activeId, files), activeId !== undefined);
 
   const onKey = (seq: string) => {
     if (!active) return;
@@ -126,7 +137,7 @@ function CodePhone() {
           <LauncherGrid onLaunch={(spec) => void launch(spec)} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
+        <div ref={inputArea} className="flex min-h-0 flex-1 flex-col px-2 pb-2">
           <div className="relative min-h-0 flex-1">
             {terminals.map((t) => (
               <TerminalView
@@ -154,6 +165,7 @@ function CodePhone() {
             onToggleCtrl={() => setCtrl((v) => !v)}
             onToggleAlt={() => setAlt((v) => !v)}
             onPaste={() => void paste()}
+            onAttach={() => setAttachOpen(true)}
             disabled={!active}
           />
 
@@ -165,6 +177,14 @@ function CodePhone() {
           )}
         </div>
       )}
+
+      <AttachSheet
+        open={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onFiles={(files, shrink) => active && void attachToTerminal(active.id, files, shrink)}
+        onText={(text) => active && sendText(active.id, text, false)}
+        hint="The file is uploaded to your machine and its path goes into the terminal — the agent reads it from there. Max 20 MB."
+      />
 
       <LauncherSheet
         open={launcherOpen}

@@ -25,6 +25,7 @@ import { UsageSheet } from './features/settings/UsageSheet';
 import { ActivitySheet } from './features/activity/ActivitySheet';
 import { ShareSheet } from './features/share/ShareSheet';
 import { listenForNativeShares, takeStashedShare } from './util/shareTarget';
+import { listenForKeyboardMedia } from './util/incomingFiles';
 import { useUsageTracking } from './hooks/useUsageTracking';
 import { Spinner } from './components/ui/Spinner';
 import { desktopFrame, useDesktopLayout } from './hooks/useDesktopLayout';
@@ -271,6 +272,12 @@ export default function App() {
   useEffect(() => {
     listenForNativeShares(
       (share) => useAppStore.getState().offerShare(share),
+      (message) => useAppStore.getState().toast('warn', message),
+    );
+    // APK: an image inserted by the keyboard goes to the focused input — with
+    // none in focus the user picks the chat, as for a share.
+    listenForKeyboardMedia(
+      (files) => useAppStore.getState().offerShare({ text: '', files }),
       (message) => useAppStore.getState().toast('warn', message),
     );
   }, []);

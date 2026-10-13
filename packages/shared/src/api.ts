@@ -17,6 +17,8 @@ export interface Attachment {
   /** API-relative URL (served by the backend, authed via signed token query param). */
   url: string;
   kind: 'image' | 'file';
+  /** Absolute path on the server — only for a terminal upload, whose agent is told where the file is. */
+  path?: string;
 }
 
 export interface MessageUsage {

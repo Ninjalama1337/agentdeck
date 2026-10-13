@@ -12,6 +12,8 @@ import { ctrlChar, isTerminalReply } from './termInput';
 import { installMobileIme } from './termIme';
 import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode } from './termScroll';
 import { openExternal } from '../../util/openExternal';
+import { useIncomingFiles } from '../../util/incomingFiles';
+import { attachToTerminal } from './termAttach';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -73,6 +75,10 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   useEffect(() => {
     endedRef.current = ended !== null;
   }, [ended]);
+
+  // Desktop pane: an image pasted or dropped onto the terminal goes to its agent
+  // (on the phone the Code screen takes them for terminal and compose field alike).
+  useIncomingFiles(hostRef, (files) => void attachToTerminal(id, files), pane && ended === null);
 
   useEffect(() => {
     const host = hostRef.current;

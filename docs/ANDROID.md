@@ -162,6 +162,21 @@ Berechtigung; ältere Geräte laden über den System-Browser. Der
 gesamte AgentDeck-Traffic geht als REST/WebSocket an deinen Server; die
 WebView lädt ausschließlich lokal gebaute Assets aus dem APK.
 
+### Bilder aus der Tastatur und der Zwischenablage
+
+Eine WebView meldet der Tastatur von sich aus nicht, dass ihre Textfelder
+Bilder annehmen — Gboard zeigt Screenshots in seiner Zwischenablage-Zeile
+dann als „hier nicht unterstützt“. Das Patch-Skript ersetzt deshalb
+Capacitors Activity-Layout (`res/layout/capacitor_bridge_layout_main.xml`)
+durch eines mit `AgentDeckWebView` (`mobile/native/`): Sie trägt `image/*`
+als annehmbaren Inhalt ein und nimmt entgegen, was die Tastatur einfügt.
+Das Plugin `MediaInput` (`MediaInputPlugin.java`) kopiert die Datei sofort
+in den App-Cache (der Lesezugriff der Tastatur endet gleich wieder; höchstens
+25 MB, die letzten 20 bleiben liegen) und meldet sie der Web-App, die sie dem
+Eingabefeld gibt, das gerade den Fokus hat — Chat-Nachricht oder Terminal.
+Dasselbe Plugin liest für „Paste from clipboard“ die System-Zwischenablage
+samt Bild. Eine Berechtigung braucht beides nicht.
+
 ### Teilen-Ziel
 
 Das Patch-Skript trägt in die `MainActivity` Intent-Filter für

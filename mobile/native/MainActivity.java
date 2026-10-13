@@ -27,6 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ApkInstallPlugin.class);
         registerPlugin(NotifyActionsPlugin.class);
         registerPlugin(ShareTargetPlugin.class);
+        registerPlugin(MediaInputPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

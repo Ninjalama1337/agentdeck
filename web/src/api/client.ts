@@ -626,7 +626,8 @@ export const api = {
 /**
  * Multipart upload with progress. Per contract the upload endpoint lives at
  * /api/projects/:id/files/upload?dir=… (multipart field `file`) and returns a
- * signed Attachment — session attachments use the same route.
+ * signed Attachment — session attachments use the same route, and so do files
+ * for a terminal (`terminalId`; the answer then carries the server `path`).
  */
 export function uploadFile(
   projectId: string,
@@ -634,12 +635,13 @@ export function uploadFile(
   dir = 'uploads',
   onProgress?: (fraction: number) => void,
   sessionId?: string,
+  terminalId?: string,
 ): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(
       'POST',
-      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?${sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : `dir=${encodeURIComponent(dir)}`}`,
+      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?${terminalId ? `terminalId=${encodeURIComponent(terminalId)}&dir=${encodeURIComponent(dir)}` : sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : `dir=${encodeURIComponent(dir)}`}`,
     );
     const token = getToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);

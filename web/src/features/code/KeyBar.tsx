@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ClipboardPaste, CornerDownLeft, Keyboard, Minus, Plus, Type } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ClipboardPaste, CornerDownLeft, Keyboard, Minus, Paperclip, Plus, Type } from 'lucide-react';
 import { usePrefs } from '../../store/prefs';
 import { haptic } from '../../util/haptics';
 import { KEYS, ctrlChar } from './termInput';
@@ -10,11 +10,12 @@ interface Props {
   onToggleCtrl: () => void;
   onToggleAlt: () => void;
   onPaste: () => void;
+  onAttach: () => void;
   disabled?: boolean;
 }
 
 /** Keys a phone keyboard can't send: modifiers, arrows, Esc, Tab, ^C … */
-export function KeyBar({ onKey, ctrl, alt, onToggleCtrl, onToggleAlt, onPaste, disabled }: Props) {
+export function KeyBar({ onKey, ctrl, alt, onToggleCtrl, onToggleAlt, onPaste, onAttach, disabled }: Props) {
   const compose = usePrefs((s) => s.termCompose);
   const fontSize = usePrefs((s) => s.termFontSize);
   const setPref = usePrefs((s) => s.set);
@@ -47,6 +48,9 @@ export function KeyBar({ onKey, ctrl, alt, onToggleCtrl, onToggleAlt, onPaste, d
         }}
       >
         {compose ? <Keyboard size={15} /> : <Type size={15} />}
+      </button>
+      <button type="button" aria-label="Attach an image or file" className="kbd" disabled={disabled} onClick={() => { haptic(); onAttach(); }}>
+        <Paperclip size={15} />
       </button>
       <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         <button type="button" className="kbd" aria-pressed={ctrl} onClick={() => { haptic(); onToggleCtrl(); }}>

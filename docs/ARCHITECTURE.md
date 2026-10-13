@@ -183,11 +183,13 @@ Alles liegt unter `dataDir` (Standard `~/.local/share/agentdeck`, siehe
 ├── stats.sqlite                      # Aktivität: jeder Agent-Lauf + Abo-Limits im Zeitverlauf (node:sqlite)
 ├── sessions/<id>/meta.json           # Session-Metadaten
 ├── sessions/<id>/messages.jsonl      # Chat-Verlauf (append-only)
-└── attachments/<sessionId>/<fileId>__<safe-name>
+├── attachments/<sessionId>/<fileId>__<safe-name>
+└── attachments/terminal-<terminalId>/<fileId>__<safe-name>   # Dateien für den Agent im Terminal
 ```
 
 Der Chat-Verlauf ist damit dateibasiert und portabel; löschen einer Session
-löscht `sessions/<id>/` samt Attachments.
+löscht `sessions/<id>/` samt Attachments. Dateien eines Terminals
+verschwinden, wenn das Terminal beendet wird.
 
 ## Team-Run-Ablauf
 

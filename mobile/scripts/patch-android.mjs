@@ -159,6 +159,28 @@ if (!fs.existsSync(statIcon) || fs.readFileSync(statIcon, 'utf8') !== STAT_ICON)
   console.log('patch-android: wrote ic_stat_agentdeck drawable');
 }
 
+// Capacitor's activity layout, with our WebView in place of its own: the one
+// that lets the keyboard insert images (mobile/native/AgentDeckWebView.java).
+// An app resource of the same name wins over the library's.
+const BRIDGE_LAYOUT = `<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.ninjalama.agentdeck.AgentDeckWebView
+        android:id="@+id/webview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
+`;
+const bridgeLayout = path.resolve(here, '../android/app/src/main/res/layout/capacitor_bridge_layout_main.xml');
+if (!fs.existsSync(bridgeLayout) || fs.readFileSync(bridgeLayout, 'utf8') !== BRIDGE_LAYOUT) {
+  fs.mkdirSync(path.dirname(bridgeLayout), { recursive: true });
+  fs.writeFileSync(bridgeLayout, BRIDGE_LAYOUT);
+  console.log('patch-android: wrote the WebView layout');
+}
+
 // App-local Java sources (MainActivity registers the plugins next to it).
 const nativeSrc = path.resolve(here, '../native');
 const javaDir = path.resolve(here, '../android/app/src/main/java/com/ninjalama/agentdeck');

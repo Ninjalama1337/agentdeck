@@ -88,7 +88,15 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   erst, wenn du es tust. In der APK für alles, in der installierten PWA für
   Text, Links und ein Bild.
 - **Bild-/Screenshot-Anhang im Chat** — Screenshots vom Handy direkt in den
-  Agent-Turn (z. B. „Mach es wie auf dem Bild").
+  Agent-Turn (z. B. „Mach es wie auf dem Bild"): über die Büroklammer
+  (Kamera, Galerie, Datei, Zwischenablage), per Einfügen ins Nachrichtenfeld
+  oder direkt aus der Tastatur (Screenshot in der Zwischenablage-Zeile von
+  Gboard antippen).
+- **Bilder und Dateien für den Agent im Terminal** — dieselben Wege im
+  Code-Tab (Büroklammer in der Tastenleiste, Einfügen, Tastatur, am Desktop
+  auch Ziehen aufs Terminal): Die Datei wird auf deinen Rechner geladen, ihr
+  Pfad landet in der Eingabe des Agents. Claude Code zeigt ein Bild dann als
+  `[Image #1]` an.
 - **Team-Runs** — mehrere Agents als Pipeline, sequenziell (mit
   Kontext-Weitergabe) oder parallel.
 - **MCP-Bridge** — jeder Agent kann jeden anderen als Subagent aufrufen

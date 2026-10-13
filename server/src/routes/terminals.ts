@@ -3,6 +3,7 @@
  * these routes only create/list/kill PTYs and hand back replayable output.
  */
 import type { FastifyInstance } from 'fastify';
+import fsp from 'node:fs/promises';
 import { z } from 'zod';
 import { httpError, notFound } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
@@ -63,6 +64,10 @@ export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
 }
 
 export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): Promise<void> {
+  /** Files uploaded for a terminal (routes/files.ts) go with it. */
+  const dropUploads = (id: string) =>
+    void fsp.rm(deps.store.attachmentsDirFor(`terminal-${id}`), { recursive: true, force: true }).catch(() => undefined);
+
   fastify.get('/terminals', async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query ?? {});
     return deps.terminals.list(query.projectId);
@@ -112,13 +117,14 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const id = (req.params as { id: string }).id;
     const ok = deps.terminals.kill(id, terminalBroadcasts(deps));
     if (!ok) throw notFound('Terminal not found');
+    dropUploads(id);
     reply.code(204).send();
   });
 
   fastify.post('/terminals/:id/kill', async (req, reply) => {
     // Same as DELETE — kept for the UI's explicit "end" action.
     const id = (req.params as { id: string }).id;
-    deps.terminals.kill(id, terminalBroadcasts(deps));
+    if (deps.terminals.kill(id, terminalBroadcasts(deps))) dropUploads(id);
     reply.code(204).send();
   });
 

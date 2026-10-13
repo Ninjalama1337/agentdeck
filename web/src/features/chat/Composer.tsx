@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Camera, FileText, Image as ImageIcon, Paperclip, Square, Wand2, X } from 'lucide-react';
+import { ArrowUp, Paperclip, Square, Wand2, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, Attachment, Session } from '@agentdeck/shared';
 import { api, uploadFile } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
-import { Sheet } from '../../components/ui/Sheet';
+import { AttachSheet } from '../../components/AttachSheet';
 import { Spinner } from '../../components/ui/Spinner';
 import { DictationHint, MicButton } from '../../components/MicButton';
 import { useDictation } from '../../hooks/useDictation';
@@ -14,6 +14,7 @@ import { loadComposerDraft, saveComposerDraft, type ComposerDraft } from '../../
 import { useAttachmentUrl } from '../../hooks/useAttachmentUrl';
 import { rememberAttachmentUrl } from '../../util/attachments';
 import { prepareImage } from '../../util/imagePrep';
+import { useIncomingFiles } from '../../util/incomingFiles';
 import { haptic } from '../../util/haptics';
 
 interface PendingAttachment {
@@ -28,6 +29,11 @@ interface PendingAttachment {
 }
 
 let localSeq = 0;
+
+/** IDE-mode agents have no message field to attach to. */
+function headlessInput(agent: AgentInfo | undefined): boolean {
+  return !agent || agent.capabilities.headless;
+}
 
 export function Composer({ session, agent }: { session: Session; agent: AgentInfo | undefined }) {
   const sendTurn = useAppStore((s) => s.sendTurn);
@@ -50,9 +56,9 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
     (msg) => toast('error', msg),
   );
   const textarea = useRef<HTMLTextAreaElement | null>(null);
-  const photoInput = useRef<HTMLInputElement | null>(null);
-  const fileInput = useRef<HTMLInputElement | null>(null);
-  const anyInput = useRef<HTMLInputElement | null>(null);
+  const root = useRef<HTMLDivElement | null>(null);
+  // A screenshot pasted, dropped or inserted by the keyboard becomes an attachment.
+  useIncomingFiles(root, (files) => void addFiles(files, true), headlessInput(agent));
 
   const projectId = session.projectId;
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
@@ -197,7 +203,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   }
 
   return (
-    <div className="safe-b px-3 pb-3">
+    <div ref={root} className="safe-b px-3 pb-3">
       <DictationHint dictation={dictation} />
       {/* attachment strip */}
       {atts.length > 0 && (
@@ -297,77 +303,12 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
         )}
       </div>
 
-      {/* attach action sheet */}
-      <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add attachment">
-        <div className="flex flex-col gap-1.5">
-          <AttachRow
-            icon={<Camera size={18} />}
-            title="Take photo"
-            hint="Capture with the device camera"
-            onClick={() => {
-              setSheetOpen(false);
-              photoInput.current?.click();
-            }}
-          />
-          <AttachRow
-            icon={<ImageIcon size={18} />}
-            title="Choose image"
-            hint="From gallery"
-            onClick={() => {
-              setSheetOpen(false);
-              fileInput.current?.click();
-            }}
-          />
-          <AttachRow
-            icon={<FileText size={18} />}
-            title="Choose file"
-            hint="PDF, text, logs, code"
-            onClick={() => {
-              setSheetOpen(false);
-              anyInput.current?.click();
-            }}
-          />
-          <p className="px-1 pt-1 text-[12px] text-dim">
-            Files upload instantly and are attached to your next message. Max 20 MB.
-          </p>
-        </div>
-      </Sheet>
-
-      {/* hidden inputs (kept mounted) */}
-      <input
-        ref={photoInput}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          e.target.value = '';
-          if (files.length) void addFiles(files, true);
-        }}
-      />
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          e.target.value = '';
-          if (files.length) void addFiles(files, true);
-        }}
-      />
-      <input
-        ref={anyInput}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          e.target.value = '';
-          if (files.length) void addFiles(files, false);
-        }}
+      <AttachSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        onFiles={(files, shrink) => void addFiles(files, shrink)}
+        onText={(pasted) => setText((t) => `${t}${pasted}`)}
+        hint="Files upload instantly and are attached to your next message. Max 20 MB. You can also paste a screenshot into the message field."
       />
     </div>
   );
@@ -390,31 +331,5 @@ function PendingThumb({ item }: { item: PendingAttachment }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {src && <img src={src} alt={item.name} className="h-full w-full object-cover" />}
     </div>
-  );
-}
-
-function AttachRow({
-  icon,
-  title,
-  hint,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  hint: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="press tap flex w-full items-center gap-3 rounded-2xl border border-line bg-white/[0.04] px-4 py-3 text-left active:bg-white/[0.08]"
-    >
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/15 text-accent">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[14px] font-medium">{title}</span>
-        <span className="block text-[12px] text-dim">{hint}</span>
-      </span>
-    </button>
   );
 }
