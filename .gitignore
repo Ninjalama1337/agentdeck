@@ -17,3 +17,5 @@ mobile/dist/
 mobile/android/.idea/
 mobile/android/*.iml
 dist-bundle/
+# Server attachment dir when dataDir points at the checkout — never commit uploads.
+uploads/
