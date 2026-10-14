@@ -186,8 +186,8 @@ Storage layout under `dataDir`:
 | GET | `/api/tunnel` | `TunnelInfo` (authed) |
 | GET | `/api/server` | `ServerInfo` `{name,version,host}` (authed) — same object as `server` in the pairing response |
 | GET | `/api/usage` | `AgentUsage[]` (authed, server-side cached 30 s; the app polls every minute while an agent is in use). Claude: parsed from `claude -p "/usage"`; Antigravity: `agy -p /usage` (5h/week + model quotas); Codex: rate-limit windows via the local app-server `account/rateLimits/read` RPC (login status fallback); OpenCode: `opencode stats`; ZCode: provider plan/model hint plus selectable plans. Reset times are shown in 24-hour format. |
-| GET | `/api/update` | `UpdateInfo` `{current,latest?,updateAvailable,checkedAt?,checkError?,blockedReason?,job?}` (authed). `current` comes from `git describe` (`1.2.3`, or `1.2.3-4-gabc1234` past a release); `latest` is the newest GitHub release via `gh` (cached 10 min, `?refresh=1` asks again). |
-| POST | `/api/update` | `→ UpdateInfo` (202). Runs `scripts/update.sh <tag>`: fast-forward to the release tag, build, restart. 409 `UPDATE_RUNNING` / `UPDATE_NOT_NEEDED` / `UPDATE_UNAVAILABLE`, 502 `UPDATE_CHECK_FAILED`. Progress streams via WS `update:state` `{update: UpdateInfo}`; a successful job ends with the server restarting. |
+| GET | `/api/update` | `UpdateInfo` `{current,latest?,updateAvailable,checkedAt?,checkError?,blockedReason?,via?,job?}` (authed). `via: 'desktop-app'`: the server ships in the desktop AppImage and the update goes through the app (see POST). `current` comes from `git describe` (`1.2.3`, or `1.2.3-4-gabc1234` past a release); `latest` is the newest GitHub release via `gh` (cached 10 min, `?refresh=1` asks again). |
+| POST | `/api/update` | `→ UpdateInfo` (202). Runs `scripts/update.sh <tag>`: fast-forward to the release tag, build, restart. 409 `UPDATE_RUNNING` / `UPDATE_NOT_NEEDED` / `UPDATE_UNAVAILABLE`, 502 `UPDATE_CHECK_FAILED`. Progress streams via WS `update:state` `{update: UpdateInfo}`; a successful job ends with the server restarting. A packaged server with `via: 'desktop-app'` instead downloads the release's AppImage (`latest-linux.yml`, SHA-512 checked), puts it in place of the installed one, and runs `agentdeck-server service install` from it (stages the runtime, restarts the service). A `.deb` install answers 409 `UPDATE_UNAVAILABLE` (needs root). |
 | GET | `/api/admin/jobs` | `AdminJob[]` (authed; newest first, kept in memory + capped) |
 | POST | `/api/admin/jobs` | `StartAdminJobRequest → AdminJob` (202; 409 ADMIN_JOB_ACTIVE while one runs). Runs the agent's fixed recipe (see below) as a live job; after update/install the server re-detects the agent and broadcasts `agent:update`. Output streams via WS `admin:job`. |
 | GET | `/api/admin/jobs/:id` | `AdminJob` |
@@ -310,7 +310,10 @@ builds inject their version via `VITE_AGENTDECK_APK_VERSION` (default
 (`window.Capacitor?.isNativePlatform()`) and the installed version is older
 than the release version, a dismissible update banner with a download button
 appears. The PWA keeps updating itself via the service worker (already
-implemented).
+implemented). The APK also checks in the background (WorkManager, every 6 h,
+also with the app closed) and posts one notification per new version; tapping
+it opens the app with the deep link `apk-update:<version>`, which starts the
+download and Android's installer right away.
 
 ## BridgeMind ports (v0.9.0)
 

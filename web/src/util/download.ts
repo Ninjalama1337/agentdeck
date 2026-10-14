@@ -1,5 +1,6 @@
 import { api, fetchBlob, getApiBase, getToken } from '../api/client';
 import { isNativePlatform } from './platform';
+import { RELEASE_REPO } from './apkRelease';
 
 /** Outcome of {@link downloadFile}: saved to Downloads, handed to the browser, or shared/saved by the browser itself. */
 export type DownloadResult = 'saved' | 'browser' | 'done';
@@ -125,6 +126,15 @@ export async function installApkUpdate(url: string, onProgress?: (fraction: numb
       /* already gone */
     }
   }
+}
+
+/**
+ * APK only: tells the native background update check (UpdateCheckWorker.java)
+ * which repo publishes the releases. Older APKs lack the method — fine.
+ */
+export function configureNativeUpdateCheck(): void {
+  const native = isNativePlatform() ? window.Capacitor?.Plugins?.ApkInstall : undefined;
+  void native?.configureUpdates?.({ repo: RELEASE_REPO })?.catch?.(() => undefined);
 }
 
 /** True for the rejection of a share sheet the user closed. */

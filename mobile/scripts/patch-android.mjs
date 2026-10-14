@@ -220,4 +220,10 @@ if (fs.existsSync(gradle)) {
     fs.writeFileSync(gradle, g);
     console.log('patch-android: added firebase-messaging dependency');
   }
+  // Background update check (mobile/native/UpdateCheckWorker.java).
+  if (!g.includes('androidx.work:work-runtime')) {
+    g = g.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "androidx.work:work-runtime:2.10.1"');
+    fs.writeFileSync(gradle, g);
+    console.log('patch-android: added work-runtime dependency');
+  }
 }

@@ -3,6 +3,7 @@ import { Download, X } from 'lucide-react';
 import { ApkDownloadLink } from './ApkDownloadLink';
 import { apkUpdateAvailable, type ApkRelease } from '../util/apkRelease';
 import { isNativePlatform } from '../util/platform';
+import { useAppStore } from '../store/appStore';
 
 const DISMISS_KEY = 'agentdeck:apk-update-dismissed';
 
@@ -22,16 +23,18 @@ function readDismissed(): string | null {
  * update. Dismissal lives in sessionStorage and is per release version — a
  * newer release makes the banner reappear. The PWA never sees this banner:
  * its version constant stays '0.0.0-web' and updates go through the service
- * worker.
+ * worker. A tap on the background check's notification (UpdateCheckWorker.java)
+ * shows the banner even when dismissed and starts the install right away.
  */
 export function UpdateBanner({ apk }: { apk: ApkRelease | null }) {
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(readDismissed);
+  const installRequest = useAppStore((s) => s.apkInstallRequest);
 
   const native = isNativePlatform();
   const version = apk?.version;
   const updateAvailable = native && apkUpdateAvailable(__APK_VERSION__, apk);
 
-  if (!apk || !updateAvailable || !version || dismissedVersion === version) return null;
+  if (!apk || !updateAvailable || !version || (dismissedVersion === version && !installRequest)) return null;
 
   const dismiss = () => {
     try {
@@ -60,6 +63,7 @@ export function UpdateBanner({ apk }: { apk: ApkRelease | null }) {
         </p>
         <ApkDownloadLink
           release={apk}
+          autoStart={installRequest}
           className="press tap flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-white btn-primary"
         >
           <Download size={14} />

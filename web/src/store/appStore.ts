@@ -61,6 +61,7 @@ import {
   updateActiveServer,
 } from '../api/servers';
 import { fetchLatestApkRelease, type ApkRelease } from '../util/apkRelease';
+import { configureNativeUpdateCheck } from '../util/download';
 import { usePrefs } from './prefs';
 import {
   draftFromSnapshot,
@@ -276,6 +277,8 @@ export interface AppStore {
   modelPrefs: Partial<Record<AgentId, string>>;
   /** Latest APK release from GitHub (null = unknown / unreachable). */
   apkRelease: ApkRelease | null;
+  /** Set when the "update available" notification was tapped: the banner starts the install (APK). */
+  apkInstallRequest: number | null;
   /** Server version, latest release and the running update job (null = not fetched / older server). */
   update: UpdateInfo | null;
   /** Subscription usage per agent (null = not fetched yet). */
@@ -884,6 +887,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
     share: null,
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
     apkRelease: null,
+    apkInstallRequest: null,
     update: null,
     usage: null,
     currentUsageAgent: 'claude',
@@ -955,6 +959,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       // The Android app ships on GitHub — also fetched while unpaired so the
       // pairing screen can offer the download. One shot, no polling loop.
       void get().refreshApkRelease();
+      configureNativeUpdateCheck();
     },
 
     navigate(route) {
@@ -1547,6 +1552,10 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         else get().toast('warn', 'That terminal has ended');
       } else if (kind === 'team') {
         get().navigate({ name: 'team', runId: id });
+      } else if (kind === 'apk-update') {
+        // Tap on the background update check's notification (UpdateCheckWorker.java).
+        set({ apkInstallRequest: Date.now() });
+        if (!get().apkRelease) void get().refreshApkRelease();
       }
     },
 

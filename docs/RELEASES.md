@@ -39,7 +39,8 @@ lädt die Pakete dann hoch. Fehlen sie, meldet `scripts/release.sh --wait` eine
 Warnung — Server und APK des Releases sind davon nicht betroffen.
 
 Ein Server aus dem Desktop-Paket aktualisiert sich nicht über
-`scripts/update.sh` (kein Git-Checkout), sondern mit der App; Details in
+`scripts/update.sh` (kein Git-Checkout), sondern mit der App — beim AppImage
+auch aus der Ferne über *Settings → Server update*; Details in
 [DESKTOP.md](DESKTOP.md#updates).
 
 ## Server aktualisieren

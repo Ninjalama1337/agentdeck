@@ -215,9 +215,22 @@ Server seine eigene letzte Ansicht.
   Dienst neu — **ohne Rückfrage**; laufende Agent-Läufe werden dabei unterbrochen,
   Terminals laufen in tmux weiter. Ein von der App losgelöst gestarteter Server
   (ohne Dienst) wird nicht automatisch auf die neue Version gebracht.
-- Ein Dienst aus dem Paket aktualisiert sich **nicht** über *Settings → Server
-  update* oder `scripts/update.sh` (kein Git-Checkout); die App zeigt dort den
-  Grund. Ein Checkout-Server funktioniert wie bisher ([RELEASES.md](RELEASES.md)).
+- **Aus der Ferne (AppImage):** *Settings → Server update* auf dem Handy zeigt
+  *Update desktop app & server to vX.Y.Z*. Der Server lädt das AppImage des
+  Releases (Datei und SHA-512 aus `latest-linux.yml`), prüft es, entpackt
+  daraus den Server (`--appimage-extract`, ohne FUSE), legt das neue AppImage
+  an die Stelle des alten und führt `agentdeck-server service install` aus dem
+  neuen Paket aus — das kopiert die Laufzeit und startet den Dienst neu
+  (Terminals laufen in tmux weiter). Niemand muss am Rechner sein. Ein offenes
+  Fenster läuft bis zu seinem nächsten Start mit der alten Version weiter.
+  Woher der Server das AppImage kennt: Die App trägt sich bei jedem Start in
+  `~/.local/share/agentdeck/desktop-app.json` ein; ältere Apps findet er über
+  ihren Autostart- oder Menüeintrag (z. B. von Gear Lever). Läuft der Server
+  ohne Dienst (losgelöst), wird nur das AppImage ersetzt; der Server wechselt
+  beim nächsten Start der App. Protokoll: `~/.local/share/agentdeck/update.log`.
+- **deb:** geht nicht aus der Ferne (braucht root); *Settings → Server update*
+  nennt den Grund. Die App bietet das Update beim Start selbst an.
+- `scripts/update.sh` gilt nur für Checkout-Server ([RELEASES.md](RELEASES.md)).
 - tmux: Die mitgelieferte Version (3.6a) spricht mit Servern gleicher
   Protokollversion. Ein Sprung der Protokollversion würde laufende Terminals
   bis zu ihrem Ende unerreichbar machen — deshalb ist die Version gepinnt.

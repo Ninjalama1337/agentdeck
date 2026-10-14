@@ -39,6 +39,16 @@ public class ApkInstallPlugin extends Plugin {
 
     private volatile boolean running = false;
 
+    /** The repo UpdateCheckWorker reads releases from (a fork builds with its own). */
+    @PluginMethod
+    public void configureUpdates(PluginCall call) {
+        String repo = call.getString("repo");
+        if (repo != null && repo.matches("^[\\w.-]+/[\\w.-]+$")) {
+            NotifyActionsPlugin.prefs(getContext()).edit().putString(UpdateCheckWorker.KEY_REPO, repo).apply();
+        }
+        call.resolve();
+    }
+
     @PluginMethod
     public void install(final PluginCall call) {
         // Content URIs for the installer need Android 7.

@@ -9,9 +9,11 @@
  * - The script restarts the server as its last step, so a successful job
  *   ends with this process being replaced; the new process reports the new
  *   version and has no job.
- * - A packaged server (part of the desktop app bundle) never updates itself —
- *   the app brings the new server. It still reports the latest release (via
- *   `gh` or the public GitHub API), and a failed lookup stays quiet there:
+ * - A packaged server (part of the desktop app bundle) has no checkout. When
+ *   the app is an AppImage, `start()` updates the app instead (./desktop.ts):
+ *   new AppImage in place, new server staged, service restarted. A .deb needs
+ *   root — the app updates itself at start. The latest release comes via
+ *   `gh` or the public GitHub API, and a failed lookup stays quiet there:
  *   it is not something the user can act on from the server.
  */
 import fs from 'node:fs';
@@ -22,10 +24,12 @@ import type { UpdateInfo, UpdateJob } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import type { Broadcaster } from '../ws/gateway.js';
 import { httpError } from '../http/errors.js';
+import { findDesktopApp, runDesktopUpdate, type DesktopApp, type DesktopUpdateOptions } from './desktop.js';
 import {
   fetchLatestRelease,
   fetchLatestReleasePackaged,
   isNewerRelease,
+  RELEASE_REPO,
   type FetchRelease,
   type ReleaseInfo,
 } from './release.js';
@@ -47,6 +51,13 @@ export interface UpdateChild {
 export const PACKAGED_BLOCKED_REASON =
   'This server is part of the AgentDeck desktop app — update the app (Settings → Desktop).';
 
+/** A .deb install: replacing it needs root, which a remote update does not have. */
+export const DEB_BLOCKED_REASON =
+  'This server is part of the AgentDeck desktop app installed as .deb — updating it needs root. ' +
+  'Start the app on the computer: it offers the update itself.';
+
+export type DesktopUpdateRunner = (opts: DesktopUpdateOptions) => Promise<void>;
+
 export type UpdateSpawn = (script: string, tag: string, env: Record<string, string>) => UpdateChild;
 
 export interface UpdateManagerOptions {
@@ -61,11 +72,17 @@ export interface UpdateManagerOptions {
   packaged?: boolean;
   fetchRelease?: FetchRelease;
   spawn?: UpdateSpawn;
+  /** Where the desktop app of a packaged server is (default: ./desktop.ts). */
+  findDesktopApp?: () => DesktopApp | null;
+  runDesktopUpdate?: DesktopUpdateRunner;
 }
 
 export class UpdateManager {
   private readonly fetchRelease: FetchRelease;
   private readonly spawnFn: UpdateSpawn;
+  private readonly findApp: () => DesktopApp | null;
+  private readonly runDesktop: DesktopUpdateRunner;
+  private desktopApp: DesktopApp | null | undefined;
   private readonly script: string;
   private readonly logFile: string;
   private latest: ReleaseInfo | null = null;
@@ -80,6 +97,8 @@ export class UpdateManager {
     this.fetchRelease = opts.fetchRelease ?? (opts.packaged ? fetchLatestReleasePackaged : fetchLatestRelease);
     this.script = path.join(opts.repoRoot, 'scripts', 'update.sh');
     this.logFile = path.join(opts.dataDir, 'update.log');
+    this.findApp = opts.findDesktopApp ?? (() => findDesktopApp({ dataDir: opts.dataDir }));
+    this.runDesktop = opts.runDesktopUpdate ?? runDesktopUpdate;
     this.spawnFn =
       opts.spawn ??
       ((script, tag, env) => {
@@ -112,7 +131,11 @@ export class UpdateManager {
 
   /** Why this install cannot update itself, if so. */
   private blockedReason(): string | undefined {
-    if (this.opts.packaged) return PACKAGED_BLOCKED_REASON;
+    if (this.opts.packaged) {
+      const app = this.app();
+      if (app?.kind === 'appimage') return undefined;
+      return app?.kind === 'deb' ? DEB_BLOCKED_REASON : PACKAGED_BLOCKED_REASON;
+    }
     if (!fs.existsSync(path.join(this.opts.repoRoot, '.git'))) {
       return 'This server does not run from a git checkout, so it cannot update itself.';
     }
@@ -120,7 +143,15 @@ export class UpdateManager {
     return undefined;
   }
 
+  /** The desktop app of a packaged server; looked up again with every release check. */
+  private app(): DesktopApp | null {
+    if (!this.opts.packaged) return null;
+    if (this.desktopApp === undefined) this.desktopApp = this.findApp();
+    return this.desktopApp;
+  }
+
   private async check(): Promise<void> {
+    this.desktopApp = undefined;
     try {
       this.latest = await this.fetchRelease(this.opts.repoRoot);
       this.checkError = undefined;
@@ -159,6 +190,7 @@ export class UpdateManager {
       ...(this.checkedAt !== undefined ? { checkedAt: this.checkedAt } : {}),
       ...(this.checkError ? { checkError: this.checkError } : {}),
       ...(blocked ? { blockedReason: blocked } : {}),
+      ...(this.opts.packaged && !blocked ? { via: 'desktop-app' as const } : {}),
       ...(this.job ? { job: { ...this.job, output: [...this.job.output] } } : {}),
     };
   }
@@ -178,7 +210,9 @@ export class UpdateManager {
     const job: UpdateJob = { target: info.latest.version, status: 'running', output: [], startedAt: Date.now() };
     this.job = job;
     this.broadcast();
-    void this.run(job, info.latest.tag);
+    const app = this.app();
+    if (app?.kind === 'appimage') void this.runDesktopJob(job, app.path, info.latest);
+    else void this.run(job, info.latest.tag);
     return this.snapshot();
   }
 
@@ -230,6 +264,42 @@ export class UpdateManager {
     return this.running;
   }
 
+  /** Packaged server: update the desktop AppImage, which brings the new server (./desktop.ts). */
+  private runDesktopJob(job: UpdateJob, appImage: string, release: ReleaseInfo): Promise<void> {
+    this.running = (async () => {
+      this.appendLog(`\n=== ${new Date().toISOString()} desktop app update ${this.opts.currentVersion} -> ${release.tag} ===`);
+      const abort = new AbortController();
+      const timer = setTimeout(() => {
+        job.error = `Timed out after ${Math.round(UPDATE_TIMEOUT_MS / 60_000)} min — update stopped`;
+        abort.abort();
+      }, UPDATE_TIMEOUT_MS);
+      timer.unref?.();
+      try {
+        await this.runDesktop({
+          appImage,
+          release,
+          repo: RELEASE_REPO,
+          dataDir: this.opts.dataDir,
+          logFile: this.logFile,
+          signal: abort.signal,
+          push: (line) => this.pushLine(job, line),
+        });
+      } catch (err) {
+        job.error ??= `${err instanceof Error ? err.message : String(err)} — the server keeps running the old version.`;
+      }
+      clearTimeout(timer);
+      this.finish(job, job.error);
+    })();
+    return this.running;
+  }
+
+  private pushLine(job: UpdateJob, line: string): void {
+    job.output.push(line.length > LINE_CAP ? line.slice(0, LINE_CAP) : line);
+    while (job.output.length > OUTPUT_CAP) job.output.shift();
+    this.appendLog(line);
+    this.scheduleBroadcast(job);
+  }
+
   private finish(job: UpdateJob, error?: string): void {
     if (this.trailingTimer) clearTimeout(this.trailingTimer);
     this.trailingTimer = undefined;
@@ -249,12 +319,7 @@ export class UpdateManager {
     if (!stream) return;
     let buf = '';
     stream.setEncoding?.('utf8');
-    const push = (line: string) => {
-      job.output.push(line.length > LINE_CAP ? line.slice(0, LINE_CAP) : line);
-      while (job.output.length > OUTPUT_CAP) job.output.shift();
-      this.appendLog(line);
-      this.scheduleBroadcast(job);
-    };
+    const push = (line: string) => this.pushLine(job, line);
     stream.on('data', (chunk: string) => {
       buf += chunk;
       for (;;) {

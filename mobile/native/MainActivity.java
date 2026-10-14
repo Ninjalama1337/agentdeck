@@ -29,5 +29,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareTargetPlugin.class);
         registerPlugin(MediaInputPlugin.class);
         super.onCreate(savedInstanceState);
+        // Looks for a newer APK every few hours, also while the app is closed.
+        UpdateCheckWorker.schedule(getApplicationContext());
     }
 }

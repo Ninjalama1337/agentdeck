@@ -13,7 +13,14 @@ import {
   RELEASE_REPO,
   type ReleaseInfo,
 } from '../src/update/release.js';
-import { PACKAGED_BLOCKED_REASON, UpdateManager, type UpdateChild } from '../src/update/manager.js';
+import {
+  DEB_BLOCKED_REASON,
+  PACKAGED_BLOCKED_REASON,
+  UpdateManager,
+  type DesktopUpdateRunner,
+  type UpdateChild,
+} from '../src/update/manager.js';
+import { appImageFromExec, findDesktopApp, parseLatestLinuxYml, type DesktopApp } from '../src/update/desktop.js';
 import { loadConfig } from '../src/config.js';
 import { buildApp } from '../src/http/app.js';
 import { signDeviceToken } from '../src/auth/jwt.js';
@@ -71,7 +78,14 @@ interface FakeRun {
   env: Record<string, string>;
 }
 
-function makeManager(opts: { current: string; latest: ReleaseInfo | null | Error; repoRoot?: string; packaged?: boolean }) {
+function makeManager(opts: {
+  current: string;
+  latest: ReleaseInfo | null | Error;
+  repoRoot?: string;
+  packaged?: boolean;
+  desktopApp?: DesktopApp | null;
+  runDesktopUpdate?: DesktopUpdateRunner;
+}) {
   const broadcasts: UpdateInfo[] = [];
   const runs: FakeRun[] = [];
   const fetchRelease = vi.fn(async () => {
@@ -89,6 +103,8 @@ function makeManager(opts: { current: string; latest: ReleaseInfo | null | Error
       if (event === 'update:state') broadcasts.push(payload.update);
     }) as never,
     fetchRelease,
+    findDesktopApp: () => opts.desktopApp ?? null,
+    ...(opts.runDesktopUpdate ? { runDesktopUpdate: opts.runDesktopUpdate } : {}),
     spawn: (script, tag, env) => {
       const stdout = new PassThrough();
       let resolve!: (r: { exitCode?: number }) => void;
@@ -217,6 +233,108 @@ describe('UpdateManager in the desktop app bundle', () => {
   it('a checkout still reports the failure', async () => {
     const { manager } = makeManager({ current: '0.11.0', latest: new Error('GitHub CLI is not logged in') });
     expect((await manager.info()).checkError).toMatch(/not logged in/);
+  });
+  it('updates an AppImage install through the app instead of the checkout', async () => {
+    const calls: Parameters<DesktopUpdateRunner>[0][] = [];
+    const { manager, runs } = makeManager({
+      current: '0.11.0',
+      latest: release('0.12.0'),
+      repoRoot: tmp,
+      packaged: true,
+      desktopApp: { kind: 'appimage', path: '/home/me/AppImages/agentdeck.appimage' },
+      runDesktopUpdate: async (o) => {
+        calls.push(o);
+        o.push('Desktop app replaced with v0.12.0');
+      },
+    });
+    const info = await manager.info();
+    expect(info.blockedReason).toBeUndefined();
+    expect(info.via).toBe('desktop-app');
+    const started = await manager.start();
+    expect(started.job).toMatchObject({ target: '0.12.0', status: 'running' });
+    await manager.idle();
+    expect(runs).toHaveLength(0);
+    expect(calls[0]).toMatchObject({ appImage: '/home/me/AppImages/agentdeck.appimage', release: { tag: 'v0.12.0' }, repo: RELEASE_REPO });
+    expect(manager.snapshot().job).toMatchObject({ status: 'done', output: ['Desktop app replaced with v0.12.0'] });
+  });
+
+  it('reports a failed app update and keeps the old version', async () => {
+    const { manager } = makeManager({
+      current: '0.11.0',
+      latest: release('0.12.0'),
+      packaged: true,
+      desktopApp: { kind: 'appimage', path: '/x.AppImage' },
+      runDesktopUpdate: async () => {
+        throw new Error('The downloaded AppImage does not match its SHA-512 checksum.');
+      },
+    });
+    await manager.start();
+    await manager.idle();
+    expect(manager.snapshot().job).toMatchObject({ status: 'error', error: expect.stringMatching(/SHA-512.*old version/) });
+  });
+
+  it('a .deb install cannot be updated remotely', async () => {
+    const { manager } = makeManager({ current: '0.11.0', latest: release('0.12.0'), packaged: true, desktopApp: { kind: 'deb' } });
+    const info = await manager.info();
+    expect(info.blockedReason).toBe(DEB_BLOCKED_REASON);
+    expect(info.via).toBeUndefined();
+    await expect(manager.start()).rejects.toMatchObject({ statusCode: 409, code: 'UPDATE_UNAVAILABLE' });
+  });
+});
+
+describe('desktop app lookup', () => {
+  it('reads the AppImage from a desktop entry Exec line', () => {
+    expect(appImageFromExec('env DESKTOPINTEGRATION=1 /home/me/AppImages/agentdeck.appimage --no-sandbox %U')).toBe(
+      '/home/me/AppImages/agentdeck.appimage',
+    );
+    expect(appImageFromExec('"/home/me/My Apps/AgentDeck-1.0.0.AppImage" --hidden')).toBe('/home/me/My Apps/AgentDeck-1.0.0.AppImage');
+    expect(appImageFromExec('/opt/AgentDeck/agentdeck %U')).toBeUndefined();
+  });
+
+  it('prefers the registration of the app, then its desktop entries, then the deb', async () => {
+    const root = await fsp.mkdtemp(path.join(tmp, 'lookup-'));
+    const home = path.join(root, 'home');
+    const dataDir = path.join(root, 'data');
+    const appImage = path.join(root, 'agentdeck.appimage');
+    const deb = path.join(root, 'opt-agentdeck');
+    await fsp.mkdir(dataDir, { recursive: true });
+    const env = {};
+    const find = () => findDesktopApp({ dataDir, env, home, debExecutable: deb });
+
+    expect(find()).toBeNull();
+    await fsp.writeFile(deb, '');
+    expect(find()).toEqual({ kind: 'deb' });
+
+    await fsp.writeFile(appImage, '');
+    await fsp.mkdir(path.join(home, '.local', 'share', 'applications'), { recursive: true });
+    await fsp.writeFile(
+      path.join(home, '.local', 'share', 'applications', 'agentdeck.desktop'),
+      `[Desktop Entry]\nName=AgentDeck\nExec=env DESKTOPINTEGRATION=1 ${appImage} --no-sandbox %U\n`,
+    );
+    expect(find()).toEqual({ kind: 'appimage', path: appImage });
+
+    const moved = path.join(root, 'moved.AppImage');
+    await fsp.writeFile(moved, '');
+    await fsp.writeFile(path.join(dataDir, 'desktop-app.json'), JSON.stringify({ appImage: moved, packageType: 'appimage' }));
+    expect(find()).toEqual({ kind: 'appimage', path: moved });
+
+    await fsp.writeFile(path.join(dataDir, 'desktop-app.json'), JSON.stringify({ packageType: 'deb' }));
+    expect(find()).toEqual({ kind: 'deb' });
+  });
+
+  it('parses latest-linux.yml', () => {
+    const yml = [
+      'version: 0.11.31',
+      'files:',
+      '  - url: AgentDeck-0.11.31-linux-x86_64.AppImage',
+      '    sha512: abc==',
+      '    size: 175393603',
+      'path: AgentDeck-0.11.31-linux-x86_64.AppImage',
+      'sha512: abc==',
+      "releaseDate: '2026-10-13T20:57:34.709Z'",
+    ].join('\n');
+    expect(parseLatestLinuxYml(yml)).toEqual({ file: 'AgentDeck-0.11.31-linux-x86_64.AppImage', sha512: 'abc==', size: 175393603 });
+    expect(() => parseLatestLinuxYml('path: ../evil.AppImage\nsha512: x')).toThrow(/no AppImage/);
   });
 });
 

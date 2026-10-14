@@ -121,6 +121,19 @@ bleiben erhalten. APKs vor v0.11.6 kennen das Plugin noch nicht und legen die
 Datei stattdessen in den Downloads-Ordner (dort antippen). Im Browser/PWA ist
 der Button ein schlichter Download-Link.
 
+### Update-Benachrichtigung (auch bei geschlossener App)
+
+Die APK prüft zusätzlich im Hintergrund (`UpdateCheckWorker`, WorkManager,
+alle 6 Stunden bei Netz, erster Lauf direkt nach dem Start), ob das neueste
+GitHub-Release eine neuere APK hat. Dann kommt **einmal pro Version** die
+Benachrichtigung **„AgentDeck vX.Y.Z is available“**. Antippen (oder
+**Install**) öffnet die App und startet sofort Download und Installer — du
+bestätigst nur noch „App aktualisieren?“. Ist die App gerade im Vordergrund,
+bleibt es beim Banner. Abschalten: Android-Einstellungen → Apps → AgentDeck →
+Benachrichtigungen → **App updates**. Der Worker liest das Repo, das die App
+beim Start übergibt (`__RELEASE_REPO__`). Erst ab der APK mit dieser Funktion
+— die Version davor bekommt das Update noch über Banner bzw. Settings.
+
 ### Verteilung
 
 Die APK hängt als `app-debug.apk` am GitHub-Release und wird von dort verteilt

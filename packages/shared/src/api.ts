@@ -458,6 +458,8 @@ export interface UpdateInfo {
   checkError?: string;
   /** Why this server cannot update itself (e.g. not a git checkout). */
   blockedReason?: string;
+  /** `desktop-app`: the server ships in the desktop AppImage — the update replaces the app, then restarts the service. */
+  via?: 'desktop-app';
   /** The running or last update of this server process. */
   job?: UpdateJob;
 }

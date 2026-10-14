@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ApkRelease } from '../util/apkRelease';
 import { errorMessage, useAppStore } from '../store/appStore';
 import { downloadApkNatively, installApkUpdate } from '../util/download';
@@ -9,6 +9,8 @@ interface Props {
   className?: string;
   style?: CSSProperties;
   children: ReactNode;
+  /** A new value starts the in-app update right away (tap on the update notification). */
+  autoStart?: number | null;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * file to Downloads instead — following the link there would open a browser
  * tab that stays behind after every update.
  */
-export function ApkDownloadLink({ release, className, style, children }: Props) {
+export function ApkDownloadLink({ release, className, style, children, autoStart }: Props) {
   const toast = useAppStore((s) => s.toast);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -43,6 +45,14 @@ export function ApkDownloadLink({ release, className, style, children }: Props) 
       setBusy(false);
     }
   };
+
+  const started = useRef<number | null>(null);
+  useEffect(() => {
+    if (!autoStart || started.current === autoStart || !isNativePlatform()) return;
+    started.current = autoStart;
+    void updateInApp();
+    // One start per request; updateInApp itself changes every render.
+  }, [autoStart]);
 
   return (
     <a

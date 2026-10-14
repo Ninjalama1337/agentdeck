@@ -24,6 +24,7 @@ import { createHealthProbe, type FetchLike } from './core/health';
 import { createPairingCoordinator, deviceName, pairWithLocalServer } from './core/pairing';
 import { desktopPaths, xdgPaths } from './core/paths';
 import { systemProcessProbe } from './core/pidfile';
+import { registrationFor, writeRegistration } from './core/registration';
 import { createRestartLimiter } from './core/restartLimit';
 import { isVolatilePath, stageRuntime } from './core/runtimeStage';
 import { toPublicStatus } from './core/serverStatus';
@@ -170,6 +171,15 @@ async function main(): Promise<void> {
     return;
   }
   log(`server origin: ${origin}`);
+
+  // Tell the server where this app lives, so the phone can update it (server/src/update/desktop.ts).
+  const registration = registrationFor(process.env, app.getVersion(), app.isPackaged);
+  if (registration) {
+    void controller
+      .info()
+      .then((info) => writeRegistration(nodeFs, info.dataDir, registration))
+      .catch((err: unknown) => log(`cannot record the app for remote updates: ${String(err)}`));
+  }
 
   // ---- pairing: the shell logs this device in to its own server
   const coordinator = createPairingCoordinator({

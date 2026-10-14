@@ -8,7 +8,9 @@ import { relTime } from '../../util/format';
  * Server self-update: the version this server runs, the latest GitHub
  * release, and one tap to move the server onto it. The server fast-forwards
  * its checkout, builds and restarts — the socket
- * drops for a moment and the app reconnects to the new version.
+ * drops for a moment and the app reconnects to the new version. A server
+ * from the desktop AppImage (`via: 'desktop-app'`) replaces the app instead,
+ * which brings the new server along.
  */
 export function ServerUpdateSection() {
   const update = useAppStore((s) => s.update);
@@ -38,6 +40,7 @@ export function ServerUpdateSection() {
   // A finished job on a server that is about to restart (or is restarting).
   const restarting = job?.status === 'done' || (running && connection !== 'online');
   const latest = update.latest;
+  const desktop = update.via === 'desktop-app';
 
   const check = async () => {
     setChecking(true);
@@ -119,7 +122,11 @@ export function ServerUpdateSection() {
           )}
         >
           <ArrowUpCircle size={16} />
-          {confirm ? 'Tap again — the server restarts' : `Update server to v${latest.version}`}
+          {confirm
+            ? 'Tap again — the server restarts'
+            : desktop
+              ? `Update desktop app & server to v${latest.version}`
+              : `Update server to v${latest.version}`}
         </button>
       )}
 
@@ -142,8 +149,9 @@ export function ServerUpdateSection() {
       )}
 
       <p className="mt-2.5 text-[11.5px] leading-relaxed text-dim">
-        Updates come from GitHub releases. The server builds the release, picks up its Android app and restarts —
-        terminals keep running.
+        {desktop
+          ? 'Updates come from GitHub releases. The server downloads the new desktop app (AppImage), puts it in place of the old one and restarts on the new version — terminals keep running. An open desktop window switches over at its next start.'
+          : 'Updates come from GitHub releases. The server builds the release and restarts — terminals keep running.'}
         {update.checkedAt ? ` Last checked ${relTime(update.checkedAt)}.` : ''}
       </p>
     </section>
