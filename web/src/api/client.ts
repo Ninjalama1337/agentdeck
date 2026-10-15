@@ -25,6 +25,8 @@ import type {
   GitBranches,
   GitChange,
   GitCommitInfo,
+  DailySummary,
+  DigestSettings,
   GitDiffResponse,
   GithubItem,
   GithubItemDetail,
@@ -331,6 +333,18 @@ export const api = {
 
   killProcess(terminalId: string, pid: number): Promise<void> {
     return request('POST', `/api/terminals/${encodeURIComponent(terminalId)}/processes/${pid}/kill`);
+  },
+
+  digestToday(): Promise<DailySummary> {
+    return request('GET', '/api/digest/today', { query: { tzOffset: -new Date().getTimezoneOffset() } });
+  },
+
+  digest(): Promise<DigestSettings> {
+    return request('GET', '/api/digest');
+  },
+
+  setDigest(body: Partial<Pick<DigestSettings, 'enabled' | 'time'>>): Promise<DigestSettings> {
+    return request('PUT', '/api/digest', { json: body });
   },
 
   power(): Promise<PowerStatus> {

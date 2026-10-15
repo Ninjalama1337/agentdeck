@@ -45,6 +45,7 @@ export const DEFAULT_PREFS: Prefs = {
     'team-done': true,
     'team-error': true,
     'usage-limit': true,
+    'daily-summary': true,
     info: true,
   },
   backgroundService: true,

@@ -19,6 +19,7 @@ const KIND_LABELS: Record<DeckNotificationKind, string> = {
   'team-done': 'Team run finished',
   'team-error': 'Team run failed',
   'usage-limit': 'Usage limit almost reached',
+  'daily-summary': 'Evening summary of the day',
   info: 'Other',
 };
 

@@ -30,6 +30,7 @@ import { PreferencesSection } from './PreferencesSection';
 import { PairCodeCard } from '../pairing/PairCodeCard';
 import { ServerUpdateSection } from './ServerUpdateSection';
 import { PowerSection } from './PowerSection';
+import { DigestSection } from './DigestSection';
 import { ArrowLeft } from 'lucide-react';
 import { DesktopSection } from './DesktopSection';
 import { useDesktopLayout } from '../../hooks/useDesktopLayout';
@@ -276,6 +277,7 @@ export function SettingsScreen() {
       </section>
 
       <PowerSection />
+      <DigestSection />
       <ServerUpdateSection />
     </>
   );

@@ -19,6 +19,7 @@ import { worktreeRoutes } from './worktrees.js';
 import { powerRoutes } from './power.js';
 import { resourceRoutes } from './resources.js';
 import { portRoutes } from './ports.js';
+import { digestRoutes } from './digest.js';
 import { routineRoutes } from './routines.js';
 import { accountRoutes } from './accounts.js';
 import { enhanceRoutes } from './enhance.js';
@@ -46,6 +47,7 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await powerRoutes(fastify, deps);
   await resourceRoutes(fastify, deps);
   await portRoutes(fastify, deps);
+  await digestRoutes(fastify, deps);
   await routineRoutes(fastify, deps);
   await accountRoutes(fastify, deps);
   await enhanceRoutes(fastify, deps);

@@ -31,6 +31,7 @@ import { WorktreeStore } from '../git/worktrees.js';
 import { KeepAwake } from '../power/keepAwake.js';
 import { PreviewProxy } from '../preview/proxy.js';
 import { ActiveAccounts } from '../accounts/active.js';
+import { buildDailySummary, DigestScheduler } from '../stats/digest.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -313,6 +314,14 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     notify: (level, text) => broadcast('notify', { level, text }),
   });
 
+  const digest = new DigestScheduler({
+    dataDir: config.dataDir,
+    build: (now) => buildDailySummary(stats, store.listProjects(), now),
+    notify: ({ title, body }) => notifications.notify({ kind: 'daily-summary', title, body }),
+    log,
+  });
+  digest.start();
+
   const activeAccounts = new ActiveAccounts(config.dataDir, (id) => store.getAccount(id));
   const usage = new UsageCollector({ agents, envFor: (agentId) => activeAccounts.envFor(agentId) });
   const usageWatcher = new UsageWatcher({
@@ -355,6 +364,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     keepAwake,
     preview,
     activeAccounts,
+    digest,
     stats,
     pairing,
     limiter,
@@ -428,6 +438,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     routines.stop();
     usageWatcher.stop();
     keepAwake.stop();
+    digest.stop();
     await preview.stop();
     terminals.detachAll();
     adminJobRunner.stop('Server shutting down');

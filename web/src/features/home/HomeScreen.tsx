@@ -10,6 +10,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Chip } from '../../components/ui/Chip';
 import { NewProjectSheet } from '../projects/NewProjectSheet';
 import { AgentSheet } from './AgentSheet';
+import { TodayCard } from './TodayCard';
 import { RoutinesSheet, scheduleLabel } from '../routines/RoutinesSheet';
 import { greeting, relTime } from '../../util/format';
 import { InboxButton } from '../inbox/InboxSheet';
@@ -424,6 +425,7 @@ export function HomeScreen() {
             {projectsSection}
           </div>
           <div className="min-w-0">
+            <TodayCard />
             {liveTerminalsSection}
             {runningSection}
             {agentSection}
@@ -434,6 +436,7 @@ export function HomeScreen() {
       ) : (
         <>
           {quickStartSection}
+          <TodayCard />
           {liveTerminalsSection}
           {agentSection}
           {runningSection}

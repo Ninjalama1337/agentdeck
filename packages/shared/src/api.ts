@@ -756,6 +756,29 @@ export interface GithubItemDetail extends GithubItem {
   thread: { author?: string; body: string; createdAt?: string }[];
 }
 
+/** What the agents did on one day (GET /api/digest/today, evening notification). */
+export interface DailySummary {
+  /** `YYYY-MM-DD` in the asking device's (or the server's) timezone. */
+  day: string;
+  from: number;
+  to: number;
+  totals: StatsBucket;
+  byAgent: (StatsBucket & { agentId: string })[];
+  byProject: (StatsBucket & { projectId: string; projectName: string })[];
+  /** Commits made that day, per project (any author — agents commit as you). */
+  commits: { projectId: string; projectName: string; count: number; subjects: string[] }[];
+  /** What was asked in the latest finished runs. */
+  highlights: { agentId: string; title: string; projectName?: string; status: string }[];
+}
+
+export interface DigestSettings {
+  enabled: boolean;
+  /** Local server time, "HH:MM". */
+  time: string;
+  /** Day the last digest went out, `YYYY-MM-DD`. */
+  lastSent?: string;
+}
+
 /** A port a terminal's process listens on (GET /api/ports). */
 export interface PortInfo {
   terminalId: string;
@@ -840,6 +863,8 @@ export type DeckNotificationKind =
   | 'team-error'
   /** A subscription limit crossed 80 / 95 / 100 % (server-side usage watcher). */
   | 'usage-limit'
+  /** The evening digest of what the agents did today. */
+  | 'daily-summary'
   | 'info';
 
 /**

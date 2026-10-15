@@ -17,6 +17,7 @@ const KINDS: readonly DeckNotificationKind[] = [
   'team-done',
   'team-error',
   'usage-limit',
+  'daily-summary',
   'info',
 ];
 
