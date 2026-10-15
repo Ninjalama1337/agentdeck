@@ -6,6 +6,7 @@ import { downloadFile, isShareCancel } from '../../util/download';
 import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
 import { bytes } from '../../util/format';
+import { FilePreview, isBinaryPreview, previewKind } from './FilePreview';
 
 interface FileEditorSheetProps {
   open: boolean;
@@ -44,6 +45,11 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
   const lastEventTsRef = useRef(0);
 
   const fileName = path.split('/').pop() || path;
+  const pkind = previewKind(path);
+  /** Previewable files open rendered; "Edit" shows the text. */
+  const [mode, setMode] = useState<'preview' | 'edit'>('preview');
+  useEffect(() => setMode('preview'), [path]);
+  const showPreview = pkind !== null && (binary ? isBinaryPreview(pkind) : mode === 'preview');
   const dirPart = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const dirty = !binary && !truncated && text !== savedText;
 
@@ -65,7 +71,8 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
     } catch (err) {
       if (err instanceof ApiError && (err.status === 415 || err.code === 'NON_TEXT')) {
         setBinary(true);
-        toast('info', 'Binary file — preview only');
+        const kind = previewKind(path);
+        if (!kind || !isBinaryPreview(kind)) toast('info', 'Binary file — preview only');
       } else {
         setLoadError(errorMessage(err));
         toast('error', errorMessage(err));
@@ -154,7 +161,7 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
     grow();
     window.addEventListener('resize', grow);
     return () => window.removeEventListener('resize', grow);
-  }, [text, loading, binary, truncated, loadError]);
+  }, [text, loading, binary, truncated, loadError, mode]);
 
   /* ------------------------------------------------------------- Tab */
 
@@ -198,6 +205,27 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
         )}
         {size !== null && <span className="text-[12px] text-dim">{bytes(size)}</span>}
         <span className="flex-1" />
+        {pkind && !binary && !loadError && (
+          <div role="radiogroup" aria-label="View" className="flex rounded-full border border-line bg-white/[0.04] p-0.5">
+            {(['preview', 'edit'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={mode === m}
+                onClick={() => setMode(m)}
+                className={`press rounded-full px-3 py-1 text-[12px] font-medium ${mode === m ? 'bg-surface-3 text-ink' : 'text-dim'}`}
+              >
+                {m === 'preview' ? 'Preview' : 'Edit'}
+              </button>
+            ))}
+          </div>
+        )}
+        {binary && pkind && isBinaryPreview(pkind) && (
+          <Button variant="glass" size="sm" icon={<Download size={14} />} onClick={() => void downloadBinary()}>
+            Download
+          </Button>
+        )}
         {truncated && (
           <span className="rounded-lg border border-warn/30 bg-warn/10 px-2 py-1 text-[11.5px] font-medium text-warn">
             Read-only preview — file &gt; 1 MB
@@ -265,6 +293,8 @@ export function FileEditorSheet({ open, projectId, path, onClose }: FileEditorSh
         <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-dim">
           <Loader2 size={16} className="animate-spin" /> Loading file…
         </div>
+      ) : showPreview && pkind && !loadError ? (
+        <FilePreview projectId={projectId} path={path} kind={pkind} text={text} />
       ) : binary ? (
         <div className="flex flex-col items-center gap-3 px-2 py-14 text-center">
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.06] text-dim">
