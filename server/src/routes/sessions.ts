@@ -103,13 +103,15 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
         throw httpError(400, 'BAD_REQUEST', 'Unknown account for this agent.');
       }
     }
+    // No account chosen: the agent's active one (Settings / usage switcher).
+    const accountId = body.accountId ?? deps.activeAccounts.get(body.agentId)?.id;
     const session = await deps.store.newSession({
       projectId: body.projectId,
       agentId: body.agentId,
       ...(body.model !== undefined ? { model: body.model } : {}),
       ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
       ...(body.permissionMode !== undefined ? { permissionMode: body.permissionMode } : {}),
-      ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
+      ...(accountId !== undefined ? { accountId } : {}),
       ...(body.title !== undefined ? { title: body.title } : {}),
     });
     reply.code(201).send(session);

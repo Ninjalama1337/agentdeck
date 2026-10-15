@@ -4,6 +4,7 @@
  */
 import type {
   Account,
+  AgentId,
   AdminJob,
   AdminJobKey,
   AnswerPermissionRequest,
@@ -578,6 +579,19 @@ export const api = {
   /** Account profiles (env overrides per agent). */
   accounts(agentId?: string): Promise<Account[]> {
     return request('GET', '/api/accounts', { query: { agentId } });
+  },
+
+  activeAccounts(): Promise<Record<string, string>> {
+    return request('GET', '/api/accounts/active');
+  },
+
+  setActiveAccount(agentId: AgentId, accountId: string | null): Promise<Record<string, string>> {
+    return request('PUT', '/api/accounts/active', { json: { agentId, accountId } });
+  },
+
+  /** New account with its own config folder; log in once in a terminal on it. */
+  quickAccount(agentId: 'claude' | 'codex', name: string): Promise<Account> {
+    return request('POST', '/api/accounts/quick', { json: { agentId, name } });
   },
 
   createAccount(body: CreateAccountRequest): Promise<Account> {

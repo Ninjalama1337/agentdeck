@@ -39,7 +39,7 @@ export interface SpawnResult {
 export type UsageSpawn = (
   command: string,
   args: string[],
-  opts: { timeoutMs: number; cwd: string },
+  opts: { timeoutMs: number; cwd: string; env?: Record<string, string> },
 ) => Promise<SpawnResult>;
 
 const defaultSpawn: UsageSpawn = (command, args, opts) =>
@@ -48,12 +48,15 @@ const defaultSpawn: UsageSpawn = (command, args, opts) =>
     cwd: opts.cwd,
     reject: false,
     stdin: 'ignore',
+    ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
   });
 
 export interface CollectorOptions {
   agents: Pick<AgentService, 'infoOf'>;
   /** Spawn function override (tests). */
   spawn?: UsageSpawn;
+  /** Env of the agent's active account — its usage is what the readout shows. */
+  envFor?: (agentId: string) => Record<string, string>;
   /** Availability override (tests); defaults to AgentService detection. */
   isAvailable?: (agentId: AgentId) => boolean;
   /** Codex app-server RPC override; omitted in custom-spawn collectors. */
@@ -437,10 +440,11 @@ export function parseCodexRateLimits(payload: unknown): CodexUsageParse {
 }
 
 /** Reads rate limits through Codex's local app-server protocol; no auth file is read by AgentDeck. */
-function readCodexRateLimitsFromAppServer(): Promise<unknown> {
+function readCodexRateLimitsFromAppServer(env: Record<string, string> = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const child = spawnProcess('codex', ['app-server', '--stdio'], {
       cwd: os.homedir(),
+      env: { ...process.env, ...env },
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
     });
@@ -523,6 +527,7 @@ function readCodexRateLimitsFromAppServer(): Promise<unknown> {
 
 export class UsageCollector {
   private readonly spawn: UsageSpawn;
+  private readonly envFor: (agentId: string) => Record<string, string>;
   private readonly isAvailableFn: (agentId: AgentId) => boolean;
   private readonly readCodexRateLimits?: () => Promise<unknown>;
   private readonly ttlMs: number;
@@ -534,9 +539,10 @@ export class UsageCollector {
 
   constructor(opts: CollectorOptions) {
     this.spawn = opts.spawn ?? defaultSpawn;
+    this.envFor = opts.envFor ?? (() => ({}));
     this.isAvailableFn = opts.isAvailable ?? ((id) => opts.agents.infoOf(id)?.available === true);
     this.readCodexRateLimits =
-      opts.readCodexRateLimits ?? (opts.spawn ? undefined : readCodexRateLimitsFromAppServer);
+      opts.readCodexRateLimits ?? (opts.spawn ? undefined : () => readCodexRateLimitsFromAppServer(this.envFor('codex')));
     this.ttlMs = opts.ttlMs ?? USAGE_TTL_MS;
     this.zcodeCollector = opts.zcodeCollector;
     // Network read of the OpenCode Go quota — off when a custom spawn is used (tests).
@@ -585,6 +591,7 @@ export class UsageCollector {
       res = await this.spawn('claude', ['-p', '/usage'], {
         timeoutMs: CLAUDE_TIMEOUT_MS,
         cwd: os.homedir(),
+        env: this.envFor('claude'),
       });
     } catch (err) {
       return { ...base, reason: `claude -p "/usage" failed: ${errorMessage(err)}`, fetchedAt };
@@ -705,6 +712,7 @@ export class UsageCollector {
       res = await this.spawn('codex', ['login', 'status'], {
         timeoutMs: CODEX_TIMEOUT_MS,
         cwd: os.homedir(),
+        env: this.envFor('codex'),
       });
     } catch (err) {
       return { ...base, reason: `codex login status failed: ${errorMessage(err)}`, fetchedAt };

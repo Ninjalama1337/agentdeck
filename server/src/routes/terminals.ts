@@ -11,6 +11,7 @@ import type { AppDeps } from './deps.js';
 import { listPresets, resolveLaunch } from '../term/presets.js';
 import type { TerminalBroadcasts } from '../term/manager.js';
 import { stateTitle } from '../notify/hub.js';
+import { accountAgentOfPreset } from '../accounts/active.js';
 
 const CreateSchema = z.object({
   projectId: z.string().min(1),
@@ -23,6 +24,8 @@ const CreateSchema = z.object({
   timeZone: z.string().max(64).optional(),
   /** First prompt for an agent preset that takes one (presets with promptArg). */
   prompt: z.string().max(8000).optional(),
+  /** Account profile to run on; omitted = the agent's active account. */
+  accountId: z.string().max(80).optional(),
 });
 
 /** A zone name this machine knows — it ends up in the terminal's environment. */
@@ -97,6 +100,15 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }
     const timeZone = knownTimeZone(body.timeZone);
+    const accountAgent = accountAgentOfPreset(launch.presetId);
+    let env: Record<string, string> = {};
+    if (body.accountId) {
+      const account = deps.store.getAccount(body.accountId);
+      if (!account || account.agentId !== accountAgent) throw httpError(400, 'BAD_REQUEST', 'Unknown account for this agent.');
+      env = account.env;
+    } else if (accountAgent) {
+      env = deps.activeAccounts.envFor(accountAgent);
+    }
     const info = deps.terminals.spawn(
       project.path,
       project.id,
@@ -110,6 +122,7 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
         idleNotify: launch.agent,
         ...(launch.command ? { command: launch.command } : {}),
         ...(timeZone ? { timeZone } : {}),
+        ...(Object.keys(env).length ? { env } : {}),
       },
     );
     reply.code(201).send({ terminal: info });

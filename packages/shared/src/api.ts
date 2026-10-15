@@ -673,6 +673,8 @@ export interface CreateTerminalRequest {
   timeZone?: string;
   /** First prompt for the agent (presets with `promptArg`). */
   prompt?: string;
+  /** Account profile to run on; omitted = the agent's active account. */
+  accountId?: string;
 }
 
 export interface TerminalPresetVariant {

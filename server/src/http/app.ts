@@ -30,6 +30,7 @@ import { alertText, UsageWatcher } from '../usage/watcher.js';
 import { WorktreeStore } from '../git/worktrees.js';
 import { KeepAwake } from '../power/keepAwake.js';
 import { PreviewProxy } from '../preview/proxy.js';
+import { ActiveAccounts } from '../accounts/active.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -312,7 +313,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     notify: (level, text) => broadcast('notify', { level, text }),
   });
 
-  const usage = new UsageCollector({ agents });
+  const activeAccounts = new ActiveAccounts(config.dataDir, (id) => store.getAccount(id));
+  const usage = new UsageCollector({ agents, envFor: (agentId) => activeAccounts.envFor(agentId) });
   const usageWatcher = new UsageWatcher({
     collect: () => usage.collect(),
     record: (usages) => stats.recordPlans(usages),
@@ -352,6 +354,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     worktrees: new WorktreeStore(config.dataDir),
     keepAwake,
     preview,
+    activeAccounts,
     stats,
     pairing,
     limiter,

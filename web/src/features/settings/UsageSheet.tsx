@@ -9,6 +9,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { normalizeMeridiemTimes, resetLabel } from '../../util/format';
 import { usePrefs } from '../../store/prefs';
+import { AccountSwitcher } from './AccountSwitcher';
 import { useNow } from '../../hooks/useNow';
 import {
   countdown,
@@ -137,6 +138,12 @@ function UsageCard({
           <MiniCircleGauge available={false} accent={accent} />
         </div>
         <p className="text-[12.5px] leading-relaxed text-dim">{usage.reason ?? 'No usage data.'}</p>
+        {/* An account without a login yet reads nothing — switching back must stay possible. */}
+        {(usage.agentId === 'claude' || usage.agentId === 'codex') && (
+          <div className="mt-3">
+            <AccountSwitcher agentId={usage.agentId} />
+          </div>
+        )}
       </div>
     );
   }
@@ -197,6 +204,8 @@ function UsageCard({
           <MiniCircleGauge pct={primaryPct} cost={usage.cost} available={usage.available} accent={accent} />
         </div>
       </div>
+
+      {(usage.agentId === 'claude' || usage.agentId === 'codex') && <AccountSwitcher agentId={usage.agentId} />}
 
       {/* Multi-plan switcher (ZCode subscription vs. free tokens) */}
       {usage.plans && usage.plans.length > 0 && (

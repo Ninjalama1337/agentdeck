@@ -66,6 +66,8 @@ export interface SpawnOptions {
   idleNotify?: boolean;
   /** Zone for clock times shown in the terminal (the device's); default is the server's. */
   timeZone?: string;
+  /** Extra environment (an account profile: CLAUDE_CONFIG_DIR, CODEX_HOME …). */
+  env?: Record<string, string>;
 }
 
 export interface TerminalManagerOptions {
@@ -384,6 +386,7 @@ export class TerminalManager {
         AGENTDECK_PROJECT: path.basename(projectPath),
         AGENTDECK_PERSISTENT_TERM: '1',
         ...(opts.timeZone ? { TZ: opts.timeZone } : {}),
+        ...(opts.env ?? {}),
       };
       const ok = createTmuxSession({
         sessionName: sName,
@@ -427,6 +430,7 @@ export class TerminalManager {
             COLORTERM: 'truecolor',
             AGENTDECK_PROJECT: path.basename(projectPath),
             ...(opts.timeZone ? { TZ: opts.timeZone } : {}),
+            ...(opts.env ?? {}),
           } as Record<string, string>,
         });
 

@@ -10,6 +10,7 @@ import { httpError } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import { knownTimeZone, terminalBroadcasts } from './terminals.js';
 import { PRESET_DEFS, resolveLaunch } from '../term/presets.js';
+import { accountAgentOfPreset } from '../accounts/active.js';
 import type { AppDeps } from './deps.js';
 
 const ParallelSchema = z.object({
@@ -52,6 +53,7 @@ export async function worktreeRoutes(fastify: FastifyInstance, deps: AppDeps): P
         idleNotify: launch.agent,
         ...(launch.command ? { command: launch.command } : {}),
         ...(timeZone ? { timeZone } : {}),
+        env: deps.activeAccounts.envFor(accountAgentOfPreset(launch.presetId) ?? ''),
       });
       await deps.worktrees.setTerminal(project.id, wt.name, info.id);
       worktrees.push({ ...wt, terminalId: info.id });
