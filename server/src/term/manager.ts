@@ -19,6 +19,7 @@ import type { TerminalInfo } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
 import { augmentedPath, PRESET_DEFS } from './presets.js';
+import { trackMouseEncoding, type MouseEncoding } from './mouseEncoding.js';
 import { AttentionDetector, isTyped, type AttentionReason } from './attention.js';
 import { classifyScreen, type PromptKind, type Verdict } from '../notify/classify.js';
 import type { DeckNotificationState } from '@agentdeck/shared';
@@ -108,6 +109,8 @@ interface ActiveTerminal {
    */
   screen: InstanceType<typeof xtermHeadless.Terminal>;
   serializer: InstanceType<typeof serializeAddon.SerializeAddon>;
+  /** Mouse encoding the serializer leaves out of snapshots (see mouseEncoding.ts). */
+  mouseEncoding: MouseEncoding;
   attention: AttentionDetector;
   tmuxSession?: string;
   projectPath: string;
@@ -179,7 +182,7 @@ export class TerminalManager {
   private snapshot(t: ActiveTerminal): string {
     try {
       const snap = t.serializer.serialize({ scrollback: REPLAY_SCROLLBACK });
-      if (snap && snap.trim()) return snap;
+      if (snap && snap.trim()) return snap + t.mouseEncoding.modes();
       if (t.tmuxSession) {
         return captureTmuxPane(t.tmuxSession, REPLAY_SCROLLBACK);
       }
@@ -399,6 +402,7 @@ export class TerminalManager {
     const screen = new xtermHeadless.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
+    const mouseEncoding = trackMouseEncoding(screen);
 
     // Query responses (DSR, DA, OSC 10/11) go straight back into the PTY.
     screen.onData((reply) => {
@@ -414,6 +418,7 @@ export class TerminalManager {
       proc,
       screen,
       serializer,
+      mouseEncoding,
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
@@ -534,6 +539,7 @@ export class TerminalManager {
     const screen = new xtermHeadless.Terminal({ cols: info.cols, rows: info.rows, scrollback: SCROLLBACK, allowProposedApi: true });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
+    const mouseEncoding = trackMouseEncoding(screen);
 
     // Pre-populate screen with scrollback from the still-running tmux pane
     const captured = captureTmuxPane(tmuxSession, REPLAY_SCROLLBACK);
@@ -554,6 +560,7 @@ export class TerminalManager {
       proc,
       screen,
       serializer,
+      mouseEncoding,
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
