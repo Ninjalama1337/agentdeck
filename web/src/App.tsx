@@ -30,6 +30,7 @@ import { useUsageTracking } from './hooks/useUsageTracking';
 import { Spinner } from './components/ui/Spinner';
 import { desktopFrame, useDesktopLayout } from './hooks/useDesktopLayout';
 import { matchShortcut, OPEN_PROJECT_SWITCHER } from './util/shortcuts';
+import { openQuickOpen, QuickOpen } from './components/QuickOpen';
 import { attachPaneSync } from './features/code/paneSync';
 import { usePanes } from './features/code/paneStore';
 
@@ -129,6 +130,7 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       if (action.type === 'route') store.navigate(action.route);
+      else if (action.type === 'quick-open') openQuickOpen();
       else window.dispatchEvent(new Event(OPEN_PROJECT_SWITCHER));
     };
     window.addEventListener('keydown', onKey, true);
@@ -369,6 +371,7 @@ export default function App() {
         </>
       )}
       <UsageSheet />
+      <QuickOpen />
       <ActivityHost />
       <ShareSheet />
       <Lightbox />

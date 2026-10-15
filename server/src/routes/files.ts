@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { notFound, httpError } from '../http/errors.js';
 import { resolveInsideRoot } from '../files/sandbox.js';
 import { guessMime, isInlineMime, listDirectory } from '../files/browser.js';
+import { fileIndex } from '../files/fileIndex.js';
 import { sanitizeFileName } from '../util/paths.js';
 import { newFileId } from '../util/ids.js';
 import { signDownloadToken, verifyDownloadToken } from '../auth/downloadTokens.js';
@@ -33,6 +34,12 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
     // Any file access lazily arms the project's live watcher.
     deps.fileWatchers.ensureStarted(project.id, project.path);
     return listDirectory(resolved.abs, resolved.rel, { all: query.all === '1' });
+  });
+
+  // Every file path of the project (quick open searches it on the device).
+  fastify.get('/projects/:id/files/index', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    return fileIndex(project.path);
   });
 
   fastify.get('/projects/:id/files/raw', async (req, reply) => {

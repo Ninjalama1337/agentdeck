@@ -1,6 +1,8 @@
 import { UsageCircleButton } from './UsageCircleButton';
 import { ConnectionPill } from './ConnectionPill';
 import { ServerSwitcher } from './SavedServers';
+import { Search } from 'lucide-react';
+import { openQuickOpen } from './QuickOpen';
 
 /**
  * Always-visible app bar (usage button + connection state). It is the first
@@ -22,7 +24,18 @@ export function TopBar() {
       <div className="mx-auto flex h-[52px] w-full max-w-xl items-center justify-between px-3">
         <UsageCircleButton showLabel={true} />
         <ServerSwitcher />
-        <ConnectionPill className="shrink-0" />
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Search"
+            title="Search terminals, projects, chats and files"
+            onClick={openQuickOpen}
+            className="press tap flex h-9 w-9 items-center justify-center rounded-xl text-dim active:bg-white/10"
+          >
+            <Search size={18} />
+          </button>
+          <ConnectionPill className="shrink-0" />
+        </div>
       </div>
     </header>
   );

@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { Settings } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { LucideIcon } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import type { Route } from '../store/appStore';
 import { UsageCircleButton } from './UsageCircleButton';
+import { openQuickOpen } from './QuickOpen';
 import { ConnectionPill } from './ConnectionPill';
 import { ServerSwitcher } from './SavedServers';
 import { ProjectSwitcher } from './ProjectSwitcher';
@@ -70,6 +71,7 @@ export function Sidebar() {
           <ConnectionPill className="shrink-0" />
           <InboxButton />
         </div>
+        <NavItem label="Search" icon={Search} active={false} shortcut={shortcutLabel('P', mac)} onClick={openQuickOpen} />
         <NavItem
           label="Settings"
           icon={Settings}

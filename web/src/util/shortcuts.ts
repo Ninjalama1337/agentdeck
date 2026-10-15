@@ -1,6 +1,7 @@
 /**
  * Desktop keyboard shortcuts: Ctrl/Cmd+1…5 jump to the tabs, Ctrl/Cmd+, opens
- * Settings, Ctrl/Cmd+K the project switcher. Matching is pure; App.tsx wires it.
+ * Settings, Ctrl/Cmd+K the project switcher, Ctrl/Cmd+P quick open. Matching
+ * is pure; App.tsx wires it.
  */
 import type { Route } from '../store/route';
 
@@ -13,7 +14,7 @@ export const TAB_ROUTES: Route[] = [
   { name: 'files' },
 ];
 
-export type ShortcutAction = { type: 'route'; route: Route } | { type: 'project-switcher' };
+export type ShortcutAction = { type: 'route'; route: Route } | { type: 'project-switcher' } | { type: 'quick-open' };
 
 export interface KeyLike {
   key: string;
@@ -32,7 +33,10 @@ export interface KeyLike {
  * so a terminal user loses nothing, and the tabs stay reachable from the keyboard.
  */
 export function matchShortcut(e: KeyLike, opts: { inTerminal?: boolean } = {}): ShortcutAction | null {
-  if (!(e.ctrlKey || e.metaKey) || (e.ctrlKey && e.metaKey) || e.altKey || e.shiftKey) return null;
+  if (!(e.ctrlKey || e.metaKey) || (e.ctrlKey && e.metaKey) || e.altKey) return null;
+  // Quick open: Ctrl/Cmd+Shift+P everywhere, Ctrl/Cmd+P outside a terminal (where Ctrl+P is "previous command").
+  if (e.key === 'p' || e.key === 'P') return e.shiftKey || !opts.inTerminal ? { type: 'quick-open' } : null;
+  if (e.shiftKey) return null;
   if (/^[1-9]$/.test(e.key)) {
     const route = TAB_ROUTES[Number(e.key) - 1];
     return route ? { type: 'route', route } : null;

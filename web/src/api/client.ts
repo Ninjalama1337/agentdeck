@@ -299,6 +299,11 @@ export const api = {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
   },
 
+  /** Every file path of a project (quick open). */
+  fileIndex(projectId: string): Promise<{ paths: string[]; truncated: boolean }> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/files/index`);
+  },
+
   files(projectId: string, path?: string, all?: boolean): Promise<FileEntry[]> {
     return request('GET', `/api/projects/${encodeURIComponent(projectId)}/files`, {
       query: { path, all: all ? 1 : undefined },
