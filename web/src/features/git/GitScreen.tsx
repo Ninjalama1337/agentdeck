@@ -27,6 +27,7 @@ import { RepoPicker } from '../github/RepoPicker';
 import { relTime } from '../../util/format';
 import { haptic } from '../../util/haptics';
 import { DiffView } from './DiffView';
+import { ReviewSendBar } from './ReviewSend';
 
 const STATE_BADGE: Record<GitChange['state'], { letter: string; color: string }> = {
   modified: { letter: 'M', color: '#F59E0B' },
@@ -250,6 +251,7 @@ function GitScreenInner({ projectId }: { projectId: string }) {
 
           {tab === 'changes' ? (
             <>
+              <ReviewSendBar projectId={projectId} />
               {changes === null ? (
                 <div className="flex flex-col gap-2">
                   {[0, 1, 2].map((i) => (
@@ -524,7 +526,17 @@ function DiffSheet({
 
   return (
     <Sheet open={target !== null} onClose={onClose} title={target?.title} subtitle={target?.hash ? `Commit ${target.hash.slice(0, 8)}` : 'Working tree vs HEAD'}>
-      {diff === null ? <div className="skeleton h-40" /> : <DiffView diff={diff.diff} truncated={diff.truncated} />}
+      {diff === null ? (
+        <div className="skeleton h-40" />
+      ) : (
+        // Review comments belong to the working tree, not to past commits.
+        <DiffView diff={diff.diff} truncated={diff.truncated} projectId={target?.hash ? undefined : projectId} />
+      )}
+      {!target?.hash && (
+        <div className="mt-3">
+          <ReviewSendBar projectId={projectId} />
+        </div>
+      )}
       {target?.path && diff && (
         <button
           type="button"

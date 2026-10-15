@@ -651,6 +651,32 @@ textarea.field {
   padding: 0 12px;
   min-width: max-content;
 }
+.diff > div.commented {
+  box-shadow: inset 3px 0 0 var(--ad-accent, #7c5cff);
+}
+/* Review comments sit under their line, as wide as the visible diff, wrapped. */
+.diff > div.review-note,
+.diff > div.review-editor {
+  position: sticky;
+  left: 0;
+  min-width: 0;
+  width: min(100%, 560px);
+  white-space: normal;
+  margin: 4px 0 6px;
+}
+.diff > div.review-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-family: var(--font-sans, inherit);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ad-ink, #e6e9f0);
+  background: rgba(124, 92, 255, 0.12);
+  border-left: 3px solid #7c5cff;
+  border-radius: 0 10px 10px 0;
+  padding: 6px 6px 6px 10px;
+}
 .diff .add {
   background: rgba(16, 185, 129, 0.13);
   color: #8ff0c7;
