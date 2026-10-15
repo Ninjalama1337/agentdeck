@@ -106,7 +106,7 @@ export class WorktreeStore {
     await this.write(projectId, { ...rec, terminalId });
   }
 
-  async list(projectId: string, liveTerminals: Set<string>): Promise<WorktreeInfo[]> {
+  async list(projectId: string, liveTerminals: Set<string>, projectPath?: string): Promise<WorktreeInfo[]> {
     let files: string[];
     try {
       files = (await fsp.readdir(this.dirOf(projectId))).filter((f) => f.endsWith('.json'));
@@ -121,10 +121,24 @@ export class WorktreeStore {
       const info: WorktreeInfo = { ...rest, ...(terminalId && liveTerminals.has(terminalId) ? { terminalId } : {}) };
       const exists = await fsp.stat(rec.path).then((s) => s.isDirectory()).catch(() => false);
       if (!exists) info.missing = true;
-      else info.stats = await this.stats(rec);
+      else {
+        info.stats = await this.stats(rec);
+        if (projectPath && (await this.isMerged(rec, projectPath))) info.merged = true;
+      }
       out.push(info);
     }
     return out.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  /**
+   * Merged: the branch has its own commits, all of them are in the project's
+   * HEAD, and the worktree holds nothing beyond them.
+   */
+  private async isMerged(rec: Record_, projectPath: string): Promise<boolean> {
+    const tip = (await git(projectPath, ['rev-parse', rec.branch])).stdout.trim();
+    if (!tip || tip === rec.base) return false;
+    if ((await git(projectPath, ['merge-base', '--is-ancestor', tip, 'HEAD'])).exitCode !== 0) return false;
+    return (await git(rec.path, ['status', '--porcelain'])).stdout.trim() === '';
   }
 
   /** Everything the agent changed, uncommitted and untracked files included. */

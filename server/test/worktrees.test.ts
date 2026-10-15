@@ -44,8 +44,11 @@ describe('WorktreeStore', () => {
     expect(listed!.stats).toEqual({ files: 2, add: 2, del: 0 });
     expect((await store.diff('p1', wt.name)).diff).toContain('+new');
 
+    expect(listed!.merged).toBeUndefined();
     await store.apply('p1', project, wt.name);
     expect(fs.readFileSync(path.join(project, 'b.txt'), 'utf8')).toBe('new\n');
+    const [after] = await store.list('p1', new Set(), project);
+    expect(after!.merged).toBe(true);
 
     await store.remove('p1', project, wt.name);
     expect(fs.existsSync(wt.path)).toBe(false);

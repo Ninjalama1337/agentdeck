@@ -475,7 +475,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
         </>
       )}
       {selecting && (
-        <div className="absolute inset-x-3 top-3 z-20 flex items-center gap-2 rounded-2xl border border-accent/40 bg-surface-2/95 p-2 pl-3.5 shadow-lg">
+        // At the bottom: the top lines are what people often want to select.
+        <div className="absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 rounded-2xl border border-accent/40 bg-surface-2/95 p-2 pl-3.5 shadow-lg">
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim">
             {selected.trim() ? selected.replace(/\s+/g, ' ') : 'Touch the first character, drag to the last — release copies'}
           </span>

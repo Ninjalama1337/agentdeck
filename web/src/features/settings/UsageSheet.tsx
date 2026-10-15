@@ -565,8 +565,7 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
           ))}
           <p className="flex items-start gap-1.5 px-1 pb-1 text-[11.5px] leading-relaxed text-dim">
             <Gauge size={13} className="mt-0.5 shrink-0" />
-            The button on the top left displays the currently active tool as a percentage circle.
-            Tap "Select" on any tool above to feature it in the circle.
+            The usage button shows one tool's limits. Tap "Select" on any tool above to show it there.
           </p>
         </div>
       )}

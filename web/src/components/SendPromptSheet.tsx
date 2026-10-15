@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, GitFork, MessageSquareText, Play, SquareTerminal } from 'lucide-react';
 import { errorMessage, useAppStore } from '../store/appStore';
 import { usePrefs } from '../store/prefs';
@@ -17,12 +17,18 @@ export function SendPromptSheet({
   title,
   open,
   onClose,
+  onSent,
+  children,
 }: {
   projectId: string;
   prompt: string;
   title: string;
   open: boolean;
   onClose: () => void;
+  /** The prompt went to an agent (not on close, not when handed to the parallel sheet). */
+  onSent?: () => void;
+  /** Shown above the choices (e.g. the review comments). */
+  children?: ReactNode;
 }) {
   const allTerminals = useAppStore((s) => s.terminals);
   const presets = useAppStore((s) => s.terminalPresets);
@@ -33,6 +39,7 @@ export function SendPromptSheet({
   const chats = [...(sessions ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
 
   const done = (target: string) => {
+    onSent?.();
     onClose();
     useAppStore.getState().openTarget(target);
   };
@@ -61,6 +68,7 @@ export function SendPromptSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="Hand to an agent" subtitle={title}>
+      {children}
       <button type="button" onClick={() => setPreview((v) => !v)} className="press mb-2 flex items-center gap-1 text-[12px] font-medium text-dim">
         {preview ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Prompt
       </button>

@@ -833,6 +833,8 @@ export interface WorktreeInfo {
   stats?: { files: number; add: number; del: number };
   /** The folder is gone (removed outside the app). */
   missing?: boolean;
+  /** Its work is in the project's checkout already — only cleanup is left. */
+  merged?: boolean;
 }
 
 export interface ParallelLaunchRequest {

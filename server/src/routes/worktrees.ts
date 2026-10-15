@@ -29,7 +29,7 @@ export async function worktreeRoutes(fastify: FastifyInstance, deps: AppDeps): P
 
   fastify.get('/projects/:id/worktrees', async (req) => {
     const project = getProjectOr404(deps, (req.params as { id: string }).id);
-    return deps.worktrees.list(project.id, live());
+    return deps.worktrees.list(project.id, live(), project.path);
   });
 
   fastify.post('/projects/:id/parallel', async (req, reply) => {
@@ -79,7 +79,7 @@ export async function worktreeRoutes(fastify: FastifyInstance, deps: AppDeps): P
   fastify.delete('/projects/:id/worktrees/:name', async (req, reply) => {
     const { id, name } = req.params as { id: string; name: string };
     const project = getProjectOr404(deps, id);
-    const all = await deps.worktrees.list(project.id, live());
+    const all = await deps.worktrees.list(project.id, live(), project.path);
     const wt = all.find((w) => w.name === name);
     // The agent goes with its worktree.
     if (wt?.terminalId) deps.terminals.kill(wt.terminalId, terminalBroadcasts(deps));

@@ -94,6 +94,8 @@ export function WorktreesSection({ projectId, onMerged }: { projectId: string; o
                   <span className="shrink-0 text-[11.5px] tabular-nums text-dim">
                     {wt.missing ? (
                       'folder missing'
+                    ) : wt.merged ? (
+                      <span className="font-semibold text-ok">✓ merged</span>
                     ) : s && s.files ? (
                       <>
                         <span className="text-ok">+{s.add}</span> <span className="text-danger">−{s.del}</span> · {s.files} {s.files === 1 ? 'file' : 'files'}
@@ -109,17 +111,27 @@ export function WorktreesSection({ projectId, onMerged }: { projectId: string; o
                 <div className="mt-2 flex flex-wrap gap-1.5 pl-4">
                   <ActionButton icon={FileDiff} label="Diff" onClick={() => setDiffFor(wt)} disabled={!!wt.missing} />
                   {live && <ActionButton icon={SquareTerminal} label="Terminal" onClick={() => useAppStore.getState().openTarget(`terminal:${wt.terminalId}`)} />}
-                  <ActionButton
-                    icon={busy === wt.name ? Loader2 : GitMerge}
-                    label={confirm?.name === wt.name && confirm.action === 'merge' ? 'Tap to merge' : 'Merge'}
-                    accent
-                    onClick={() => void run(wt, 'merge')}
-                    disabled={busy !== null || !!wt.missing || !s?.files}
-                  />
+                  {!wt.merged && (
+                    <ActionButton
+                      icon={busy === wt.name ? Loader2 : GitMerge}
+                      label={confirm?.name === wt.name && confirm.action === 'merge' ? 'Tap to merge' : 'Merge'}
+                      accent
+                      onClick={() => void run(wt, 'merge')}
+                      disabled={busy !== null || !!wt.missing || !s?.files}
+                    />
+                  )}
                   <ActionButton
                     icon={Trash2}
-                    label={confirm?.name === wt.name && confirm.action === 'discard' ? 'Tap to discard' : 'Discard'}
-                    danger
+                    label={
+                      confirm?.name === wt.name && confirm.action === 'discard'
+                        ? wt.merged
+                          ? 'Tap to clean up'
+                          : 'Tap to discard'
+                        : wt.merged
+                          ? 'Clean up'
+                          : 'Discard'
+                    }
+                    danger={!wt.merged}
                     onClick={() => void run(wt, 'discard')}
                     disabled={busy !== null}
                   />
