@@ -17,6 +17,7 @@ import { updateRoutes } from './update.js';
 import { terminalRoutes } from './terminals.js';
 import { worktreeRoutes } from './worktrees.js';
 import { powerRoutes } from './power.js';
+import { resourceRoutes } from './resources.js';
 import { routineRoutes } from './routines.js';
 import { accountRoutes } from './accounts.js';
 import { enhanceRoutes } from './enhance.js';
@@ -42,6 +43,7 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await terminalRoutes(fastify, deps);
   await worktreeRoutes(fastify, deps);
   await powerRoutes(fastify, deps);
+  await resourceRoutes(fastify, deps);
   await routineRoutes(fastify, deps);
   await accountRoutes(fastify, deps);
   await enhanceRoutes(fastify, deps);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Cpu } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
 import { ProjectSwitcher } from '../../components/ProjectSwitcher';
@@ -9,6 +9,7 @@ import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 import { LauncherGrid, LauncherSheet } from './Launcher';
 import { TerminalView, type ModifierRef } from './TerminalView';
 import { KeyBar } from './KeyBar';
+import { openResources } from './ResourcesSheet';
 import { ComposeBar } from './ComposeBar';
 import { sendRaw, sendText } from './termInput';
 import { attachToTerminal } from './termAttach';
@@ -95,6 +96,15 @@ function CodePhone() {
           subtitle={terminals.length ? `${terminals.length} live ${terminals.length === 1 ? 'terminal' : 'terminals'}` : 'Terminals & agents'}
         />
         <InboxButton />
+        <button
+          type="button"
+          aria-label="Resources"
+          title="CPU and memory per terminal"
+          onClick={openResources}
+          className="press flex h-10 w-10 items-center justify-center rounded-full text-dim hover:text-ink active:bg-white/10"
+        >
+          <Cpu size={18} />
+        </button>
         <button
           type="button"
           aria-label="New terminal"

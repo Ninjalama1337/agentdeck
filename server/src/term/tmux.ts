@@ -313,6 +313,22 @@ export function captureTmuxPane(sessionName: string, lines = 1500): string {
   }
 }
 
+/** PID of the process in the session's pane (the login shell), or undefined. */
+export function tmuxPanePid(sessionName: string): number | undefined {
+  const tmux = getTmuxBinary();
+  if (!tmux) return undefined;
+  try {
+    const raw = execFileSync(tmux, ['-S', tmuxSocketPath(), 'list-panes', '-t', sessionName, '-F', '#{pane_pid}'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const pid = Number(raw.split('\n')[0]);
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** List all active AgentDeck tmux session names. */
 export function listTmuxSessions(prefix = 'ad_'): string[] {
   const tmux = getTmuxBinary();

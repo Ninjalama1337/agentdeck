@@ -33,6 +33,7 @@ import {
   tmuxCommand,
   tmuxSocketPath,
   tmuxSessionName,
+  tmuxPanePid,
   createTmuxSession,
   applyTmuxSessionOptions,
   killTmuxSession,
@@ -172,6 +173,16 @@ export class TerminalManager {
     private readonly log: Logger,
     private readonly options: TerminalManagerOptions = {},
   ) {}
+
+  /** Root process of each terminal: the tmux pane's shell, or the PTY's. */
+  rootPids(): { id: string; pid: number }[] {
+    const out: { id: string; pid: number }[] = [];
+    for (const [id, t] of this.active) {
+      const pid = t.tmuxSession ? tmuxPanePid(t.tmuxSession) : t.proc.pid;
+      if (pid) out.push({ id, pid });
+    }
+    return out;
+  }
 
   /** Agent terminals at work: in a turn, or printing within the last minute. */
   busyAgents(now = Date.now()): number {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Columns2, Grid2x2, LayoutPanelLeft, MailWarning as MailDot, Plus, Square, SquareTerminal, X } from 'lucide-react';
+import { ChevronDown, Columns2, Grid2x2, LayoutPanelLeft, MailWarning as MailDot, Plus, Square, SquareTerminal, X, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { TerminalInfo, TerminalPreset } from '@agentdeck/shared';
@@ -11,6 +11,7 @@ import { AgentChips, TerminalDot, TerminalTab, toggleUnread, useConfirmEnd, useT
 import { useUnread } from '../../store/unread';
 import { launchTarget, paneCellClass, paneGridClass, paneOf, type PaneCount } from './paneLayout';
 import { usePanes } from './paneStore';
+import { openResources } from './ResourcesSheet';
 
 /** Desktop terminals take real key presses — there is no sticky Ctrl/Alt. */
 const NO_MODIFIER: ModifierRef = { current: { ctrl: false, alt: false } };
@@ -70,6 +71,15 @@ export function CodePanes() {
           subtitle={terminals.length ? `${terminals.length} live ${terminals.length === 1 ? 'terminal' : 'terminals'}` : 'Terminals & agents'}
         />
         <PaneCountPicker count={count} onChange={(n) => usePanes.getState().setCount(n)} />
+        <button
+          type="button"
+          aria-label="Resources"
+          title="CPU and memory per terminal"
+          onClick={openResources}
+          className="press flex h-10 w-10 items-center justify-center rounded-full text-dim hover:text-ink active:bg-white/10"
+        >
+          <Cpu size={18} />
+        </button>
         <button
           type="button"
           aria-label="New terminal"

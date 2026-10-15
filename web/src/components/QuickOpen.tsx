@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
+  Cpu,
   FileText,
   Folder,
   FolderGit2,
@@ -19,6 +20,7 @@ import { useAppStore } from '../store/appStore';
 import { registerOverlayClose } from '../util/overlayHistory';
 import { rankItems } from '../util/quickOpen';
 import { FileEditorSheet } from '../features/files/FileEditorSheet';
+import { openResources } from '../features/code/ResourcesSheet';
 
 /** Event that opens quick open (shortcut, search buttons). */
 export const OPEN_QUICK_OPEN = 'agentdeck:quick-open';
@@ -116,6 +118,7 @@ export function QuickOpen() {
       { id: 'go:files', group: 'Go to', title: 'Files', icon: Folder, text: 'files', run: go('files') },
       { id: 'go:settings', group: 'Go to', title: 'Settings', icon: Settings, text: 'settings', run: go('settings') },
       { id: 'go:usage', group: 'Go to', title: 'Usage limits', icon: Gauge, text: 'usage limits', run: () => store.setUsageSheetOpen(true) },
+      { id: 'go:resources', group: 'Go to', title: 'Resources — CPU & memory', icon: Cpu, text: 'resources cpu memory processes', run: openResources },
       { id: 'go:activity', group: 'Go to', title: 'Activity — runs, tokens, cost', icon: BarChart3, text: 'activity stats cost tokens', run: () => store.setActivitySheetOpen(true) },
     ];
     for (const t of terminals) {

@@ -33,6 +33,7 @@ import { matchShortcut, OPEN_PROJECT_SWITCHER } from './util/shortcuts';
 import { openQuickOpen, QuickOpen } from './components/QuickOpen';
 import { useUnreadTracking } from './hooks/useUnreadTracking';
 import { ParallelLauncher } from './features/code/ParallelSheet';
+import { ResourcesSheet } from './features/code/ResourcesSheet';
 import { attachPaneSync } from './features/code/paneSync';
 import { usePanes } from './features/code/paneStore';
 
@@ -376,6 +377,7 @@ export default function App() {
       <UsageSheet />
       <QuickOpen />
       <ParallelLauncher />
+      <ResourcesSheet />
       <ActivityHost />
       <ShareSheet />
       <Lightbox />

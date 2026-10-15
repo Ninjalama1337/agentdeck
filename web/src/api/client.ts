@@ -27,6 +27,7 @@ import type {
   GitDiffResponse,
   ParallelLaunchRequest,
   PowerStatus,
+  ResourcesResponse,
   ParallelLaunchResponse,
   WorktreeInfo,
   GitOpResult,
@@ -301,6 +302,14 @@ export const api = {
 
   deleteProject(id: string): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
+  },
+
+  resources(): Promise<ResourcesResponse> {
+    return request('GET', '/api/terminals/resources');
+  },
+
+  killProcess(terminalId: string, pid: number): Promise<void> {
+    return request('POST', `/api/terminals/${encodeURIComponent(terminalId)}/processes/${pid}/kill`);
   },
 
   power(): Promise<PowerStatus> {

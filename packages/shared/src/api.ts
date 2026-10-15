@@ -707,6 +707,31 @@ export interface TerminalPreset {
   promptArg?: string;
 }
 
+/** One process below a terminal (GET /api/terminals/resources). */
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  /** Percent of one core. */
+  cpu: number;
+  /** Resident memory in bytes. */
+  mem: number;
+}
+
+export interface TerminalResources {
+  id: string;
+  cpu: number;
+  mem: number;
+  /** Heaviest first, at most 12; the terminal's own shell first of all. */
+  processes: ProcessInfo[];
+  /** Processes in the tree, also those not listed. */
+  count: number;
+}
+
+export interface ResourcesResponse {
+  terminals: TerminalResources[];
+  system: { load: number; cpus: number; memTotal: number; memFree: number };
+}
+
 /** Keep-awake state of the server machine (GET/PUT /api/power). */
 export interface PowerStatus {
   /** This platform can hold a sleep lock (systemd-inhibit / caffeinate). */
