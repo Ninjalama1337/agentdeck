@@ -120,6 +120,9 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     );
     mouseRef.current = mouse;
     const disposeLongPress = installLongPress(host, (x, y) => {
+      // No soft keyboard while the menu is up (see the inputmode effect below).
+      term.textarea?.setAttribute('inputmode', 'none');
+      term.textarea?.blur();
       const rect = host.getBoundingClientRect();
       setMenu({ x: x - rect.left, y: y - rect.top });
     });
@@ -253,13 +256,15 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
 
   // Compose mode: tapping the terminal must not pop the soft keyboard. (A desktop
   // pane has no compose bar — it types into the terminal, and must keep the focus it was given.)
+  // Neither may the long-press menu or select mode.
+  const touchMenu = menu !== null || selecting;
   useEffect(() => {
     const ta = termRef.current?.textarea;
     if (!ta) return;
-    const composing = compose && !pane;
-    ta.setAttribute('inputmode', composing ? 'none' : 'text');
-    if (composing && document.activeElement === ta) ta.blur();
-  }, [compose, pane]);
+    const quiet = (compose && !pane) || touchMenu;
+    ta.setAttribute('inputmode', quiet ? 'none' : 'text');
+    if (quiet && document.activeElement === ta) ta.blur();
+  }, [compose, pane, touchMenu]);
 
   // Seen while visible; refit when becoming visible (size may have changed).
   useEffect(() => {
@@ -345,7 +350,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       <div
         ref={hostRef}
         className={clsx('term-host min-h-0 flex-1 overflow-hidden', !pane && 'rounded-[16px] border border-line')}
-        style={{ background: TERM_THEME.background }}
+        style={{ background: TERM_THEME.background, WebkitTouchCallout: 'none' }}
         onTouchStart={(e) => {
           if (e.touches.length === 2) pinch.current = { dist: distance(e.touches), size: usePrefs.getState().termFontSize };
         }}

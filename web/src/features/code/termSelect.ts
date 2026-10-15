@@ -69,6 +69,8 @@ export function installLongPress(host: HTMLElement, onLongPress: (x: number, y: 
   let startY = 0;
   let fired = false;
   let touchedAt = 0;
+  /** Until then, mouse events are the browser's emulation of the long press — not a tap. */
+  let swallowUntil = 0;
   const cancel = (): void => {
     if (timer !== null) window.clearTimeout(timer);
     timer = null;
@@ -92,9 +94,19 @@ export function installLongPress(host: HTMLElement, onLongPress: (x: number, y: 
   };
   const onEnd = (e: TouchEvent): void => {
     cancel();
-    if (fired && e.cancelable) e.preventDefault();
+    if (fired) {
+      if (e.cancelable) e.preventDefault();
+      swallowUntil = Date.now() + 800;
+    }
     fired = false;
   };
+  // xterm focuses its input on mousedown — that would flash the soft keyboard.
+  const onMouse = (e: Event): void => {
+    if (!fired && Date.now() > swallowUntil) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const mouseEvents = ['mousedown', 'mouseup', 'click'] as const;
   // Only the touch-triggered menu — a mouse right-click keeps the browser's.
   const onContextMenu = (e: Event): void => {
     if (Date.now() - touchedAt < 2000) e.preventDefault();
@@ -104,7 +116,9 @@ export function installLongPress(host: HTMLElement, onLongPress: (x: number, y: 
   host.addEventListener('touchend', onEnd, { passive: false });
   host.addEventListener('touchcancel', cancel, { passive: true });
   host.addEventListener('contextmenu', onContextMenu);
+  for (const type of mouseEvents) host.addEventListener(type, onMouse, true);
   return () => {
+    for (const type of mouseEvents) host.removeEventListener(type, onMouse, true);
     cancel();
     host.removeEventListener('touchstart', onStart);
     host.removeEventListener('touchmove', onMove);
