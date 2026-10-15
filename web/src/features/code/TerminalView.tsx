@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, ChevronsDown, RotateCcw, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronsDown, Copy, RotateCcw, TextSelect, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -14,6 +14,7 @@ import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode
 import { openExternal } from '../../util/openExternal';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
+import { copyText, installLongPress, installTouchSelect } from './termSelect';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -69,6 +70,11 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   const mouseRef = useRef<MouseMode | null>(null);
   const endedRef = useRef(false);
   const [ended, setEnded] = useState<number | null>(null);
+  /** Long-press menu, at a position inside the terminal. */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Select mode: the finger selects text, lifting it copies. */
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState('');
   const fontSize = usePrefs((s) => s.termFontSize);
   const compose = usePrefs((s) => s.termCompose);
 
@@ -113,6 +119,10 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       },
     );
     mouseRef.current = mouse;
+    const disposeLongPress = installLongPress(host, (x, y) => {
+      const rect = host.getBoundingClientRect();
+      setMenu({ x: x - rect.left, y: y - rect.top });
+    });
     const viewport = host.querySelector<HTMLElement>('.xterm-viewport');
     if (viewport) {
       viewport.style.touchAction = 'pan-y';
@@ -213,6 +223,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       unsubscribeReconnect();
       unsubscribe();
       disposeTouchScroll();
+      disposeLongPress();
       mouse.dispose();
       mouseRef.current = null;
       disposeIme();
@@ -266,6 +277,47 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     return () => window.clearTimeout(t);
   }, [visible, id]);
 
+  // Select mode takes over the touches until text was copied or it is cancelled.
+  useEffect(() => {
+    const term = termRef.current;
+    const host = hostRef.current;
+    if (!selecting || !term || !host) return;
+    const dispose = installTouchSelect(term, host, setSelected, (text) => {
+      setSelecting(false);
+      void copy(text);
+    });
+    return () => {
+      dispose();
+      term.clearSelection();
+      setSelected('');
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selecting]);
+
+  useEffect(() => {
+    if (!visible) {
+      setMenu(null);
+      setSelecting(false);
+    }
+  }, [visible]);
+
+  const copy = async (text: string) => {
+    const toast = useAppStore.getState().toast;
+    if (!text.trim()) return;
+    if (await copyText(text)) toast('info', 'Copied to clipboard');
+    else toast('error', 'Clipboard unavailable');
+  };
+
+  /** Text currently on screen, trailing blank lines dropped. */
+  const screenText = () => {
+    const term = termRef.current;
+    if (!term) return '';
+    const buf = term.buffer.active;
+    const lines: string[] = [];
+    for (let y = buf.viewportY; y < buf.viewportY + term.rows; y++) lines.push(buf.getLine(y)?.translateToString(true) ?? '');
+    return lines.join('\n').replace(/\s+$/, '');
+  };
+
   // Pinch to zoom the font.
   const pinch = useRef<{ dist: number; size: number } | null>(null);
   const distance = (t: React.TouchList) => {
@@ -309,7 +361,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       />
       <div
         className={clsx(
-          'absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-xl border border-line bg-surface-2/90 p-1 shadow-lg backdrop-blur-sm',
+          // Centred on the right edge: the top-right corner is where TUIs put their close buttons.
+          'absolute right-3 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-line bg-surface-2/90 p-1 shadow-lg backdrop-blur-sm',
           pane && 'opacity-0 transition-opacity focus-within:opacity-100 group-hover/pane:opacity-100',
         )}
       >
@@ -341,6 +394,57 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           <ChevronsDown size={15} />
         </button>
       </div>
+      {menu && (
+        <>
+          <div className="absolute inset-0 z-20" onPointerDown={() => setMenu(null)} />
+          <div
+            role="menu"
+            className="absolute z-30 w-48 rounded-xl border border-line-strong bg-surface-2 p-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+            style={{
+              left: Math.max(8, Math.min(menu.x, (hostRef.current?.clientWidth ?? 0) - 200)),
+              top: Math.max(8, Math.min(menu.y, (hostRef.current?.clientHeight ?? 0) - 100)),
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                setSelecting(true);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-[13.5px] active:bg-white/[0.07]"
+            >
+              <TextSelect size={15} className="text-dim" /> Select text
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                void copy(screenText());
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-[13.5px] active:bg-white/[0.07]"
+            >
+              <Copy size={15} className="text-dim" /> Copy screen
+            </button>
+          </div>
+        </>
+      )}
+      {selecting && (
+        <div className="absolute inset-x-3 top-3 z-20 flex items-center gap-2 rounded-2xl border border-accent/40 bg-surface-2/95 p-2 pl-3.5 shadow-lg">
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim">
+            {selected.trim() ? selected.replace(/\s+/g, ' ') : 'Touch the first character, drag to the last — release copies'}
+          </span>
+          <button
+            type="button"
+            aria-label="Cancel selection"
+            onClick={() => setSelecting(false)}
+            className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-dim active:bg-white/10"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
       {ended !== null && (
         <div className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-2xl border border-line bg-surface-2/95 p-2 pl-3.5 shadow-lg">
           <span className="min-w-0 flex-1 text-[12.5px] text-dim">
