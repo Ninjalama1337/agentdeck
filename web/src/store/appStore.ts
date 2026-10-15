@@ -396,7 +396,7 @@ export interface AppStore {
     projectId: string,
     cols: number,
     rows: number,
-    launch?: Pick<CreateTerminalRequest, 'presetId' | 'variantId' | 'command' | 'title'>,
+    launch?: Pick<CreateTerminalRequest, 'presetId' | 'variantId' | 'command' | 'title' | 'prompt'>,
   ): Promise<TerminalInfo>;
   refreshTerminalPresets(force?: boolean): Promise<void>;
   /** Tells the server the user looked at a terminal (clears attention). */

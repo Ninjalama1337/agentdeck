@@ -671,6 +671,8 @@ export interface CreateTerminalRequest {
   title?: string;
   /** IANA zone of the device ("Europe/Berlin") — clock times in the terminal follow it, not the server's zone. */
   timeZone?: string;
+  /** First prompt for the agent (presets with `promptArg`). */
+  prompt?: string;
 }
 
 export interface TerminalPresetVariant {
@@ -730,6 +732,26 @@ export interface TerminalResources {
 export interface ResourcesResponse {
   terminals: TerminalResources[];
   system: { load: number; cpus: number; memTotal: number; memFree: number };
+}
+
+/** An issue or pull request of the project's GitHub repo (via `gh`). */
+export interface GithubItem {
+  kind: 'issue' | 'pr';
+  number: number;
+  title: string;
+  url: string;
+  author?: string;
+  labels: string[];
+  updatedAt?: string;
+  comments?: number;
+  /** PRs: source branch and draft state. */
+  headRef?: string;
+  draft?: boolean;
+}
+
+export interface GithubItemDetail extends GithubItem {
+  body: string;
+  thread: { author?: string; body: string; createdAt?: string }[];
 }
 
 /** A port a terminal's process listens on (GET /api/ports). */

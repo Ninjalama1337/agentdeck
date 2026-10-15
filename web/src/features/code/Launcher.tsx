@@ -12,6 +12,8 @@ export interface LaunchSpec {
   variantId?: string;
   command?: string;
   title?: string;
+  /** First prompt for an agent that takes one on start (preset.promptArg). */
+  prompt?: string;
 }
 
 const RECENT_KEY = 'agentdeck:recent-commands';

@@ -14,19 +14,25 @@ const MAX_AGENTS = 4;
 /** Event that opens the parallel sheet (launcher button). */
 export const OPEN_PARALLEL = 'agentdeck:parallel';
 
-export function openParallel(): void {
-  window.dispatchEvent(new Event(OPEN_PARALLEL));
+/** Opens the parallel sheet, optionally with the task already filled in. */
+export function openParallel(prompt?: string): void {
+  window.dispatchEvent(new CustomEvent<string | undefined>(OPEN_PARALLEL, { detail: prompt }));
 }
 
 /** Mounted once in the app; opens on {@link openParallel}. */
 export function ParallelLauncher() {
   const [open, setOpen] = useState(false);
+  const [initial, setInitial] = useState<{ prompt: string; seq: number } | null>(null);
   useEffect(() => {
-    const show = () => setOpen(true);
+    const show = (e: Event) => {
+      const prompt = (e as CustomEvent<string | undefined>).detail;
+      if (typeof prompt === 'string') setInitial((prev) => ({ prompt, seq: (prev?.seq ?? 0) + 1 }));
+      setOpen(true);
+    };
     window.addEventListener(OPEN_PARALLEL, show);
     return () => window.removeEventListener(OPEN_PARALLEL, show);
   }, []);
-  return <ParallelSheet open={open} onClose={() => setOpen(false)} />;
+  return <ParallelSheet open={open} onClose={() => setOpen(false)} initial={initial} />;
 }
 
 /**
@@ -34,7 +40,16 @@ export function ParallelLauncher() {
  * gets its own git worktree and branch, works on the same task, and the Git
  * tab compares the results and merges the best one.
  */
-export function ParallelSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ParallelSheet({
+  open,
+  onClose,
+  initial,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** A task handed over from elsewhere (GitHub issue); `seq` changes per hand-over. */
+  initial?: { prompt: string; seq: number } | null;
+}) {
   const presets = useAppStore((s) => s.terminalPresets);
   const projectId = useAppStore((s) => s.activeProjectId);
   const project = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
@@ -42,6 +57,9 @@ export function ParallelSheet({ open, onClose }: { open: boolean; onClose: () =>
   const [prompt, setPrompt] = useState('');
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (initial) setPrompt(initial.prompt);
+  }, [initial]);
 
   const eligible = useMemo(() => (presets ?? []).filter((p) => p.kind === 'agent' && p.available && p.promptArg), [presets]);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);

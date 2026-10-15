@@ -27,7 +27,7 @@ import {
   gitStatus,
   sanitizeCloneName,
 } from '../git/gitOps.js';
-import { listGithubRepos } from '../git/github.js';
+import { githubItemDetail, listGithubItems, listGithubRepos } from '../git/github.js';
 import type { AppDeps } from './deps.js';
 
 function getProjectOr404(deps: AppDeps, id: string): Project {
@@ -308,6 +308,19 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
   });
 
   // GitHub ------------------------------------------------------------------
+
+  fastify.get('/projects/:id/github/items', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    return listGithubItems(project.path);
+  });
+
+  fastify.get('/projects/:id/github/:kind/:number', async (req) => {
+    const params = z
+      .object({ id: z.string(), kind: z.enum(['issue', 'pr']), number: z.coerce.number().int().positive() })
+      .parse(req.params);
+    const project = getProjectOr404(deps, params.id);
+    return githubItemDetail(project.path, params.kind, params.number);
+  });
 
   fastify.get('/github/repos', async (req) => {
     const query = z

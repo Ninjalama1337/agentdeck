@@ -21,6 +21,8 @@ const CreateSchema = z.object({
   command: z.string().max(1000).optional(),
   title: z.string().max(80).optional(),
   timeZone: z.string().max(64).optional(),
+  /** First prompt for an agent preset that takes one (presets with promptArg). */
+  prompt: z.string().max(8000).optional(),
 });
 
 /** A zone name this machine knows — it ends up in the terminal's environment. */
@@ -90,7 +92,7 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const project = getProjectOr404(deps, body.projectId);
     let launch: ReturnType<typeof resolveLaunch>;
     try {
-      launch = resolveLaunch(body.presetId, body.variantId, body.command);
+      launch = resolveLaunch(body.presetId, body.variantId, body.command, body.prompt);
     } catch (err) {
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }

@@ -29,6 +29,7 @@ import { haptic } from '../../util/haptics';
 import { DiffView } from './DiffView';
 import { ReviewSendBar } from './ReviewSend';
 import { WorktreesSection } from './WorktreesSection';
+import { GithubPanel } from './GithubPanel';
 
 const STATE_BADGE: Record<GitChange['state'], { letter: string; color: string }> = {
   modified: { letter: 'M', color: '#F59E0B' },
@@ -67,7 +68,7 @@ function GitScreenInner({ projectId }: { projectId: string }) {
   const filesVersion = useAppStore((s) => s.filesVersion[projectId] ?? 0);
   const project = projects.find((p) => p.id === projectId);
 
-  const [tab, setTab] = useState<'changes' | 'history'>('changes');
+  const [tab, setTab] = useState<'changes' | 'history' | 'github'>('changes');
   const [status, setStatus] = useState<ProjectGitInfo | null>(null);
   const [notRepo, setNotRepo] = useState(false);
   const [changes, setChanges] = useState<GitChange[] | null>(null);
@@ -234,8 +235,8 @@ function GitScreenInner({ projectId }: { projectId: string }) {
           </section>
 
           {/* segmented control */}
-          <div className="grid grid-cols-2 rounded-2xl border border-line bg-surface p-1">
-            {(['changes', 'history'] as const).map((t) => (
+          <div className="grid grid-cols-3 rounded-2xl border border-line bg-surface p-1">
+            {(['changes', 'history', 'github'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -245,7 +246,7 @@ function GitScreenInner({ projectId }: { projectId: string }) {
                   tab === t ? 'bg-surface-3 text-ink shadow' : 'text-dim',
                 )}
               >
-                {t === 'changes' ? `Changes${changes?.length ? ` (${changes.length})` : ''}` : 'History'}
+                {t === 'changes' ? `Changes${changes?.length ? ` (${changes.length})` : ''}` : t === 'history' ? 'History' : 'GitHub'}
               </button>
             ))}
           </div>
@@ -356,6 +357,8 @@ function GitScreenInner({ projectId }: { projectId: string }) {
                 </section>
               )}
             </>
+          ) : tab === 'github' ? (
+            <GithubPanel projectId={projectId} />
           ) : (
             <section className="glass overflow-hidden p-0">
               {log === null ? (

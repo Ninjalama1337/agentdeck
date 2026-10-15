@@ -25,6 +25,8 @@ import type {
   GitChange,
   GitCommitInfo,
   GitDiffResponse,
+  GithubItem,
+  GithubItemDetail,
   ParallelLaunchRequest,
   PortInfo,
   PowerStatus,
@@ -304,6 +306,14 @@ export const api = {
 
   deleteProject(id: string): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
+  },
+
+  githubItems(projectId: string): Promise<GithubItem[]> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/github/items`);
+  },
+
+  githubItem(projectId: string, kind: 'issue' | 'pr', number: number): Promise<GithubItemDetail> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/github/${kind}/${number}`);
   },
 
   ports(): Promise<PortInfo[]> {
