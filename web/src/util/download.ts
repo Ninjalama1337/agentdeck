@@ -137,6 +137,20 @@ export function configureNativeUpdateCheck(): void {
   void native?.configureUpdates?.({ repo: RELEASE_REPO })?.catch?.(() => undefined);
 }
 
+/**
+ * APK only: the versionName Android has installed, or null (browser, or an
+ * APK built before the method existed).
+ */
+export async function installedApkVersion(): Promise<string | null> {
+  const native = isNativePlatform() ? window.Capacitor?.Plugins?.ApkInstall : undefined;
+  try {
+    const res = (await native?.version?.()) as { version?: unknown } | undefined;
+    return typeof res?.version === 'string' ? res.version : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True for the rejection of a share sheet the user closed. */
 export function isShareCancel(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';

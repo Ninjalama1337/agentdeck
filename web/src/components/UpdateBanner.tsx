@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
 import { ApkDownloadLink } from './ApkDownloadLink';
-import { apkUpdateAvailable, type ApkRelease } from '../util/apkRelease';
+import { apkUpdateAvailable, runningApkVersion, type ApkRelease } from '../util/apkRelease';
+import { installedApkVersion } from '../util/download';
 import { isNativePlatform } from '../util/platform';
 import { useAppStore } from '../store/appStore';
 
@@ -31,8 +32,29 @@ export function UpdateBanner({ apk }: { apk: ApkRelease | null }) {
   const installRequest = useAppStore((s) => s.apkInstallRequest);
 
   const native = isNativePlatform();
+  /** undefined = still asking Android; null = unknown (older APK). */
+  const [installed, setInstalled] = useState<string | null | undefined>(native ? undefined : null);
+
+  useEffect(() => {
+    if (!native) return;
+    let live = true;
+    void installedApkVersion().then((v) => {
+      if (!live) return;
+      setInstalled(v);
+      // A newer APK than this bundle: the service worker served the old one.
+      // Fetch the new worker — it reloads the page once it takes over.
+      if (v && runningApkVersion(__APK_VERSION__, v) !== __APK_VERSION__) {
+        void navigator.serviceWorker?.getRegistration().then((reg) => reg?.update()).catch(() => undefined);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [native]);
+
   const version = apk?.version;
-  const updateAvailable = native && apkUpdateAvailable(__APK_VERSION__, apk);
+  const updateAvailable =
+    native && installed !== undefined && apkUpdateAvailable(runningApkVersion(__APK_VERSION__, installed), apk);
 
   if (!apk || !updateAvailable || !version || (dismissedVersion === version && !installRequest)) return null;
 

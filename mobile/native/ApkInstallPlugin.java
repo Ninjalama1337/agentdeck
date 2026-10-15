@@ -49,6 +49,21 @@ public class ApkInstallPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * The installed versionName. The web bundle's own constant can be stale:
+     * right after an update the service worker still serves the old bundle.
+     */
+    @PluginMethod
+    public void version(PluginCall call) {
+        JSObject result = new JSObject();
+        try {
+            result.put("version", getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).versionName);
+        } catch (Exception e) {
+            result.put("version", (String) null);
+        }
+        call.resolve(result);
+    }
+
     @PluginMethod
     public void install(final PluginCall call) {
         // Content URIs for the installer need Android 7.

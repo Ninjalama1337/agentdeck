@@ -86,6 +86,17 @@ export async function fetchLatestApkRelease(
   }
 }
 
+/**
+ * Version the update check compares against: what Android has installed when
+ * it is known and newer than the bundle's constant — right after an APK
+ * update the service worker can still serve the previous bundle, whose
+ * constant would offer the update just installed.
+ */
+export function runningApkVersion(bundled: string, installed: string | null): string {
+  if (!installed || !/^\d+\.\d+\.\d+/.test(installed)) return bundled;
+  return compareVersions(bundled, installed) < 0 ? installed : bundled;
+}
+
 /** True when the release is newer than the version this build carries. */
 export function apkUpdateAvailable(current: string, release: ApkRelease | null): boolean {
   return release !== null && compareVersions(current, release.version) < 0;

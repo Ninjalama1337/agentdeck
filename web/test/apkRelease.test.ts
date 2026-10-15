@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  runningApkVersion,
   apkUpdateAvailable,
   fetchLatestApkRelease,
   parseLatestRelease,
@@ -74,5 +75,18 @@ describe('fetchLatestApkRelease', () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
     expect(await fetchLatestApkRelease({ repo: 'o/r', fetch: throws })).toBeNull();
+  });
+});
+
+describe('runningApkVersion (stale bundle after an APK update)', () => {
+  it('takes the installed version when the service worker still serves an older bundle', () => {
+    expect(runningApkVersion('0.11.34', '0.11.35')).toBe('0.11.35');
+    expect(apkUpdateAvailable(runningApkVersion('0.11.34', '0.11.35'), { version: '0.11.35', tag: 'v0.11.35', url: 'u' })).toBe(false);
+  });
+
+  it('keeps the bundled version when Android does not say or says less', () => {
+    expect(runningApkVersion('0.11.35', null)).toBe('0.11.35');
+    expect(runningApkVersion('0.11.35', '1.0')).toBe('0.11.35');
+    expect(runningApkVersion('0.11.35', '0.11.34')).toBe('0.11.35');
   });
 });

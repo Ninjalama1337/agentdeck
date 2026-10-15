@@ -35,6 +35,11 @@ export interface AutoUpdateDeps {
   /** Version the user chose to skip (StateStore.updateIgnored). */
   ignoredVersion?: string;
   rememberIgnored(version: string): void | Promise<void>;
+  /**
+   * Versions already offered while this app runs: a "Later" holds until the
+   * next start or a newer release, so the periodic check does not nag.
+   */
+  offered?: Set<string>;
   /** Runs before the app quits to install: flush state and mark the quit as ours. */
   prepareRestart(): Promise<void> | void;
 }
@@ -67,6 +72,12 @@ export async function runAutoUpdate(deps: AutoUpdateDeps): Promise<void> {
     return;
   }
 
+  if (deps.offered?.has(version)) {
+    log(`update ${version} was already offered`);
+    return;
+  }
+  deps.offered?.add(version);
+
   const answer = await prompts.available(version);
   if (answer === 'ignore') {
     await deps.rememberIgnored(version);
@@ -86,4 +97,35 @@ export async function runAutoUpdate(deps: AutoUpdateDeps): Promise<void> {
   if ((await prompts.ready(version)) !== 'restart') return;
   await deps.prepareRestart();
   engine.quitAndInstall();
+}
+
+/** How often a running app looks for a release (same cadence as the Android check). */
+export const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Runs `check` once after `firstDelayMs`, then every `intervalMs` — the app
+ * mostly lives in the background for days, a check at start alone never sees
+ * a release. A pass still running (a dialog is open) is not started twice.
+ */
+export function scheduleUpdateChecks(
+  check: () => Promise<void>,
+  options: {
+    firstDelayMs: number;
+    intervalMs?: number;
+    timers?: { setTimeout: typeof setTimeout; setInterval: typeof setInterval };
+  },
+): void {
+  const timers = options.timers ?? { setTimeout, setInterval };
+  let running = false;
+  const pass = (): void => {
+    if (running) return;
+    running = true;
+    void check()
+      .catch(() => undefined)
+      .finally(() => {
+        running = false;
+      });
+  };
+  timers.setTimeout(pass, options.firstDelayMs).unref?.();
+  timers.setInterval(pass, options.intervalMs ?? UPDATE_INTERVAL_MS).unref?.();
 }

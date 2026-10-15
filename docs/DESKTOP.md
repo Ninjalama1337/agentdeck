@@ -202,8 +202,10 @@ Server seine eigene letzte Ansicht.
 ## Updates
 
 - **App:** Die App aktualisiert sich selbst (`electron-updater`, nur gepackt).
-  Beim Start prüft sie das neueste Release, fragt (Herunterladen & installieren /
-  Später / Diese Version ignorieren), lädt und bietet den Neustart an.
+  Kurz nach dem Start und danach alle 6 Stunden prüft sie das neueste Release
+  (sie läuft meist tagelang im Hintergrund), fragt (Herunterladen & installieren /
+  Später / Diese Version ignorieren), lädt und bietet den Neustart an. Jede Version
+  wird pro Lauf einmal angeboten; „Später“ gilt bis zum nächsten Start oder Release.
   **AppImage:** das neue AppImage ersetzt das alte an seiner Stelle (Delta-Update,
   kein Passwort). **deb:** das Paket wird über die Paketverwaltung installiert
   (pkexec/sudo-Prompt). Das geht nur, solange die Releases ohne Anmeldung lesbar

@@ -21,6 +21,15 @@ export interface UpdateCheckOptions {
   prepareRestart(): Promise<void> | void;
 }
 
+/** Versions offered in this run (see AutoUpdateDeps.offered). */
+const offered = new Set<string>();
+
+/** A dialog on a hidden or minimised window stays invisible — then it goes up on its own. */
+function dialogParent(options: UpdateCheckOptions): BrowserWindow | null {
+  const win = options.window();
+  return win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() ? win : null;
+}
+
 export async function checkForUpdate(options: UpdateCheckOptions): Promise<void> {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -32,9 +41,9 @@ export async function checkForUpdate(options: UpdateCheckOptions): Promise<void>
   };
 
   const prompts: UpdatePrompts = {
-    available: (version) => updateAvailable(options.window(), version),
-    ready: (version) => updateReady(options.window(), version),
-    failed: (message) => updateFailed(options.window(), message),
+    available: (version) => updateAvailable(dialogParent(options), version),
+    ready: (version) => updateReady(dialogParent(options), version),
+    failed: (message) => updateFailed(dialogParent(options), message),
   };
 
   await runAutoUpdate({
@@ -46,5 +55,6 @@ export async function checkForUpdate(options: UpdateCheckOptions): Promise<void>
       await options.state.update({ updateIgnored: version });
     },
     prepareRestart: options.prepareRestart,
+    offered,
   });
 }

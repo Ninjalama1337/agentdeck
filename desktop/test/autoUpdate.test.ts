@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runAutoUpdate, type UpdateEngine, type UpdatePrompts } from '../src/core/autoUpdate';
+import { runAutoUpdate, scheduleUpdateChecks, type UpdateEngine, type UpdatePrompts } from '../src/core/autoUpdate';
 
 interface Harness {
   engine: UpdateEngine;
@@ -144,5 +144,60 @@ describe('runAutoUpdate', () => {
     await runAutoUpdate(deps(h));
     expect(h.engine.autoDownload).toBe(false);
     expect(h.engine.autoInstallOnAppQuit).toBe(false);
+  });
+});
+
+describe('periodic checks', () => {
+  it('offers a version once per run, a newer one again', async () => {
+    const offered = new Set<string>();
+    let version = '1.4.0';
+    const asked: string[] = [];
+    const run = () =>
+      runAutoUpdate({
+        engine: {
+          autoDownload: true,
+          autoInstallOnAppQuit: true,
+          checkForUpdates: async () => ({ isUpdateAvailable: true, updateInfo: { version } }),
+          downloadUpdate: async () => undefined,
+          quitAndInstall: () => undefined,
+        },
+        prompts: {
+          available: async (v) => {
+            asked.push(v);
+            return 'later';
+          },
+          ready: async () => 'later',
+          failed: async () => undefined,
+        },
+        log: () => undefined,
+        rememberIgnored: () => undefined,
+        prepareRestart: () => undefined,
+        offered,
+      });
+    await run();
+    await run();
+    version = '1.5.0';
+    await run();
+    expect(asked).toEqual(['1.4.0', '1.5.0']);
+  });
+
+  it('checks after the first delay and then on every interval, never twice at once', async () => {
+    vi.useFakeTimers();
+    try {
+      let release: (() => void) | null = null;
+      const check = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
+      scheduleUpdateChecks(check, { firstDelayMs: 1000, intervalMs: 5000 });
+      expect(check).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(check).toHaveBeenCalledTimes(1);
+      // The first pass still waits on a dialog: the interval skips.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(check).toHaveBeenCalledTimes(1);
+      release!();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(check).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

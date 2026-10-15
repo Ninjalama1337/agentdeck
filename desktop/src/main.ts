@@ -38,6 +38,7 @@ import * as dialogs from './dialogs';
 import { registerIpc } from './ipc';
 import { buildMenu } from './menu';
 import { checkForUpdate } from './updates';
+import { scheduleUpdateChecks } from './core/autoUpdate';
 import { createMainWindow, PARTITION } from './window';
 
 const HIDDEN = process.argv.includes(HIDDEN_FLAG);
@@ -370,6 +371,8 @@ async function main(): Promise<void> {
     await win?.loadURL(`${origin}/`);
   }
 
+  /** The update checks run for the life of the app, not per window. */
+  let updatesScheduled = false;
   async function openWindow(): Promise<void> {
     if (win && !win.isDestroyed()) {
       if (win.isMinimized()) win.restore();
@@ -430,17 +433,18 @@ async function main(): Promise<void> {
         void controller.refresh().catch(() => undefined);
       }, STATUS_POLL_MS);
     }
-    if (app.isPackaged && process.env.AGENTDECK_NO_UPDATE_CHECK !== '1') {
-      setTimeout(
+    if (!updatesScheduled && app.isPackaged && process.env.AGENTDECK_NO_UPDATE_CHECK !== '1') {
+      updatesScheduled = true;
+      scheduleUpdateChecks(
         () =>
-          void checkForUpdate({
+          checkForUpdate({
             state: stateStore,
             window: () => win,
             log,
             prepareRestart: flushAndMarkQuitting,
           }),
-        20_000,
-      ).unref();
+        { firstDelayMs: 20_000 },
+      );
     }
   }
 
