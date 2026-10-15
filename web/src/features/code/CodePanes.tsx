@@ -12,6 +12,7 @@ import { useUnread } from '../../store/unread';
 import { launchTarget, paneCellClass, paneGridClass, paneOf, type PaneCount } from './paneLayout';
 import { usePanes } from './paneStore';
 import { openResources } from './ResourcesSheet';
+import { PortChips } from './PortChips';
 
 /** Desktop terminals take real key presses — there is no sticky Ctrl/Alt. */
 const NO_MODIFIER: ModifierRef = { current: { ctrl: false, alt: false } };
@@ -90,6 +91,8 @@ export function CodePanes() {
           <Plus size={20} />
         </button>
       </header>
+
+      <PortChips className="px-5 pb-2" />
 
       {terminals.length > 0 && (
         <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto px-5 pb-2" role="tablist" aria-label="Terminals">

@@ -732,6 +732,24 @@ export interface ResourcesResponse {
   system: { load: number; cpus: number; memTotal: number; memFree: number };
 }
 
+/** A port a terminal's process listens on (GET /api/ports). */
+export interface PortInfo {
+  terminalId: string;
+  projectId: string;
+  port: number;
+  pid: number;
+  /** Process name ("node", "python3"). */
+  process: string;
+  address: string;
+}
+
+export interface PreviewLinkResponse {
+  /** Opens the port through the preview proxy (sets its cookie, then redirects). */
+  url: string;
+  /** The app reached the server through the tunnel — the preview port is only reachable on the same network. */
+  remote: boolean;
+}
+
 /** Keep-awake state of the server machine (GET/PUT /api/power). */
 export interface PowerStatus {
   /** This platform can hold a sleep lock (systemd-inhibit / caffeinate). */

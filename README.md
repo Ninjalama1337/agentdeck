@@ -59,6 +59,13 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   vergleichen, das beste mergen, den Rest verwerfen.
 - **Usage im Blick** — 5-Stunden- und Wochenlimit als Balken mit Countdown bis
   zum Reset, Agents nach dem knappsten Limit sortiert, Push bei 80/95/100 %.
+- **Dev-Server-Vorschau** — startet ein Agent oder Terminal einen Server
+  (`localhost:5173` …), erscheint der Port als Chip im Code-Tab; ein Tipp öffnet
+  ihn über den Vorschau-Proxy (AgentDeck-Port + 1, signierter Link) auch am
+  Handy im selben Netz, inklusive Hot Reload. Über den Tunnel geht das nicht.
+- **Ressourcen & Rechner wach** — CPU und RAM je Terminal mit Prozessliste,
+  einzelne Prozesse beenden; solange Agents arbeiten, schläft der Rechner nicht
+  ein (`systemd-inhibit`/`caffeinate`, abschaltbar).
 - **Quick Open** — Strg/⌘+P (bzw. die Lupe): Bildschirme, Projekte, Terminals,
   Chats und Dateien in einer Suche. Chats und Terminals lassen sich als
   ungelesen markieren.

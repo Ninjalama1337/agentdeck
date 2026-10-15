@@ -29,6 +29,7 @@ import { UsageCollector } from '../usage/collector.js';
 import { alertText, UsageWatcher } from '../usage/watcher.js';
 import { WorktreeStore } from '../git/worktrees.js';
 import { KeepAwake } from '../power/keepAwake.js';
+import { PreviewProxy } from '../preview/proxy.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -335,6 +336,10 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
   keepAwake.start();
 
+  // Dev-server previews on the next port (AgentDeck's port 0 = tests: a random one).
+  const preview = new PreviewProxy({ secretHex: jwtSecret, host: config.host, port: config.port ? config.port + 1 : 0, log });
+  await preview.start();
+
   const deps: AppDeps = {
     config,
     log,
@@ -346,6 +351,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     usageWatcher,
     worktrees: new WorktreeStore(config.dataDir),
     keepAwake,
+    preview,
     stats,
     pairing,
     limiter,
@@ -419,6 +425,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     routines.stop();
     usageWatcher.stop();
     keepAwake.stop();
+    await preview.stop();
     terminals.detachAll();
     adminJobRunner.stop('Server shutting down');
     await adminJobRunner.idle().catch(() => undefined);

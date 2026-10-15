@@ -15,6 +15,7 @@ import type { UsageCollector } from '../usage/collector.js';
 import type { UsageWatcher } from '../usage/watcher.js';
 import type { WorktreeStore } from '../git/worktrees.js';
 import type { KeepAwake } from '../power/keepAwake.js';
+import type { PreviewProxy } from '../preview/proxy.js';
 import type { StatsDb } from '../stats/db.js';
 import type { RateLimiter } from '../util/rateLimit.js';
 import type { Broadcaster } from '../ws/gateway.js';
@@ -34,6 +35,8 @@ export interface AppDeps {
   manager: AgentManager;
   teams: TeamOrchestrator;
   usage: UsageCollector;
+  /** Forwards a local dev-server port to other devices (preview/proxy.ts). */
+  preview: PreviewProxy;
   /** Holds a sleep lock while agents work. */
   keepAwake: KeepAwake;
   /** Parallel agent worktrees (git/worktrees.ts). */

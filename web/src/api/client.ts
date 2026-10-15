@@ -26,7 +26,9 @@ import type {
   GitCommitInfo,
   GitDiffResponse,
   ParallelLaunchRequest,
+  PortInfo,
   PowerStatus,
+  PreviewLinkResponse,
   ResourcesResponse,
   ParallelLaunchResponse,
   WorktreeInfo,
@@ -302,6 +304,14 @@ export const api = {
 
   deleteProject(id: string): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
+  },
+
+  ports(): Promise<PortInfo[]> {
+    return request('GET', '/api/ports');
+  },
+
+  previewLink(port: number): Promise<PreviewLinkResponse> {
+    return request('POST', `/api/ports/${port}/preview`);
   },
 
   resources(): Promise<ResourcesResponse> {

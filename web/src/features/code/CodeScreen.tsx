@@ -10,6 +10,7 @@ import { LauncherGrid, LauncherSheet } from './Launcher';
 import { TerminalView, type ModifierRef } from './TerminalView';
 import { KeyBar } from './KeyBar';
 import { openResources } from './ResourcesSheet';
+import { PortChips } from './PortChips';
 import { ComposeBar } from './ComposeBar';
 import { sendRaw, sendText } from './termInput';
 import { attachToTerminal } from './termAttach';
@@ -114,6 +115,8 @@ function CodePhone() {
           <Plus size={20} />
         </button>
       </header>
+
+      <PortChips className="px-4 pb-2" />
 
       {/* terminal tabs */}
       {terminals.length > 0 && (
