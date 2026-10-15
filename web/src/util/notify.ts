@@ -34,6 +34,7 @@ export function stateOf(n: Pick<DeckNotification, 'kind' | 'state'>): DeckNotifi
   if (n.kind === 'session-done' || n.kind === 'team-done') return 'done';
   if (n.kind === 'session-error' || n.kind === 'team-error') return 'error';
   if (n.kind === 'terminal-attention') return 'waiting';
+  if (n.kind === 'usage-limit') return 'limit';
   return undefined;
 }
 
@@ -218,7 +219,7 @@ export async function enableFcm(): Promise<boolean> {
       fcmListening = true;
       plugin.addListener?.('registration', ((e: { value: string }) => {
         fcmToken = e.value;
-        void api.fcmRegister({ token: e.value, kinds: enabledKinds(), quiet: quietHours() }).catch(() => undefined);
+        void withKinds({ token: e.value, kinds: enabledKinds(), quiet: quietHours() }, (r) => api.fcmRegister(r)).catch(() => undefined);
       }) as never);
     }
     await plugin.register();
@@ -308,6 +309,21 @@ export async function currentPushSubscription(): Promise<PushSubscription | null
   }
 }
 
+/**
+ * Registers with the device's kind filter; a server that rejects the list
+ * (older servers know fewer kinds and refuse the whole request) gets the
+ * registration without a filter — every kind beats no push at all.
+ */
+async function withKinds<T extends { kinds?: DeckNotificationKind[] }>(req: T, send: (req: T) => Promise<unknown>): Promise<void> {
+  try {
+    await send(req);
+  } catch (err) {
+    if (!req.kinds) throw err;
+    const { kinds: _all, ...rest } = req;
+    await send(rest as T);
+  }
+}
+
 /** Notification kinds this device wants (the per-kind toggles in Settings). */
 function enabledKinds(): DeckNotificationKind[] {
   const kinds = usePrefs.getState().notifyKinds;
@@ -333,10 +349,10 @@ function subscribeRequest(sub: PushSubscription) {
 
 /** Re-registers the existing subscription so the server honours changed kind toggles. */
 export async function syncPushKinds(): Promise<void> {
-  if (fcmToken) await api.fcmRegister({ token: fcmToken, kinds: enabledKinds(), quiet: quietHours() }).catch(() => undefined);
+  if (fcmToken) await withKinds({ token: fcmToken, kinds: enabledKinds(), quiet: quietHours() }, (r) => api.fcmRegister(r)).catch(() => undefined);
   const sub = await currentPushSubscription();
   const req = sub && subscribeRequest(sub);
-  if (req) await api.pushSubscribe(req).catch(() => undefined);
+  if (req) await withKinds(req, (r) => api.pushSubscribe(r)).catch(() => undefined);
 }
 
 export type PushResult = 'subscribed' | 'unsupported' | 'denied' | 'server-disabled' | 'error';
@@ -363,7 +379,7 @@ export async function enablePush(): Promise<PushResult> {
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
     const req = subscribeRequest(sub);
     if (!req) return 'error';
-    await api.pushSubscribe(req);
+    await withKinds(req, (r) => api.pushSubscribe(r));
     return 'subscribed';
   } catch {
     return 'error';

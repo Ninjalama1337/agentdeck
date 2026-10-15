@@ -713,6 +713,8 @@ export type DeckNotificationKind =
   | 'terminal-attention'
   | 'team-done'
   | 'team-error'
+  /** A subscription limit crossed 80 / 95 / 100 % (server-side usage watcher). */
+  | 'usage-limit'
   | 'info';
 
 /**

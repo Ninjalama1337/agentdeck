@@ -12,6 +12,7 @@ import type { AttemptLimiter } from '../auth/attemptLimiter.js';
 import type { PairRequests } from '../auth/pairRequests.js';
 import type { TunnelManager } from '../tunnel/manager.js';
 import type { UsageCollector } from '../usage/collector.js';
+import type { UsageWatcher } from '../usage/watcher.js';
 import type { StatsDb } from '../stats/db.js';
 import type { RateLimiter } from '../util/rateLimit.js';
 import type { Broadcaster } from '../ws/gateway.js';
@@ -31,6 +32,8 @@ export interface AppDeps {
   manager: AgentManager;
   teams: TeamOrchestrator;
   usage: UsageCollector;
+  /** Limit warnings; every usage reading goes through it (and on record). */
+  usageWatcher: UsageWatcher;
   /** Calls to routine webhooks per caller. */
   hookLimiter: RateLimiter;
   /** Record of every agent run and of the subscription limits over time. */

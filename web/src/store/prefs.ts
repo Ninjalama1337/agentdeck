@@ -44,6 +44,7 @@ export const DEFAULT_PREFS: Prefs = {
     'terminal-attention': true,
     'team-done': true,
     'team-error': true,
+    'usage-limit': true,
     info: true,
   },
   backgroundService: true,

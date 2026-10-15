@@ -26,6 +26,7 @@ import { PairRequests } from '../auth/pairRequests.js';
 import { makeBridgeGuard, makeDeviceAuthHook } from '../auth/guards.js';
 import { TunnelManager } from '../tunnel/manager.js';
 import { UsageCollector } from '../usage/collector.js';
+import { alertText, UsageWatcher } from '../usage/watcher.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -308,6 +309,20 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     notify: (level, text) => broadcast('notify', { level, text }),
   });
 
+  const usage = new UsageCollector({ agents });
+  const usageWatcher = new UsageWatcher({
+    collect: () => usage.collect(),
+    record: (usages) => stats.recordPlans(usages),
+    // Reading limits spawns the agent CLIs — only worth it while agents are in use.
+    active: () => terminals.list().length > 0 || (stats.runs({ limit: 1 }).runs[0]?.endedAt ?? 0) > Date.now() - 3 * 3600_000,
+    notify: (alert) => {
+      const { title, body } = alertText(alert);
+      notifications.notify({ kind: 'usage-limit', state: 'limit', title, body });
+    },
+    onError: (err) => log.warn({ err }, 'usage watcher reading failed'),
+  });
+  usageWatcher.start();
+
   const deps: AppDeps = {
     config,
     log,
@@ -315,7 +330,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     agents,
     manager,
     teams: new TeamOrchestrator(store, manager, log),
-    usage: new UsageCollector({ agents }),
+    usage,
+    usageWatcher,
     stats,
     pairing,
     limiter,
@@ -387,6 +403,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   // terminals detach so background tmux sessions stay alive across restarts.
   app.addHook('onClose', async () => {
     routines.stop();
+    usageWatcher.stop();
     terminals.detachAll();
     adminJobRunner.stop('Server shutting down');
     await adminJobRunner.idle().catch(() => undefined);

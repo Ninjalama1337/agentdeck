@@ -9,8 +9,8 @@ import type { AppDeps } from './deps.js';
 export async function usageRoutes(fastify: FastifyInstance, deps: AppDeps): Promise<void> {
   fastify.get('/usage', async () => {
     const usages = await deps.usage.collect();
-    // Each reading goes on record, so the app can show how a subscription was used over time.
-    deps.stats.recordPlans(usages);
+    // On record (the app shows how a subscription was used over time) and checked against the warning levels.
+    deps.usageWatcher.observe(usages);
     return usages;
   });
 }

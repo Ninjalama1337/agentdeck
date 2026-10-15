@@ -6,9 +6,29 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { httpError } from '../http/errors.js';
 import { VoiceError } from '../voice/transcribe.js';
+import type { DeckNotificationKind } from '@agentdeck/shared';
 import type { AppDeps } from './deps.js';
 
-const KINDS = ['session-done', 'session-error', 'terminal-attention', 'team-done', 'team-error', 'info'] as const;
+const KINDS: readonly DeckNotificationKind[] = [
+  'session-done',
+  'session-error',
+  'session-permission',
+  'terminal-attention',
+  'team-done',
+  'team-error',
+  'usage-limit',
+  'info',
+];
+
+/**
+ * Kinds a device wants. Unknown names (a newer app on this server) are dropped
+ * instead of failing the whole registration — that would silence every push.
+ */
+const KindsSchema = z
+  .array(z.string().max(64))
+  .max(32)
+  .optional()
+  .transform((list) => list?.filter((k): k is DeckNotificationKind => (KINDS as readonly string[]).includes(k)));
 
 const QuietSchema = z.object({
   from: z.number().int().min(0).max(1439),
@@ -19,7 +39,7 @@ const QuietSchema = z.object({
 const SubscribeSchema = z.object({
   endpoint: z.string().url().max(2000),
   keys: z.object({ p256dh: z.string().min(1).max(500), auth: z.string().min(1).max(500) }),
-  kinds: z.array(z.enum(KINDS)).optional(),
+  kinds: KindsSchema,
   quiet: QuietSchema.optional(),
 });
 
@@ -58,7 +78,7 @@ export async function notificationRoutes(fastify: FastifyInstance, deps: AppDeps
   fastify.post('/push/fcm', async (req, reply) => {
     const body = z.object({
         token: z.string().min(20).max(4096),
-        kinds: z.array(z.enum(KINDS)).optional(),
+        kinds: KindsSchema,
         quiet: QuietSchema.optional(),
       }).parse(req.body);
     await deps.notifications.registerFcm(deviceOf(req), body.token, body.kinds, body.quiet);

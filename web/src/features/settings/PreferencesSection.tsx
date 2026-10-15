@@ -18,6 +18,7 @@ const KIND_LABELS: Record<DeckNotificationKind, string> = {
   'terminal-attention': 'Terminal agent done, waiting or out of usage',
   'team-done': 'Team run finished',
   'team-error': 'Team run failed',
+  'usage-limit': 'Usage limit almost reached',
   info: 'Other',
 };
 
