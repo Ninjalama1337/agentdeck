@@ -58,7 +58,10 @@ export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): L
 export function alertText(a: LimitAlert, now = Date.now()): { title: string; body: string } {
   const who = AGENT_LABELS[a.agentId] ?? a.agentId;
   const title = a.level >= 100 ? `${who}: ${a.window} used up` : `${who}: ${a.window} at ${a.pct}%`;
-  let body = a.level >= 100 ? 'Agents on this plan stop until the limit resets.' : 'Consider pacing or switching agents.';
+  let body =
+    a.level >= 100
+      ? 'Agents on this plan stop until it resets — hand the task over from the terminal, or switch the account.'
+      : 'Consider pacing or switching agents.';
   const at = a.resetsAt && /^\d{4}-\d{2}-\d{2}T/.test(a.resetsAt) ? Date.parse(a.resetsAt) : NaN;
   if (!Number.isNaN(at) && at > now) {
     const minutes = Math.ceil((at - now) / 60_000);

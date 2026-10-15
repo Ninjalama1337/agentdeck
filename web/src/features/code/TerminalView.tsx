@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, ChevronsDown, Copy, RotateCcw, TextSelect, X } from 'lucide-react';
+import { ArrowRightLeft, ChevronDown, ChevronUp, ChevronsDown, Copy, RotateCcw, TextSelect, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -17,6 +17,7 @@ import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
 import { copyText, installLongPress, installTouchSelect } from './termSelect';
 import { handleOsc52, tryWebgl, applyUnicode11 } from './termExtras';
+import { HandoverSheet } from './HandoverSheet';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -77,6 +78,13 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   /** Select mode: the finger selects text, lifting it copies. */
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState('');
+  const info = useAppStore((s) => s.terminals.find((t) => t.id === id));
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [limitDismissed, setLimitDismissed] = useState(false);
+  const atLimit = info?.attention === true && info.attentionState === 'limit';
+  useEffect(() => {
+    if (!atLimit) setLimitDismissed(false);
+  }, [atLimit]);
   const fontSize = usePrefs((s) => s.termFontSize);
   const compose = usePrefs((s) => s.termCompose);
 
@@ -424,7 +432,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
             className="absolute z-30 w-48 rounded-xl border border-line-strong bg-surface-2 p-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
             style={{
               left: Math.max(8, Math.min(menu.x, (hostRef.current?.clientWidth ?? 0) - 200)),
-              top: Math.max(8, Math.min(menu.y, (hostRef.current?.clientHeight ?? 0) - 100)),
+              top: Math.max(8, Math.min(menu.y, (hostRef.current?.clientHeight ?? 0) - 150)),
             }}
           >
             <button
@@ -449,6 +457,19 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
             >
               <Copy size={15} className="text-dim" /> Copy screen
             </button>
+            {info?.presetId && info.presetId !== 'shell' && info.presetId !== 'custom' && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  setHandoverOpen(true);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-[13.5px] active:bg-white/[0.07]"
+              >
+                <ArrowRightLeft size={15} className="text-dim" /> Hand over…
+              </button>
+            )}
           </div>
         </>
       )}
@@ -467,6 +488,20 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           </button>
         </div>
       )}
+      {atLimit && !limitDismissed && ended === null && info && (
+        <div className="absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 rounded-2xl border border-danger/40 bg-surface-2/95 p-2 pl-3.5 shadow-lg">
+          <span className="min-w-0 flex-1 text-[12.5px]">
+            <span className="font-semibold text-danger">Usage limit reached.</span> <span className="text-dim">Another agent can continue.</span>
+          </span>
+          <button type="button" onClick={() => setHandoverOpen(true)} className="press flex h-9 items-center gap-1.5 rounded-xl bg-accent/20 px-3 text-[12.5px] font-semibold text-accent">
+            <ArrowRightLeft size={13} /> Hand over
+          </button>
+          <button type="button" aria-label="Dismiss" onClick={() => setLimitDismissed(true)} className="press flex h-9 w-9 items-center justify-center rounded-xl text-dim active:bg-white/10">
+            <X size={15} />
+          </button>
+        </div>
+      )}
+      {info && <HandoverSheet term={info} open={handoverOpen} onClose={() => setHandoverOpen(false)} />}
       {ended !== null && (
         <div className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-2xl border border-line bg-surface-2/95 p-2 pl-3.5 shadow-lg">
           <span className="min-w-0 flex-1 text-[12.5px] text-dim">

@@ -331,6 +331,14 @@ export const api = {
     return request('GET', '/api/terminals/resources');
   },
 
+  /** Another agent continues this terminal's task (usage limit hand-over). */
+  handover(
+    terminalId: string,
+    body: { presetId: string; accountId?: string; cols?: number; rows?: number; timeZone?: string },
+  ): Promise<{ terminal: TerminalInfo }> {
+    return request('POST', `/api/terminals/${encodeURIComponent(terminalId)}/handover`, { json: body });
+  },
+
   killProcess(terminalId: string, pid: number): Promise<void> {
     return request('POST', `/api/terminals/${encodeURIComponent(terminalId)}/processes/${pid}/kill`);
   },

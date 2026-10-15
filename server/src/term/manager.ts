@@ -129,6 +129,8 @@ interface ActiveTerminal {
   hooked?: boolean;
   /** The turn the agent is working on. */
   turn?: { startedAt: number; prompt?: string; transcriptPath?: string };
+  /** The last prompt a hook reported — what a hand-over continues. */
+  lastPrompt?: string;
 }
 
 const MAX_CONCURRENT = 10;
@@ -175,6 +177,27 @@ export class TerminalManager {
     private readonly log: Logger,
     private readonly options: TerminalManagerOptions = {},
   ) {}
+
+  /** What another agent needs to take over: folder, preset, last prompt and the screen's tail. */
+  handoverContext(id: string): { cwd: string; projectId: string; presetId?: string; title?: string; prompt?: string; screen: string } | undefined {
+    const t = this.active.get(id);
+    if (!t) return undefined;
+    const screen = screenText(t.screen)
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l, i, all) => l || (i > 0 && all[i - 1]))
+      .slice(-40)
+      .join('\n')
+      .trim();
+    return {
+      cwd: t.projectPath,
+      projectId: t.info.projectId,
+      ...(t.info.presetId ? { presetId: t.info.presetId } : {}),
+      ...(t.info.title ? { title: t.info.title } : {}),
+      ...(t.lastPrompt ? { prompt: t.lastPrompt } : {}),
+      screen,
+    };
+  }
 
   /** Root process of each terminal: the tmux pane's shell, or the PTY's. */
   rootPids(): { id: string; pid: number }[] {
@@ -751,6 +774,7 @@ export class TerminalManager {
       delete term.askedAt;
       const prompt = text('prompt');
       term.turn = { startedAt: Date.now(), ...(prompt ? { prompt } : {}) };
+      if (prompt) term.lastPrompt = prompt;
     } else if (signal.kind === 'result') {
       delete term.askedAt;
       const transcriptPath = text('transcript_path');

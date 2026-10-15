@@ -12,6 +12,7 @@ import { listPresets, resolveLaunch } from '../term/presets.js';
 import type { TerminalBroadcasts } from '../term/manager.js';
 import { stateTitle } from '../notify/hub.js';
 import { accountAgentOfPreset } from '../accounts/active.js';
+import { handoverPrompt } from '../term/handover.js';
 
 const CreateSchema = z.object({
   projectId: z.string().min(1),
@@ -125,6 +126,46 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
         ...(Object.keys(env).length ? { env } : {}),
       },
     );
+    reply.code(201).send({ terminal: info });
+  });
+
+  /** Limit hand-over: another agent (or account) continues this terminal's task in the same folder. */
+  fastify.post('/terminals/:id/handover', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const body = z
+      .object({
+        presetId: z.string().max(40),
+        accountId: z.string().max(80).optional(),
+        cols: z.number().int().min(10).max(500).optional(),
+        rows: z.number().int().min(4).max(300).optional(),
+        timeZone: z.string().max(64).optional(),
+      })
+      .parse(req.body);
+    const ctx = deps.terminals.handoverContext(id);
+    if (!ctx) throw notFound('Terminal not found');
+    const prompt = handoverPrompt({ from: ctx.title ?? 'the previous agent', ...(ctx.prompt ? { prompt: ctx.prompt } : {}), screen: ctx.screen });
+    let launch: ReturnType<typeof resolveLaunch>;
+    try {
+      launch = resolveLaunch(body.presetId, undefined, undefined, prompt);
+    } catch (err) {
+      throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
+    }
+    const accountAgent = accountAgentOfPreset(launch.presetId);
+    let env: Record<string, string> = accountAgent ? deps.activeAccounts.envFor(accountAgent) : {};
+    if (body.accountId) {
+      const account = deps.store.getAccount(body.accountId);
+      if (!account || account.agentId !== accountAgent) throw httpError(400, 'BAD_REQUEST', 'Unknown account for this agent.');
+      env = account.env;
+    }
+    const timeZone = knownTimeZone(body.timeZone);
+    const info = deps.terminals.spawn(ctx.cwd, ctx.projectId, body.cols ?? 80, body.rows ?? 24, terminalBroadcasts(deps), {
+      title: `${launch.title} · takes over`,
+      presetId: launch.presetId,
+      idleNotify: launch.agent,
+      ...(launch.command ? { command: launch.command } : {}),
+      ...(timeZone ? { timeZone } : {}),
+      ...(Object.keys(env).length ? { env } : {}),
+    });
     reply.code(201).send({ terminal: info });
   });
 
