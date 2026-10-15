@@ -16,6 +16,7 @@ import { openExternal } from '../../util/openExternal';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
 import { copyText, installLongPress, installTouchSelect } from './termSelect';
+import { handleOsc52, tryWebgl, applyUnicode11 } from './termExtras';
 
 export const TERM_THEME = {
   background: '#0d0f14',
@@ -106,6 +107,14 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon((_event, uri) => openExternal(uri)));
     term.open(host);
+    applyUnicode11(term);
+    // The GPU renderer pays off with several panes; phones keep the DOM one (few WebGL contexts, all terminals stay mounted).
+    const disposeWebgl = pane ? tryWebgl(term) : () => undefined;
+    const osc52 = handleOsc52(term, (text) => {
+      void copyText(text).then((ok) => {
+        if (ok) useAppStore.getState().toast('info', 'Copied to clipboard');
+      });
+    });
     // Soft keyboards edit the textarea instead of sending keys (see termIme.ts).
     const disposeIme = installMobileIme(term, (data) => term.input(data, true));
     // tmux/TUI screens own the display: drags become wheel events instead of
@@ -228,6 +237,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       unsubscribe();
       disposeTouchScroll();
       disposeLongPress();
+      osc52.dispose();
+      disposeWebgl();
       mouse.dispose();
       mouseRef.current = null;
       disposeIme();

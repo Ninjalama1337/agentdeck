@@ -235,6 +235,8 @@ export function createTmuxSession(opts: CreateTmuxSessionOptions): boolean {
  *
  * - status off: no tmux chrome, the app sees pure terminal output
  * - history-limit: scrollback the client reaches via wheel events
+ * - set-clipboard on: tmux's own copies and the OSC 52 of pane apps go out as
+ *   OSC 52; the app writes them to the device clipboard
  * - mouse on: tmux consumes wheel events (auto copy-mode scroll) or forwards
  *   them to pane apps that use the mouse. Without it nothing can scroll: tmux
  *   keeps the attached terminal on the alternate screen, so the client-side
@@ -249,6 +251,8 @@ export function applyTmuxSessionOptions(sessionName: string): boolean {
     execFileSync(tmux, ['-S', sock, 'set-option', '-t', sessionName, 'status', 'off'], { env, stdio: 'ignore' });
     execFileSync(tmux, ['-S', sock, 'set-option', '-t', sessionName, 'history-limit', '10000'], { env, stdio: 'ignore' });
     execFileSync(tmux, ['-S', sock, 'set-option', '-t', sessionName, 'mouse', 'on'], { env, stdio: 'ignore' });
+    // Copies (tmux selection, apps writing OSC 52) reach the app, which puts them on the device clipboard.
+    execFileSync(tmux, ['-S', sock, 'set-option', '-s', 'set-clipboard', 'on'], { env, stdio: 'ignore' });
     return true;
   } catch {
     return false;

@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import xtermHeadless from '@xterm/headless';
 import serializeAddon from '@xterm/addon-serialize';
+import unicode11Addon from '@xterm/addon-unicode11';
 import { pty } from './pty.js';
 import type { TerminalInfo } from '@agentdeck/shared';
 import type { Logger } from '../logging.js';
@@ -153,6 +154,15 @@ export function shellArgsFor(shell: string, command: string): string[] {
   const quoted = `'${shell.replace(/'/g, "'\\''")}'`;
   // `clear` first: the login banner (motd, fastfetch) is noise above a TUI.
   return ['-l', '-i', '-c', `clear 2>/dev/null; ${command}; exec ${quoted} -l`];
+}
+
+/**
+ * Unicode 11 character widths, as the app's xterm uses: emoji and symbols in
+ * agent TUIs are two cells wide there, and the snapshot must agree.
+ */
+function applyUnicode11(screen: InstanceType<typeof xtermHeadless.Terminal>): void {
+  screen.loadAddon(new unicode11Addon.Unicode11Addon());
+  screen.unicode.activeVersion = '11';
 }
 
 export class TerminalManager {
@@ -412,6 +422,7 @@ export class TerminalManager {
     const screen = new xtermHeadless.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
+    applyUnicode11(screen);
     const mouseEncoding = trackMouseEncoding(screen);
 
     // Query responses (DSR, DA, OSC 10/11) go straight back into the PTY.
@@ -549,6 +560,7 @@ export class TerminalManager {
     const screen = new xtermHeadless.Terminal({ cols: info.cols, rows: info.rows, scrollback: SCROLLBACK, allowProposedApi: true });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
+    applyUnicode11(screen);
     const mouseEncoding = trackMouseEncoding(screen);
 
     // Pre-populate screen with scrollback from the still-running tmux pane
