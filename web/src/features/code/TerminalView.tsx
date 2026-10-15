@@ -16,7 +16,7 @@ import { openExternal } from '../../util/openExternal';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
 import { copyText, installLongPress, installTouchSelect } from './termSelect';
-import { handleOsc52, tryWebgl, applyUnicode11 } from './termExtras';
+import { applyUnicode11, cellSize, handleOsc52, loadImages, tryWebgl } from './termExtras';
 import { HandoverSheet } from './HandoverSheet';
 
 export const TERM_THEME = {
@@ -116,6 +116,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     term.loadAddon(new WebLinksAddon((_event, uri) => openExternal(uri)));
     term.open(host);
     applyUnicode11(term);
+    loadImages(term);
     // The GPU renderer pays off with several panes; phones keep the DOM one (few WebGL contexts, all terminals stay mounted).
     const disposeWebgl = pane ? tryWebgl(term) : () => undefined;
     const osc52 = handleOsc52(term, (text) => {
@@ -228,7 +229,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           lastCols = term.cols;
           lastRows = term.rows;
           if (resizeTimer) window.clearTimeout(resizeTimer);
-          resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows), 80);
+          resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows, cellSize(term)), 80);
         }
       } catch {
         return; // host not measurable yet
@@ -273,7 +274,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     term.options.fontSize = fontSize;
     try {
       fitRef.current?.fit();
-      useAppStore.getState().resizeTerminal(id, term.cols, term.rows);
+      useAppStore.getState().resizeTerminal(id, term.cols, term.rows, cellSize(term));
     } catch {
       /* hidden */
     }
@@ -299,7 +300,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       try {
         fitRef.current?.fit();
         const term = termRef.current;
-        if (term) useAppStore.getState().resizeTerminal(id, term.cols, term.rows);
+        if (term) useAppStore.getState().resizeTerminal(id, term.cols, term.rows, cellSize(term));
       } catch {
         /* not measurable */
       }

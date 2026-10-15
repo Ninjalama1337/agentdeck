@@ -61,7 +61,7 @@ export function sendText(id: string, text: string, submit = true): void {
 
 /** Terminal query replies xterm.js generates — the server emulator answers these. */
 // eslint-disable-next-line no-control-regex
-const REPLY_RE = /^(\u001b\[\??\d+(;\d+)*R|\u001b\[[?>][\d;]*c|\u001b\]1[0-2];rgb:[^\u0007\u001b]*(\u0007|\u001b\\)|\u001b\[\?\d+;\d+\$y)+$/;
+const REPLY_RE = /^(\u001b\[[46];\d+;\d+t|\u001b\[\??\d+(;\d+)*R|\u001b\[[?>][\d;]*c|\u001b\]1[0-2];rgb:[^\u0007\u001b]*(\u0007|\u001b\\)|\u001b\[\?\d+;\d+\$y)+$/;
 
 export function isTerminalReply(data: string): boolean {
   return REPLY_RE.test(data);

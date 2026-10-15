@@ -235,6 +235,8 @@ export function createTmuxSession(opts: CreateTmuxSessionOptions): boolean {
  *
  * - status off: no tmux chrome, the app sees pure terminal output
  * - history-limit: scrollback the client reaches via wheel events
+ * - terminal-features sixel, allow-passthrough on: images (Sixel, iTerm inline)
+ *   reach the app's xterm
  * - set-clipboard on: tmux's own copies and the OSC 52 of pane apps go out as
  *   OSC 52; the app writes them to the device clipboard
  * - mouse on: tmux consumes wheel events (auto copy-mode scroll) or forwards
@@ -253,6 +255,10 @@ export function applyTmuxSessionOptions(sessionName: string): boolean {
     execFileSync(tmux, ['-S', sock, 'set-option', '-t', sessionName, 'mouse', 'on'], { env, stdio: 'ignore' });
     // Copies (tmux selection, apps writing OSC 52) reach the app, which puts them on the device clipboard.
     execFileSync(tmux, ['-S', sock, 'set-option', '-s', 'set-clipboard', 'on'], { env, stdio: 'ignore' });
+    // Images: the app's xterm shows Sixel (tmux built with sixel passes them on, placed and
+    // redrawn), and inline images of pane apps (imgcat, iTerm protocol) pass straight through.
+    execFileSync(tmux, ['-S', sock, 'set-option', '-s', 'terminal-features[90]', 'xterm*:sixel'], { env, stdio: 'ignore' });
+    execFileSync(tmux, ['-S', sock, 'set-option', '-gw', 'allow-passthrough', 'on'], { env, stdio: 'ignore' });
     return true;
   } catch {
     return false;

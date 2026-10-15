@@ -21,6 +21,7 @@ import type { Logger } from '../logging.js';
 import { newTerminalId } from '../util/ids.js';
 import { augmentedPath, PRESET_DEFS } from './presets.js';
 import { trackMouseEncoding, type MouseEncoding } from './mouseEncoding.js';
+import { answerPixelQueries, DEFAULT_CELL, PIXEL_QUERIES, type CellSize } from './pixelSize.js';
 import { AttentionDetector, isTyped, type AttentionReason } from './attention.js';
 import { classifyScreen, type PromptKind, type Verdict } from '../notify/classify.js';
 import type { DeckNotificationState } from '@agentdeck/shared';
@@ -115,6 +116,8 @@ interface ActiveTerminal {
   serializer: InstanceType<typeof serializeAddon.SerializeAddon>;
   /** Mouse encoding the serializer leaves out of snapshots (see mouseEncoding.ts). */
   mouseEncoding: MouseEncoding;
+  /** Cell size in pixels as the app measured it (images, see pixelSize.ts). */
+  cell: CellSize;
   attention: AttentionDetector;
   tmuxSession?: string;
   projectPath: string;
@@ -457,7 +460,7 @@ export class TerminalManager {
           } as Record<string, string>,
         });
 
-    const screen = new xtermHeadless.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
+    const screen = new xtermHeadless.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true, windowOptions: PIXEL_QUERIES });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
     applyUnicode11(screen);
@@ -471,6 +474,19 @@ export class TerminalManager {
         // pty gone
       }
     });
+    // tmux asks the pixel size to place images (see pixelSize.ts).
+    const cell: CellSize = { ...DEFAULT_CELL };
+    answerPixelQueries(
+      screen,
+      (reply) => {
+        try {
+          proc.write(reply);
+        } catch {
+          // pty gone
+        }
+      },
+      () => cell,
+    );
 
     const term: ActiveTerminal = {
       info,
@@ -478,6 +494,7 @@ export class TerminalManager {
       screen,
       serializer,
       mouseEncoding,
+      cell,
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
@@ -595,7 +612,7 @@ export class TerminalManager {
       } as Record<string, string>,
     });
 
-    const screen = new xtermHeadless.Terminal({ cols: info.cols, rows: info.rows, scrollback: SCROLLBACK, allowProposedApi: true });
+    const screen = new xtermHeadless.Terminal({ cols: info.cols, rows: info.rows, scrollback: SCROLLBACK, allowProposedApi: true, windowOptions: PIXEL_QUERIES });
     const serializer = new serializeAddon.SerializeAddon();
     screen.loadAddon(serializer);
     applyUnicode11(screen);
@@ -614,6 +631,19 @@ export class TerminalManager {
         // pty gone
       }
     });
+    // tmux asks the pixel size to place images (see pixelSize.ts).
+    const cell: CellSize = { ...DEFAULT_CELL };
+    answerPixelQueries(
+      screen,
+      (reply) => {
+        try {
+          proc.write(reply);
+        } catch {
+          // pty gone
+        }
+      },
+      () => cell,
+    );
 
     const term: ActiveTerminal = {
       info,
@@ -621,6 +651,7 @@ export class TerminalManager {
       screen,
       serializer,
       mouseEncoding,
+      cell,
       tmuxSession,
       projectPath,
       idleTimer: this.armIdleTimer(id, broadcast),
@@ -679,9 +710,13 @@ export class TerminalManager {
     }
   }
 
-  resize(id: string, cols: number, rows: number): boolean {
+  resize(id: string, cols: number, rows: number, cell?: CellSize): boolean {
     const term = this.active.get(id);
     if (!term) return false;
+    if (cell && cell.width >= 2 && cell.width <= 100 && cell.height >= 4 && cell.height <= 200) {
+      term.cell.width = Math.round(cell.width);
+      term.cell.height = Math.round(cell.height);
+    }
     const c = Math.min(Math.max(10, Math.round(cols)), 500);
     const r = Math.min(Math.max(4, Math.round(rows)), 300);
     try {

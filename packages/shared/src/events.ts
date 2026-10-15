@@ -91,7 +91,8 @@ export interface ClientToServerEvents {
     ack: (result: { ok: boolean; message?: string }) => void,
   ) => void;
   'terminal:input': (payload: { id: string; data: string }) => void;
-  'terminal:resize': (payload: { id: string; cols: number; rows: number }) => void;
+  /** `cellWidth`/`cellHeight`: one cell in CSS pixels, for images (newer apps). */
+  'terminal:resize': (payload: { id: string; cols: number; rows: number; cellWidth?: number; cellHeight?: number }) => void;
   /** Client viewed the terminal — clears its attention flag. */
   'terminal:seen': (payload: { id: string }) => void;
 }

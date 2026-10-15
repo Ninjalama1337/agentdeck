@@ -413,7 +413,8 @@ export interface AppStore {
   /** Streams terminal output to a subscriber (xterm). Returns an unsubscribe. */
   subscribeTerminal(id: string, onData: (data: string) => void, onExit?: (code: number) => void): () => void;
   sendTerminalInput(id: string, data: string): void;
-  resizeTerminal(id: string, cols: number, rows: number): void;
+  /** `cell`: one cell in CSS pixels — the server tells tmux, which places images by it. */
+  resizeTerminal(id: string, cols: number, rows: number, cell?: { width: number; height: number }): void;
   refreshRoutines(projectId?: string): Promise<void>;
   createRoutine(req: CreateRoutineRequest): Promise<Routine>;
   updateRoutine(id: string, req: UpdateRoutineRequest): Promise<Routine>;
@@ -1596,8 +1597,8 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       getSocket()?.emit('terminal:input', { id, data });
     },
 
-    resizeTerminal(id, cols, rows) {
-      getSocket()?.emit('terminal:resize', { id, cols, rows });
+    resizeTerminal(id, cols, rows, cell) {
+      getSocket()?.emit('terminal:resize', { id, cols, rows, ...(cell ? { cellWidth: cell.width, cellHeight: cell.height } : {}) });
     },
 
     async refreshRoutines(projectId) {

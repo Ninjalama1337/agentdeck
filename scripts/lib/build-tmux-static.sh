@@ -146,7 +146,8 @@ SRC="$(unpack "$TMUX_TAR" "tmux-$TMUX_VERSION")"
   # dynamischen Bibliotheken des Systems. Mit vorgegebenen *_CFLAGS/*_LIBS fragt
   # configure nicht nach, sondern linkt genau unsere statischen .a-Dateien.
   # (libncursesw.a enthaelt auch die tinfo-Funktionen: ohne --with-termlib gebaut.)
-  quiet ./configure --prefix="$PREFIX" \
+  # --enable-sixel: tmux passes Sixel images of pane apps on to the app's xterm (image addon).
+  quiet ./configure --prefix="$PREFIX" --enable-sixel \
     CFLAGS="-O2" \
     LIBEVENT_CORE_CFLAGS="-I$PREFIX/include" LIBEVENT_CORE_LIBS="$PREFIX/lib/libevent_core.a" \
     LIBEVENT_CFLAGS="-I$PREFIX/include" LIBEVENT_LIBS="$PREFIX/lib/libevent_core.a" \

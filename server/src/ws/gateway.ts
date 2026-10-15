@@ -78,7 +78,12 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
       ) {
         return;
       }
-      opts.terminals.resize(payload.id, payload.cols, payload.rows);
+      const { cellWidth, cellHeight } = payload;
+      const cell =
+        typeof cellWidth === 'number' && typeof cellHeight === 'number' && Number.isFinite(cellWidth) && Number.isFinite(cellHeight)
+          ? { width: cellWidth, height: cellHeight }
+          : undefined;
+      opts.terminals.resize(payload.id, payload.cols, payload.rows, cell);
     });
     socket.on('terminal:seen', (payload) => {
       if (typeof payload?.id !== 'string') return;
