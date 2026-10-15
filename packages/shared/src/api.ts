@@ -707,6 +707,20 @@ export interface TerminalPreset {
   promptArg?: string;
 }
 
+/** Keep-awake state of the server machine (GET/PUT /api/power). */
+export interface PowerStatus {
+  /** This platform can hold a sleep lock (systemd-inhibit / caffeinate). */
+  supported: boolean;
+  enabled: boolean;
+  /** The lock is held right now. */
+  active: boolean;
+  since?: number;
+  /** What kept it awake last ("2 agents working"). */
+  reason?: string;
+  /** The system refused the lock. */
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Parallel worktrees — one prompt, several agents, each in its own git worktree
 // ---------------------------------------------------------------------------

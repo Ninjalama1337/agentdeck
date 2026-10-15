@@ -163,6 +163,16 @@ export class TerminalManager {
     private readonly options: TerminalManagerOptions = {},
   ) {}
 
+  /** Agent terminals at work: in a turn, or printing within the last minute. */
+  busyAgents(now = Date.now()): number {
+    let n = 0;
+    for (const t of this.active.values()) {
+      if (!t.agent) continue;
+      if (t.turn || (t.info.lastOutputAt !== undefined && now - t.info.lastOutputAt < 60_000)) n++;
+    }
+    return n;
+  }
+
   list(projectId?: string): TerminalInfo[] {
     const all = [...this.active.values()].map((t) => t.info);
     return projectId ? all.filter((t) => t.projectId === projectId) : all;

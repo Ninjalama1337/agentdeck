@@ -26,6 +26,7 @@ import type {
   GitCommitInfo,
   GitDiffResponse,
   ParallelLaunchRequest,
+  PowerStatus,
   ParallelLaunchResponse,
   WorktreeInfo,
   GitOpResult,
@@ -300,6 +301,14 @@ export const api = {
 
   deleteProject(id: string): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
+  },
+
+  power(): Promise<PowerStatus> {
+    return request('GET', '/api/power');
+  },
+
+  setPower(keepAwake: boolean): Promise<PowerStatus> {
+    return request('PUT', '/api/power', { json: { keepAwake } });
   },
 
   /** One prompt, several agents, each in its own git worktree. */

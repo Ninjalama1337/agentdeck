@@ -28,6 +28,7 @@ import { TunnelManager } from '../tunnel/manager.js';
 import { UsageCollector } from '../usage/collector.js';
 import { alertText, UsageWatcher } from '../usage/watcher.js';
 import { WorktreeStore } from '../git/worktrees.js';
+import { KeepAwake } from '../power/keepAwake.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -324,6 +325,16 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   });
   usageWatcher.start();
 
+  const keepAwake = new KeepAwake({
+    dataDir: config.dataDir,
+    busy: () => {
+      const n = terminals.busyAgents() + manager.activeSessionIds().length;
+      return n > 0 ? `${n} ${n === 1 ? 'agent' : 'agents'} working` : null;
+    },
+    log,
+  });
+  keepAwake.start();
+
   const deps: AppDeps = {
     config,
     log,
@@ -334,6 +345,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     usage,
     usageWatcher,
     worktrees: new WorktreeStore(config.dataDir),
+    keepAwake,
     stats,
     pairing,
     limiter,
@@ -406,6 +418,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
   app.addHook('onClose', async () => {
     routines.stop();
     usageWatcher.stop();
+    keepAwake.stop();
     terminals.detachAll();
     adminJobRunner.stop('Server shutting down');
     await adminJobRunner.idle().catch(() => undefined);
