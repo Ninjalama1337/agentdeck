@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Columns2, Grid2x2, LayoutPanelLeft, Plus, Square, SquareTerminal, X } from 'lucide-react';
+import { ChevronDown, Columns2, Grid2x2, LayoutPanelLeft, MailWarning as MailDot, Plus, Square, SquareTerminal, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { TerminalInfo, TerminalPreset } from '@agentdeck/shared';
@@ -7,7 +7,8 @@ import { useAppStore } from '../../store/appStore';
 import { ProjectSwitcher } from '../../components/ProjectSwitcher';
 import { LauncherGrid, LauncherSheet, type LaunchSpec } from './Launcher';
 import { TerminalView, type ModifierRef } from './TerminalView';
-import { AgentChips, TerminalDot, TerminalTab, useConfirmEnd, useTerminalLauncher } from './terminalParts';
+import { AgentChips, TerminalDot, TerminalTab, toggleUnread, useConfirmEnd, useTerminalLauncher } from './terminalParts';
+import { useUnread } from '../../store/unread';
 import { launchTarget, paneCellClass, paneGridClass, paneOf, type PaneCount } from './paneLayout';
 import { usePanes } from './paneStore';
 
@@ -229,6 +230,7 @@ function Pane({
   }, [menuOpen]);
 
   const accent = preset?.accent ?? '#99A1B3';
+  const markedUnread = useUnread((s) => (term ? s.marked.includes(`terminal:${term.id}`) : false));
 
   return (
     <section
@@ -303,6 +305,19 @@ function Pane({
               >
                 <Plus size={14} className="text-dim" /> New terminal here
               </button>
+              {term && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    toggleUnread(`terminal:${term.id}`);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-white/[0.07]"
+                >
+                  <MailDot size={14} className="text-dim" /> {markedUnread ? 'Mark read' : 'Mark unread'}
+                </button>
+              )}
               {term && (
                 <button
                   type="button"

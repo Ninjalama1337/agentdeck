@@ -31,6 +31,7 @@ import { Spinner } from './components/ui/Spinner';
 import { desktopFrame, useDesktopLayout } from './hooks/useDesktopLayout';
 import { matchShortcut, OPEN_PROJECT_SWITCHER } from './util/shortcuts';
 import { openQuickOpen, QuickOpen } from './components/QuickOpen';
+import { useUnreadTracking } from './hooks/useUnreadTracking';
 import { attachPaneSync } from './features/code/paneSync';
 import { usePanes } from './features/code/paneStore';
 
@@ -139,6 +140,7 @@ export default function App() {
 
   // Usage button: follow the agent in use, refresh every minute.
   useUsageTracking();
+  useUnreadTracking();
 
   // Warm the other tabs once the first screen is up.
   useEffect(() => {

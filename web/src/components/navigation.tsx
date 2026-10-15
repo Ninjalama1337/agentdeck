@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Folder, GitBranch, LayoutGrid, MessageSquare, SquareTerminal } from 'lucide-react';
+import { isSessionUnread, useUnread } from '../store/unread';
 import { useAppStore } from '../store/appStore';
 import type { Route } from '../store/appStore';
 import { TAB_ROUTES } from '../util/shortcuts';
@@ -31,13 +32,15 @@ export function useTabIndicators(): (name: Route['name']) => ReactNode {
   const projects = useAppStore((s) => s.projects);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
 
-  const running = Object.values(sessionsByProject)
-    .flat()
-    .filter((s) => s.status === 'running' || s.status === 'queued').length;
-  const waiting = terminals.filter((t) => t.attention).length;
+  const unread = useUnread();
+  const allSessions = Object.values(sessionsByProject).flat();
+  const running = allSessions.filter((s) => s.status === 'running' || s.status === 'queued').length;
+  const unreadChats = allSessions.filter((s) => isSessionUnread(s, unread)).length;
+  const waiting = terminals.filter((t) => t.attention || unread.marked.includes(`terminal:${t.id}`)).length;
   const dirty = projects.find((p) => p.id === activeProjectId)?.git?.dirty ?? 0;
 
   return (name) => {
+    if (name === 'chat' && unreadChats > 0) return <span className="badge">{unreadChats > 99 ? '99+' : unreadChats}</span>;
     if (name === 'chat' && running > 0) return <span className="block h-2.5 w-2.5 rounded-full bg-accent pulse-dot" />;
     if (name === 'code' && waiting > 0) return <span className="badge !bg-warn !text-black">{waiting}</span>;
     if (name === 'code' && terminals.length > 0) return <span className="block h-2 w-2 rounded-full bg-ok" />;

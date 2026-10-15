@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, Clock, Loader2, MessageSquare, Plus, Users } from 'lucide-react';
 import { clsx } from 'clsx';
+import { isSessionUnread, useUnread } from '../../store/unread';
 import type { Session } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import { AgentAvatar } from '../../components/ui/Avatar';
@@ -39,6 +40,7 @@ export function SessionListPanel({
   const agents = useAppStore((s) => s.agents);
   const openSession = useAppStore((s) => s.openSession);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const unread = useUnread();
   const navigate = useAppStore((s) => s.navigate);
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -111,12 +113,20 @@ export function SessionListPanel({
             const active = session.status === 'running' || session.status === 'queued';
             const statusColor = STATUS_DOT[session.status];
             const selected = embedded && session.id === activeSessionId;
+            const isUnread = isSessionUnread(session, unread);
             return (
               <button
                 key={session.id}
                 type="button"
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => void open(session)}
+                title="Right-click or long-press: mark unread"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const target = `session:${session.id}`;
+                  if (isUnread) unread.view(target, Math.max(Date.now(), session.updatedAt));
+                  else unread.mark(target);
+                }}
                 className={clsx(
                   'press tap glass flex items-center gap-3.5 p-3.5 text-left active:bg-surface-2 hover:bg-surface-2',
                   selected && '!border-accent/45 !bg-accent/10',
@@ -124,8 +134,9 @@ export function SessionListPanel({
               >
                 <AgentAvatar agent={agent} agentId={session.agentId} size="md" glow={active} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14.5px] font-semibold leading-snug">
-                    {session.title || 'Session'}
+                  <span className={clsx('flex items-center gap-1.5 truncate text-[14.5px] leading-snug', isUnread ? 'font-bold text-ink' : 'font-semibold')}>
+                    {isUnread && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
+                    <span className="truncate">{session.title || 'Session'}</span>
                   </span>
                   <span className="mt-1 flex items-center gap-2 text-[12px] text-dim">
                     <span

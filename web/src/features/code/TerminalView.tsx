@@ -7,6 +7,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
+import { useUnread } from '../../store/unread';
 import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
 import { installMobileIme } from './termIme';
@@ -235,6 +236,11 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Looking at it clears a hand-set unread mark (in a pane: once it has focus).
+  useEffect(() => {
+    if (visible && (!pane || focused)) useUnread.getState().view(`terminal:${id}`);
+  }, [visible, pane, focused, id]);
 
   // A desktop pane that gets focus (click, tab, shortcut) types into its terminal.
   useEffect(() => {

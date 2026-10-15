@@ -9,6 +9,7 @@ import { clsx } from 'clsx';
 import type { TerminalInfo, TerminalPreset } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
+import { useUnread } from '../../store/unread';
 import { haptic } from '../../util/haptics';
 import { rememberCommand, type LaunchSpec } from './Launcher';
 import { estimateSize, sendRaw, sendText } from './termInput';
@@ -122,7 +123,19 @@ const ATTENTION_LABEL: Record<NonNullable<TerminalInfo['attentionState']>, strin
 };
 
 /** Status dot of a terminal: its agent's accent, or the attention state while it waits for the user. */
+/** Hand-set unread mark on or off (context menu, pane menu). */
+export function toggleUnread(target: string): void {
+  const u = useUnread.getState();
+  if (u.marked.includes(target)) u.view(target);
+  else u.mark(target);
+  haptic('light');
+}
+
 export function TerminalDot({ term, accent }: { term: TerminalInfo; accent: string }) {
+  const marked = useUnread((s) => s.marked.includes(`terminal:${term.id}`));
+  if (marked && !term.attention) {
+    return <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white/80" style={{ background: accent }} aria-label="Marked unread" />;
+  }
   return term.attention ? (
     <span
       className={clsx('attention-dot shrink-0', term.attentionState && `attention-${term.attentionState}`)}
@@ -173,6 +186,11 @@ export function TerminalTab({
         active ? 'bg-surface-3 text-ink' : 'border-line bg-surface text-dim',
       )}
       style={active ? { borderColor: `${accent}66`, boxShadow: `0 0 0 1px ${accent}22` } : undefined}
+      title="Right-click or long-press: mark unread"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        toggleUnread(`terminal:${term.id}`);
+      }}
     >
       <button type="button" onClick={onSelect} className="flex h-full items-center gap-2">
         <TerminalDot term={term} accent={accent} />
