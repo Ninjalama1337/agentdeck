@@ -15,6 +15,7 @@ import { statsRoutes } from './stats.js';
 import { adminRoutes } from './admin.js';
 import { updateRoutes } from './update.js';
 import { terminalRoutes } from './terminals.js';
+import { worktreeRoutes } from './worktrees.js';
 import { routineRoutes } from './routines.js';
 import { accountRoutes } from './accounts.js';
 import { enhanceRoutes } from './enhance.js';
@@ -38,6 +39,7 @@ export async function registerRoutes(fastify: FastifyInstance, opts: { deps: App
   await sessionRoutes(fastify, deps);
   await teamRoutes(fastify, deps);
   await terminalRoutes(fastify, deps);
+  await worktreeRoutes(fastify, deps);
   await routineRoutes(fastify, deps);
   await accountRoutes(fastify, deps);
   await enhanceRoutes(fastify, deps);

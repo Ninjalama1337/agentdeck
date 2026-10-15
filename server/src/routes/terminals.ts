@@ -24,7 +24,7 @@ const CreateSchema = z.object({
 });
 
 /** A zone name this machine knows — it ends up in the terminal's environment. */
-function knownTimeZone(zone: string | undefined): string | undefined {
+export function knownTimeZone(zone: string | undefined): string | undefined {
   if (!zone || !/^[A-Za-z0-9_+\-/]+$/.test(zone)) return undefined;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: zone });

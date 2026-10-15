@@ -23,6 +23,7 @@ export const PRESET_DEFS: PresetDef[] = [
     description: 'Anthropic Claude Code TUI',
     kind: 'agent',
     command: 'claude',
+    promptArg: '{prompt}',
     accent: '#FF6A3D',
     variants: [
       NEW,
@@ -51,6 +52,7 @@ export const PRESET_DEFS: PresetDef[] = [
     description: 'OpenAI Codex CLI',
     kind: 'agent',
     command: 'codex',
+    promptArg: '{prompt}',
     accent: '#10B981',
     variants: [
       NEW,
@@ -73,6 +75,7 @@ export const PRESET_DEFS: PresetDef[] = [
     description: 'sst/opencode terminal agent',
     kind: 'agent',
     command: 'opencode',
+    promptArg: '--prompt {prompt}',
     accent: '#F5A524',
     variants: [
       NEW,
@@ -93,6 +96,7 @@ export const PRESET_DEFS: PresetDef[] = [
     description: 'Google Gemini CLI (Antigravity models)',
     kind: 'agent',
     command: 'gemini',
+    promptArg: '-i {prompt}',
     accent: '#4E8CFF',
     variants: [
       NEW,
@@ -288,10 +292,17 @@ export function listPresets(force = false): TerminalPreset[] {
  * Resolves what to type into the fresh shell. Returns undefined for a plain
  * shell. Throws on unknown preset/variant ids.
  */
+/** Single-quoted for a POSIX shell. */
+export function shellQuote(text: string): string {
+  return `'${text.replace(/'/g, "'\\''")}'`;
+}
+
 export function resolveLaunch(
   presetId: string | undefined,
   variantId: string | undefined,
   command: string | undefined,
+  /** First prompt for the agent (presets with `promptArg` only). */
+  prompt?: string,
 ): { command?: string; title: string; presetId: string; variantId?: string; agent: boolean } {
   const custom = command?.trim();
   if (custom) {
@@ -302,7 +313,10 @@ export function resolveLaunch(
   if (!def) throw new Error(`Unknown terminal preset: ${presetId}`);
   const variant = def.variants.find((v) => v.id === (variantId ?? 'new'));
   if (!variant) throw new Error(`Unknown variant ${variantId} for ${presetId}`);
-  const cmd = [def.command, variant.args].filter((s) => s.trim()).join(' ');
+  const first = prompt?.trim();
+  if (first && !def.promptArg) throw new Error(`${def.label} cannot take a prompt on start`);
+  const promptArgs = first && def.promptArg ? def.promptArg.replace('{prompt}', shellQuote(first)) : '';
+  const cmd = [def.command, variant.args, promptArgs].filter((s) => s.trim()).join(' ');
   const title = variant.id === 'new' ? def.label : `${def.label} · ${variant.label}`;
   return { command: cmd, title, presetId: def.id, variantId: variant.id, agent: def.kind === 'agent' };
 }

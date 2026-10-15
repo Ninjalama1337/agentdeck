@@ -25,6 +25,9 @@ import type {
   GitChange,
   GitCommitInfo,
   GitDiffResponse,
+  ParallelLaunchRequest,
+  ParallelLaunchResponse,
+  WorktreeInfo,
   GitOpResult,
   FcmRegisterRequest,
   PushStatus,
@@ -297,6 +300,28 @@ export const api = {
 
   deleteProject(id: string): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
+  },
+
+  /** One prompt, several agents, each in its own git worktree. */
+  startParallel(body: ParallelLaunchRequest): Promise<ParallelLaunchResponse> {
+    const { projectId, ...rest } = body;
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/parallel`, { json: rest });
+  },
+
+  worktrees(projectId: string): Promise<WorktreeInfo[]> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/worktrees`);
+  },
+
+  worktreeDiff(projectId: string, name: string): Promise<GitDiffResponse> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(name)}/diff`);
+  },
+
+  applyWorktree(projectId: string, name: string): Promise<{ merged: string }> {
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(name)}/apply`);
+  },
+
+  removeWorktree(projectId: string, name: string): Promise<void> {
+    return request('DELETE', `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(name)}`);
   },
 
   /** Every file path of a project (quick open). */

@@ -28,6 +28,7 @@ import { relTime } from '../../util/format';
 import { haptic } from '../../util/haptics';
 import { DiffView } from './DiffView';
 import { ReviewSendBar } from './ReviewSend';
+import { WorktreesSection } from './WorktreesSection';
 
 const STATE_BADGE: Record<GitChange['state'], { letter: string; color: string }> = {
   modified: { letter: 'M', color: '#F59E0B' },
@@ -252,6 +253,7 @@ function GitScreenInner({ projectId }: { projectId: string }) {
           {tab === 'changes' ? (
             <>
               <ReviewSendBar projectId={projectId} />
+              <WorktreesSection projectId={projectId} onMerged={() => void refresh()} />
               {changes === null ? (
                 <div className="flex flex-col gap-2">
                   {[0, 1, 2].map((i) => (

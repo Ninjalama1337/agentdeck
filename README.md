@@ -52,6 +52,16 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 - **Git-Tab** — geänderte Dateien mit farbigem Diff, einzelne Dateien auswählen
   oder verwerfen, KI-Commit-Message aus dem Diff, Commit & Push, Pull/Fetch,
   Branches wechseln/anlegen, Historie mit Commit-Diffs, GitHub-Clone.
+  Zeilen im Diff kommentieren und die Kommentare gesammelt als Review an einen
+  Agent schicken.
+- **Parallele Worktrees** — dieselbe Aufgabe an bis zu vier Agents, jeder in
+  einem eigenen Git-Worktree auf eigenem Branch; im Git-Tab die Ergebnisse
+  vergleichen, das beste mergen, den Rest verwerfen.
+- **Usage im Blick** — 5-Stunden- und Wochenlimit als Balken mit Countdown bis
+  zum Reset, Agents nach dem knappsten Limit sortiert, Push bei 80/95/100 %.
+- **Quick Open** — Strg/⌘+P (bzw. die Lupe): Bildschirme, Projekte, Terminals,
+  Chats und Dateien in einer Suche. Chats und Terminals lassen sich als
+  ungelesen markieren.
 - **Chat-Steuerung aller Agents** — Turns senden, Live-Streaming der Antwort
   (Text, Tool-Nutzung, Token-/Kosten-Verbrauch), Unterbrechen per Tap. Wer
   die App mitten in einer Antwort wieder öffnet, sieht den bisherigen Stand

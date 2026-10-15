@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, Clock, Download, Play, RefreshCw, TerminalSquare } from 'lucide-react';
+import { ChevronRight, Clock, Download, Play, RefreshCw, TerminalSquare, GitFork } from 'lucide-react';
 import { clsx } from 'clsx';
+import { openParallel } from './ParallelSheet';
 import type { TerminalPreset } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
@@ -57,7 +58,16 @@ export function PresetGlyph({ preset, size = 40 }: { preset: Pick<TerminalPreset
  * Agent launcher: one card per preset (Claude Code, Codex, OpenCode, Gemini,
  * shell, tools). Tap the card = new session; chips = continue/resume/yolo.
  */
-export function LauncherGrid({ onLaunch, compact }: { onLaunch: (spec: LaunchSpec) => void; compact?: boolean }) {
+export function LauncherGrid({
+  onLaunch,
+  compact,
+  onBeforeParallel,
+}: {
+  onLaunch: (spec: LaunchSpec) => void;
+  compact?: boolean;
+  /** Runs before the parallel sheet opens (the launcher sheet closes itself). */
+  onBeforeParallel?: () => void;
+}) {
   const presets = useAppStore((s) => s.terminalPresets);
   const refresh = useAppStore((s) => s.refreshTerminalPresets);
   const [showMissing, setShowMissing] = useState(false);
@@ -88,6 +98,22 @@ export function LauncherGrid({ onLaunch, compact }: { onLaunch: (spec: LaunchSpe
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-2">
         <h3 className="section-title px-1">Agents</h3>
+        {agents.some((p) => p.promptArg) && (
+          <button
+            type="button"
+            onClick={() => {
+              onBeforeParallel?.();
+              openParallel();
+            }}
+            className="press tap flex items-center gap-3 rounded-2xl border border-dashed border-accent/45 bg-accent/[0.06] px-3.5 py-3 text-left"
+          >
+            <GitFork size={18} className="shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-semibold">Run in parallel</span>
+              <span className="block text-[12px] text-dim">Same task, several agents, separate worktrees — keep the best</span>
+            </span>
+          </button>
+        )}
         {agents.length === 0 && (
           <p className="rounded-2xl border border-line bg-white/[0.03] px-4 py-3 text-[13px] text-dim">
             No agent CLI found on the server PATH. Install one below, then tap refresh.
@@ -270,6 +296,7 @@ export function LauncherSheet({
           onClose();
           onLaunch(spec);
         }}
+        onBeforeParallel={onClose}
       />
     </Sheet>
   );

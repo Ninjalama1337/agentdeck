@@ -27,6 +27,7 @@ import { makeBridgeGuard, makeDeviceAuthHook } from '../auth/guards.js';
 import { TunnelManager } from '../tunnel/manager.js';
 import { UsageCollector } from '../usage/collector.js';
 import { alertText, UsageWatcher } from '../usage/watcher.js';
+import { WorktreeStore } from '../git/worktrees.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
@@ -332,6 +333,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     teams: new TeamOrchestrator(store, manager, log),
     usage,
     usageWatcher,
+    worktrees: new WorktreeStore(config.dataDir),
     stats,
     pairing,
     limiter,

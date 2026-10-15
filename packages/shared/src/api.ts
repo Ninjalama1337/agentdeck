@@ -700,6 +700,50 @@ export interface TerminalPreset {
   snippets?: { label: string; text: string }[];
   /** Install hint shown when unavailable. */
   install?: string;
+  /**
+   * How the CLI takes a first prompt on start ("{prompt}" is replaced by the
+   * shell-quoted text). Presets with it can run in parallel worktrees.
+   */
+  promptArg?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Parallel worktrees — one prompt, several agents, each in its own git worktree
+// ---------------------------------------------------------------------------
+
+export interface WorktreeInfo {
+  /** Unique within the project; also the folder name. */
+  name: string;
+  path: string;
+  branch: string;
+  /** Commit the worktree started from. */
+  base: string;
+  presetId: string;
+  /** Agent label ("Claude Code"). */
+  label: string;
+  prompt: string;
+  createdAt: number;
+  /** Terminal the agent runs in, while it is alive. */
+  terminalId?: string;
+  /** Changes against `base`, uncommitted ones included. */
+  stats?: { files: number; add: number; del: number };
+  /** The folder is gone (removed outside the app). */
+  missing?: boolean;
+}
+
+export interface ParallelLaunchRequest {
+  projectId: string;
+  prompt: string;
+  /** 2–4 agents; the same preset may appear more than once. */
+  agents: { presetId: string; variantId?: string }[];
+  cols?: number;
+  rows?: number;
+  timeZone?: string;
+}
+
+export interface ParallelLaunchResponse {
+  worktrees: WorktreeInfo[];
+  terminals: TerminalInfo[];
 }
 
 // ---------------------------------------------------------------------------
