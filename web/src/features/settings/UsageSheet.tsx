@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, Check, ChevronDown, ChevronRight, Coins, Gauge, Loader2, RefreshCw, Sparkles, Zap } from 'lucide-react';
+import { AlertTriangle, BarChart3, Check, ChevronDown, ChevronRight, Gauge, Loader2, RefreshCw, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import { AGENT_ACCENTS, AGENT_LABELS, AGENT_SHORT_LABELS } from '@agentdeck/shared';
@@ -8,6 +8,25 @@ import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { AgentAvatar } from '../../components/ui/Avatar';
 import { normalizeMeridiemTimes, resetLabel } from '../../util/format';
+import { usePrefs } from '../../store/prefs';
+import { useNow } from '../../hooks/useNow';
+import {
+  countdown,
+  pctLabel,
+  shownPct,
+  sortByTightest,
+  tightestWindow,
+  USAGE_WARN_PCT,
+  usageWarnings,
+  type UsageDisplay,
+} from '../../util/usageWindows';
+
+/** "resets in 2h 13m · Oct 15, 14:00" — the countdown where the reset is a timestamp. */
+function resetText(resetsAt: string | undefined, now: number): string | undefined {
+  if (!resetsAt) return undefined;
+  const left = countdown(resetsAt, now);
+  return left ? `resets in ${left} · ${resetLabel(resetsAt)}` : `resets ${resetLabel(resetsAt)}`;
+}
 
 /** "2m ago" style relative time for the fetch timestamp. */
 function ago(ts: number): string {
@@ -19,14 +38,15 @@ function ago(ts: number): string {
 }
 
 function MiniCircleGauge({ pct, accent, cost, available }: { pct?: number; accent: string; cost?: string; available: boolean }) {
+  const display = usePrefs((s) => s.usageDisplay);
   const r = 14;
   const c = 2 * Math.PI * r; // ~87.96
-  const isDanger = typeof pct === 'number' && pct >= 80;
-  const clampedPct = typeof pct === 'number' ? Math.max(0, Math.min(100, pct)) : (available ? 100 : 0);
+  const isDanger = typeof pct === 'number' && pct >= USAGE_WARN_PCT;
+  const clampedPct = typeof pct === 'number' ? shownPct(pct, display) : (available ? 100 : 0);
   const strokeDashoffset = typeof pct === 'number' ? c - (c * clampedPct) / 100 : 0;
   const strokeColor = !available ? '#5B6478' : isDanger ? '#F43F5E' : accent;
 
-  const display = typeof pct === 'number' ? `${pct}%` : cost ? cost : (available ? 'OK' : '—');
+  const text = typeof pct === 'number' ? `${shownPct(pct, display)}%` : cost ? cost : (available ? 'OK' : '—');
 
   return (
     <div className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center">
@@ -51,7 +71,7 @@ function MiniCircleGauge({ pct, accent, cost, available }: { pct?: number; accen
           className="text-[10px] font-extrabold tabular-nums tracking-tighter text-ink"
           style={{ color: isDanger ? '#F43F5E' : undefined }}
         >
-          {display}
+          {text}
         </span>
       </div>
     </div>
@@ -59,23 +79,25 @@ function MiniCircleGauge({ pct, accent, cost, available }: { pct?: number; accen
 }
 
 function Bar({ label, win, accent }: { label: string; win: UsageWindow; accent: string }) {
+  const display = usePrefs((s) => s.usageDisplay);
+  const now = useNow();
   const pct = win.pct ?? 0;
-  const danger = pct >= 80;
+  const danger = pct >= USAGE_WARN_PCT;
   const fill = danger ? '#F43F5E' : accent;
-  const resetText = win.resetsAt ? resetLabel(win.resetsAt) : undefined;
+  const reset = resetText(win.resetsAt, now);
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[12.5px] font-medium text-ink">{label}</span>
         <span className="text-[12px] text-dim">
-          <span className={danger ? 'font-semibold text-danger' : 'font-semibold text-ink'}>{pct}% used</span>
-          {resetText ? <span> · resets {resetText}</span> : null}
+          <span className={danger ? 'font-semibold text-danger' : 'font-semibold text-ink'}>{pctLabel(pct, display)}</span>
+          {reset ? <span> · {reset}</span> : null}
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]" role="img" aria-label={`${label}: ${pct}% used`}>
+      <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]" role="img" aria-label={`${label}: ${pctLabel(pct, display)}`}>
         <div
           className="h-full rounded-full transition-[width] duration-500"
-          style={{ width: `${Math.min(100, pct)}%`, background: fill, boxShadow: `0 0 10px ${fill}66` }}
+          style={{ width: `${shownPct(pct, display)}%`, background: fill, boxShadow: `0 0 10px ${fill}66` }}
         />
       </div>
     </div>
@@ -389,6 +411,10 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
   const toast = useAppStore((s) => s.toast);
   const [busy, setBusy] = useState(false);
   const [switchingPlan, setSwitchingPlan] = useState<string | null>(null);
+  const display = usePrefs((s) => s.usageDisplay);
+  const compact = usePrefs((s) => s.usageCompact);
+  const setPref = usePrefs((s) => s.set);
+  const now = useNow();
 
   const isOpen = open !== undefined ? open : storeUsageOpen;
   const handleClose = () => {
@@ -421,14 +447,14 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
 
   const newest = usage?.reduce((acc, u) => Math.max(acc, u.fetchedAt ?? 0), 0);
 
-  // The agent in use leads; the rest keeps a fixed order: agy, opencode, claude, codex, zcode
-  const PREFERRED_ORDER: AgentId[] = ['antigravity', 'opencode', 'claude', 'codex', 'zcode'];
+  // Tightest limit first (as in Orca's usage roster); a fixed order breaks ties.
+  const PREFERRED_ORDER: AgentId[] = ['claude', 'codex', 'opencode', 'antigravity', 'zcode'];
   const rank = (id: AgentId) => {
-    if (id === currentUsageAgent) return -1;
     const idx = PREFERRED_ORDER.indexOf(id);
     return idx !== -1 ? idx : 99;
   };
-  const sortedUsage = usage ? [...usage].sort((a, b) => rank(a.agentId) - rank(b.agentId)) : [];
+  const sortedUsage = usage ? sortByTightest([...usage].sort((a, b) => rank(a.agentId) - rank(b.agentId))) : [];
+  const warnings = usageWarnings(usage);
 
   return (
     <Sheet open={isOpen} onClose={handleClose} title="Agent Usages" subtitle="Plan limits & quota of your coding tools">
@@ -446,6 +472,45 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
           Refresh
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-3">
+        <Segmented
+          label="Usage view"
+          value={compact ? 'compact' : 'detailed'}
+          options={[
+            { value: 'detailed', label: 'Detailed' },
+            { value: 'compact', label: 'Compact' },
+          ]}
+          onChange={(v) => setPref('usageCompact', v === 'compact')}
+        />
+        <Segmented
+          label="Show limits as"
+          value={display}
+          options={[
+            { value: 'used', label: '% used' },
+            { value: 'left', label: '% left' },
+          ]}
+          onChange={(v) => setPref('usageDisplay', v)}
+        />
+      </div>
+
+      {warnings.length > 0 && (
+        <div role="alert" className="mb-3 flex flex-col gap-1 rounded-xl border border-danger/40 bg-danger/[0.08] px-3 py-2.5">
+          {warnings.slice(0, 3).map(({ agentId, window: w }) => {
+            const left = countdown(w.resetsAt, now);
+            return (
+              <p key={`${agentId}:${w.key}`} className="flex items-start gap-2 text-[12.5px] leading-snug text-ink">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-danger" />
+                <span>
+                  <span className="font-semibold">{AGENT_SHORT_LABELS[agentId] ?? agentId}</span> {w.label.toLowerCase()}:{' '}
+                  <span className="font-semibold text-danger">{pctLabel(w.pct, display)}</span>
+                  {left ? <span className="text-dim"> — resets in {left}</span> : null}
+                </span>
+              </p>
+            );
+          })}
+        </div>
+      )}
 
       <button
         type="button"
@@ -466,8 +531,19 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
           Reading usages from AGY, OpenCode, Claude, Codex & ZCode…
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {sortedUsage.map((u) => (
+        <div className={clsx('flex flex-col', compact ? 'gap-2' : 'gap-3')}>
+          {compact && sortedUsage.map((u) => (
+            <CompactRow
+              key={u.agentId}
+              usage={u}
+              accent={AGENT_ACCENTS[u.agentId] ?? '#7C5CFF'}
+              display={display}
+              now={now}
+              isActive={currentUsageAgent === u.agentId}
+              onSelect={() => setCurrentUsageAgent(u.agentId)}
+            />
+          ))}
+          {!compact && sortedUsage.map((u) => (
             <UsageCard
               key={u.agentId}
               usage={u}
@@ -486,5 +562,83 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
         </div>
       )}
     </Sheet>
+  );
+}
+
+/** Compact roster line: agent, its tightest limit as a bar, the time to that reset. */
+function CompactRow({ usage, accent, display, now, isActive, onSelect }: {
+  usage: AgentUsage;
+  accent: string;
+  display: UsageDisplay;
+  now: number;
+  isActive: boolean;
+  onSelect: () => void;
+}) {
+  const tight = tightestWindow(usage);
+  const danger = tight !== null && tight.pct >= USAGE_WARN_PCT;
+  const left = countdown(tight?.resetsAt, now);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={isActive ? 'Shown in the usage button' : 'Show in the usage button'}
+      className={clsx(
+        'press tap flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left',
+        isActive ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-white/[0.03]',
+      )}
+    >
+      <AgentAvatar agent={undefined} agentId={usage.agentId} size="sm" />
+      <span className="w-24 min-w-0 shrink-0">
+        <span className="block truncate text-[13px] font-semibold text-ink">{AGENT_SHORT_LABELS[usage.agentId] ?? usage.agentId}</span>
+        {usage.plan && <span className="block truncate text-[10.5px] text-dim">{usage.plan}</span>}
+      </span>
+      {tight ? (
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+            <span
+              className="block h-full rounded-full"
+              style={{ width: `${shownPct(tight.pct, display)}%`, background: danger ? '#F43F5E' : accent }}
+            />
+          </span>
+          <span className="flex justify-between gap-2 text-[11px] text-dim">
+            <span className={danger ? 'font-semibold text-danger' : 'text-ink'}>
+              {pctLabel(tight.pct, display)} · {tight.short}
+            </span>
+            {left && <span className="tabular-nums">{left}</span>}
+          </span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-dim">
+          {usage.cost ?? (usage.available ? 'No limit data' : (usage.reason ?? 'Not available'))}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function Segmented<T extends string>({ value, options, onChange, label }: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+  label: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex rounded-full border border-line bg-white/[0.04] p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={clsx(
+            'press rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors',
+            value === o.value ? 'bg-surface-3 text-ink' : 'text-dim hover:text-ink',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

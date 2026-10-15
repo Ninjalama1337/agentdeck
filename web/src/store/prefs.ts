@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import type { DeckNotificationKind } from '@agentdeck/shared';
 import { desktopLayoutNow } from '../hooks/useDesktopLayout';
+import type { UsageDisplay } from '../util/usageWindows';
 
 export type DictationEngine = 'auto' | 'device' | 'server';
 
@@ -26,6 +27,10 @@ export interface Prefs {
   dictationLang: string;
   /** Send chat messages with Enter (desktop) — phones keep Enter = newline. */
   enterToSend: boolean;
+  /** Usage limits read as "% used" or "% left". */
+  usageDisplay: UsageDisplay;
+  /** Usage sheet: one line per agent (its tightest limit) instead of full cards. */
+  usageCompact: boolean;
 }
 
 const KEY = 'agentdeck:prefs';
@@ -49,6 +54,8 @@ export const DEFAULT_PREFS: Prefs = {
   dictation: 'auto',
   dictationLang: '',
   enterToSend: false,
+  usageDisplay: 'used',
+  usageCompact: false,
 };
 
 function load(): Prefs {
