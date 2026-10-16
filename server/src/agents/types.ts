@@ -121,7 +121,7 @@ export function summarizeInput(input: unknown): string | undefined {
   }
   if (typeof input !== 'object') return String(input);
   const obj = input as Record<string, unknown>;
-  const preferred = ['file_path', 'path', 'command', 'CommandLine', 'commandLine', 'pattern', 'url', 'query', 'description', 'prompt'];
+  const preferred = ['file_path', 'filePath', 'path', 'command', 'CommandLine', 'commandLine', 'pattern', 'url', 'query', 'description', 'prompt'];
   const parts: string[] = [];
   for (const key of preferred) {
     const value = obj[key];
