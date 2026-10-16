@@ -20,6 +20,7 @@ import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import type { AgentService } from '../agents/registry.js';
 import { collectOpenCodeGoUsage, type OpenCodeGoUsage } from '../agents/opencodeGo.js';
 import { getZcodePlanInfo, readZcodeSqliteStats } from '../agents/zcode.js';
+import { TimeoutError, withTimeout } from '../util/async.js';
 
 export const USAGE_TTL_MS = 30_000;
 const CLAUDE_TIMEOUT_MS = 30_000;
@@ -27,6 +28,15 @@ const AGY_TIMEOUT_MS = 20_000;
 const OPENCODE_TIMEOUT_MS = 15_000;
 const CODEX_TIMEOUT_MS = 15_000;
 const CODEX_APP_SERVER_TIMEOUT_MS = 12_000;
+// Hard ceiling per agent, a little above its own CLI/network timeouts. A spawned
+// CLI can hang past those (a grandchild keeps the output pipe open, a stuck
+// mount, …); without this ceiling that one promise never settles, `Promise.all`
+// never resolves and `inflight` wedges every later GET /api/usage until restart.
+const CLAUDE_MAX_MS = 35_000;
+const AGY_MAX_MS = 45_000;
+const OPENCODE_MAX_MS = 30_000;
+const CODEX_MAX_MS = 35_000;
+const ZCODE_MAX_MS = 20_000;
 const RAW_CAP = 4000;
 
 /** Exec result shape used by the collector (satisfied by execa with reject:false). */
@@ -66,6 +76,8 @@ export interface CollectorOptions {
   zcodeCollector?: () => Promise<Partial<AgentUsage>>;
   /** OpenCode Go subscription overlay override (tests). */
   opencodeGoCollector?: () => Promise<OpenCodeGoUsage>;
+  /** Overrides every per-agent hard timeout (tests). */
+  agentTimeoutMs?: number;
 }
 
 interface CacheEntry {
@@ -531,6 +543,7 @@ export class UsageCollector {
   private readonly isAvailableFn: (agentId: AgentId) => boolean;
   private readonly readCodexRateLimits?: () => Promise<unknown>;
   private readonly ttlMs: number;
+  private readonly agentTimeoutMs?: number;
   private cache?: CacheEntry;
   private inflight?: Promise<AgentUsage[]>;
 
@@ -544,6 +557,7 @@ export class UsageCollector {
     this.readCodexRateLimits =
       opts.readCodexRateLimits ?? (opts.spawn ? undefined : () => readCodexRateLimitsFromAppServer(this.envFor('codex')));
     this.ttlMs = opts.ttlMs ?? USAGE_TTL_MS;
+    this.agentTimeoutMs = opts.agentTimeoutMs;
     this.zcodeCollector = opts.zcodeCollector;
     // Network read of the OpenCode Go quota — off when a custom spawn is used (tests).
     this.readOpenCodeGo = opts.opencodeGoCollector ?? (opts.spawn ? undefined : collectOpenCodeGoUsage);
@@ -572,13 +586,35 @@ export class UsageCollector {
   private async collectUncached(): Promise<AgentUsage[]> {
     const fetchedAt = Date.now();
     const entries = await Promise.all([
-      this.collectClaude(fetchedAt),
-      this.collectAntigravity(fetchedAt),
-      this.collectOpenCode(fetchedAt),
-      this.collectCodex(fetchedAt),
-      this.collectZcode(fetchedAt),
+      this.collectSafely('claude', this.collectClaude(fetchedAt), fetchedAt, CLAUDE_MAX_MS),
+      this.collectSafely('antigravity', this.collectAntigravity(fetchedAt), fetchedAt, AGY_MAX_MS),
+      this.collectSafely('opencode', this.collectOpenCode(fetchedAt), fetchedAt, OPENCODE_MAX_MS),
+      this.collectSafely('codex', this.collectCodex(fetchedAt), fetchedAt, CODEX_MAX_MS),
+      this.collectSafely('zcode', this.collectZcode(fetchedAt), fetchedAt, ZCODE_MAX_MS),
     ]);
     return entries;
+  }
+
+  /**
+   * Bounds one agent's collection so a promise that never settles cannot wedge
+   * the cached/final result: the agent is reported unavailable instead and every
+   * later request gets a fresh attempt.
+   */
+  private async collectSafely(
+    agentId: AgentId,
+    run: Promise<AgentUsage>,
+    fetchedAt: number,
+    ms: number,
+  ): Promise<AgentUsage> {
+    try {
+      return await withTimeout(run, this.agentTimeoutMs ?? ms, `${agentId} usage`);
+    } catch (err) {
+      const reason =
+        err instanceof TimeoutError
+          ? `Reading usage timed out after ${Math.round((this.agentTimeoutMs ?? ms) / 1000)}s`
+          : `Reading usage failed: ${errorMessage(err)}`;
+      return { agentId, available: false, reason, fetchedAt };
+    }
   }
 
   private async collectClaude(fetchedAt: number): Promise<AgentUsage> {

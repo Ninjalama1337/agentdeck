@@ -284,6 +284,33 @@ describe('UsageCollector', () => {
     expect(opencode?.session?.pct).toBe(12);
   });
 
+  it('does not wedge the readout when one agent never settles', async () => {
+    let opencodeRuns = 0;
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => ['claude', 'opencode'].includes(id),
+      ttlMs: 0,
+      agentTimeoutMs: 40,
+      spawn: (cmd: string) => {
+        if (cmd === 'claude') return new Promise<SpawnResult>(() => {}); // hangs forever
+        if (cmd === 'opencode') {
+          opencodeRuns += 1;
+          return Promise.resolve(ok(OPENCODE_SAMPLE));
+        }
+        return Promise.resolve(ok(''));
+      },
+    });
+    const first = await c.collect();
+    const claude = first.find((r) => r.agentId === 'claude');
+    expect(claude?.available).toBe(false);
+    expect(claude?.reason).toContain('timed out');
+    expect(first.find((r) => r.agentId === 'opencode')?.available).toBe(true);
+    // The hung agent must not poison later requests: a new run still completes.
+    const second = await c.collect();
+    expect(second.find((r) => r.agentId === 'opencode')?.available).toBe(true);
+    expect(opencodeRuns).toBe(2);
+  });
+
   it('clears cache on clearCache()', async () => {
     let callCount = 0;
     const c = new UsageCollector({
