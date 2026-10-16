@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Attachment, ChatMessage, Project, Session, SessionDetailResponse, ThinkingEffort } from '@agentdeck/shared';
 import { z } from 'zod';
 import { execa } from 'execa';
+import { AgentIdSchema } from '../config.js';
 import { httpError, notFound } from '../http/errors.js';
 import { guessMime } from '../files/browser.js';
 import { resolveInsideRoot } from '../files/sandbox.js';
@@ -37,7 +38,7 @@ export function effortOr400(value: string | undefined): ThinkingEffort | undefin
 
 const CreateSessionSchema = z.object({
   projectId: z.string().min(1),
-  agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+  agentId: AgentIdSchema,
   model: z.string().optional(),
   thinkingEffort: z.string().optional(),
   permissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypass']).optional(),

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { AgentIdSchema } from '../config.js';
 import { notFound } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
@@ -12,7 +13,7 @@ const TeamRunSchema = z.object({
   steps: z
     .array(
       z.object({
-        agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+        agentId: AgentIdSchema,
         prompt: z.string().min(1).max(100_000),
       }),
     )

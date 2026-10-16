@@ -15,7 +15,7 @@ const ENV_KEY = /^[A-Z_][A-Z0-9_]*$/;
 
 const AccountBodySchema = z.object({
   name: z.string().trim().min(1).max(60),
-  agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+  agentId: z.enum(ACCOUNT_AGENTS),
   env: z.record(z.string().max(500)).refine(
     (env) => Object.keys(env).length <= 24 && Object.keys(env).every((k) => ENV_KEY.test(k)),
     { message: 'env keys must be UPPER_SNAKE env names (max 24 entries)' },

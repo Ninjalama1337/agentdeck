@@ -4,6 +4,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { AgentIdSchema } from '../config.js';
 import { httpError } from '../http/errors.js';
 import { EnhanceError, runEnhance } from '../agents/enhance.js';
 import { getProjectOr404 } from './projects.js';
@@ -11,7 +12,7 @@ import type { AppDeps } from './deps.js';
 
 const EnhanceSchema = z.object({
   projectId: z.string().min(1),
-  agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+  agentId: AgentIdSchema,
   text: z.string().trim().min(1).max(20_000),
   model: z.string().optional(),
   thinkingEffort: z.string().optional(),

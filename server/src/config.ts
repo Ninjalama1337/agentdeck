@@ -7,13 +7,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { AGENT_IDS } from '@agentdeck/shared';
 import { expandHome } from './util/paths.js';
+
+export { AGENT_IDS };
 
 export type AgentMode = 'headless' | 'ide' | 'auto' | 'off';
 
 export const AGENT_MODES: AgentMode[] = ['headless', 'ide', 'auto', 'off'];
 
-export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex', 'opencode'] as const;
+/** Canonical agent-id schema; route validation derives from this, never a copy. */
+export const AgentIdSchema = z.enum(AGENT_IDS);
 
 const AgentConfigSchema = z.object({
   mode: z.enum(['headless', 'ide', 'auto', 'off']).default('auto'),

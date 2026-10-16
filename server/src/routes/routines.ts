@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { Routine, RoutineSchedule } from '@agentdeck/shared';
 import { z } from 'zod';
+import { AgentIdSchema } from '../config.js';
 import { httpError, notFound } from '../http/errors.js';
 import { nextRunAt, validateSchedule } from '../routines/scheduler.js';
 import { getProjectOr404 } from './projects.js';
@@ -23,7 +24,7 @@ const ScheduleSchema = z.discriminatedUnion('kind', [
 const RoutineBodySchema = z.object({
   name: z.string().trim().min(1).max(80),
   projectId: z.string().min(1),
-  agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+  agentId: AgentIdSchema,
   prompt: z.string().trim().min(1).max(20_000),
   model: z.string().optional(),
   thinkingEffort: z.string().optional(),

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Project } from '@agentdeck/shared';
 import { z } from 'zod';
+import { AgentIdSchema } from '../config.js';
 import { notFound } from '../http/errors.js';
 import { ensureDir } from '../util/paths.js';
 import { newProjectId } from '../util/ids.js';
@@ -14,7 +15,7 @@ import { listDirectory } from '../files/browser.js';
 import type { AppDeps } from './deps.js';
 
 const BridgeRunSchema = z.object({
-  agent: z.enum(['claude', 'zcode', 'antigravity', 'codex']),
+  agent: AgentIdSchema,
   prompt: z.string().min(1).max(500_000),
   project: z.string().optional(),
   model: z.string().optional(),

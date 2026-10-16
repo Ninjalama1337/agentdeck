@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Project } from '@agentdeck/shared';
+import { AgentIdSchema } from '../config.js';
 import { httpError, notFound } from '../http/errors.js';
 import { EnhanceError, runEnhance } from '../agents/enhance.js';
 import { sanitizeFileName, ensureDir } from '../util/paths.js';
@@ -271,7 +272,7 @@ export async function projectRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const project = getProjectOr404(deps, (req.params as { id: string }).id);
     const body = z
       .object({
-        agentId: z.enum(['claude', 'zcode', 'antigravity', 'codex']).default('claude'),
+        agentId: AgentIdSchema.default('claude'),
         files: z.array(z.string().max(1000)).max(2000).optional(),
         model: z.string().optional(),
       })

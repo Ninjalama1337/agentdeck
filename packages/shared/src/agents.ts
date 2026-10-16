@@ -3,7 +3,10 @@
  */
 import type { AdminCapability } from './api.js';
 
-export type AgentId = 'claude' | 'zcode' | 'antigravity' | 'codex' | 'opencode';
+/** The one canonical list of agents — server schemas and clients derive from it. */
+export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex', 'opencode'] as const;
+
+export type AgentId = (typeof AGENT_IDS)[number];
 
 export type AgentKind = 'cli' | 'ide';
 

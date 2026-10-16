@@ -21,6 +21,7 @@ import { createInterface } from 'node:readline';
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { AGENT_IDS } from '@agentdeck/shared';
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_NAME = 'agentdeck-mcp';
@@ -169,7 +170,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'agentdeck_list_agents',
     description:
-      'List all coding agents registered on this machine via AgentDeck (Claude Code, ZCode, Antigravity, Codex) with availability and capabilities.',
+      'List all coding agents registered on this machine via AgentDeck (Claude Code, ZCode, Antigravity, Codex, OpenCode) with availability and capabilities.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -181,7 +182,7 @@ const TOOLS: ToolDef[] = [
       properties: {
         agent: {
           type: 'string',
-          enum: ['claude', 'zcode', 'antigravity', 'codex'],
+          enum: [...AGENT_IDS],
           description: 'Which agent should run the task.',
         },
         prompt: { type: 'string', description: 'The task/prompt for the agent.' },
