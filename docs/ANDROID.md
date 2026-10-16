@@ -121,6 +121,11 @@ bleiben erhalten. APKs vor v0.11.6 kennen das Plugin noch nicht und legen die
 Datei stattdessen in den Downloads-Ordner (dort antippen). Im Browser/PWA ist
 der Button ein schlichter Download-Link.
 
+Dasselbe Plugin installiert auch APKs aus einem Projekt: Im **Files**-Tab hat
+jede `.apk` im Menü **Install** — die App lädt sie (Fortschritt über der
+Liste) und öffnet direkt den Installer, ohne Umweg über Downloads und einen
+Dateimanager.
+
 ### Update-Benachrichtigung (auch bei geschlossener App)
 
 Die APK prüft zusätzlich im Hintergrund (`UpdateCheckWorker`, WorkManager,

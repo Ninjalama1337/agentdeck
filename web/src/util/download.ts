@@ -128,6 +128,27 @@ export async function installApkUpdate(url: string, onProgress?: (fraction: numb
   }
 }
 
+/** True when this app can hand an APK straight to Android's installer (see {@link installApkFile}). */
+export function canInstallApks(): boolean {
+  return isNativePlatform() && typeof window.Capacitor?.Plugins?.ApkInstall?.install === 'function';
+}
+
+/**
+ * APK only: downloads an `.apk` from the project and opens Android's installer
+ * on it — install or update without a detour through Downloads and a file
+ * manager. Goes through a signed URL: the plugin sends no auth header.
+ *
+ * Resolves `false` when this APK cannot do it; throws like {@link installApkUpdate}.
+ */
+export async function installApkFile(
+  projectId: string,
+  path: string,
+  onProgress?: (fraction: number) => void,
+): Promise<boolean> {
+  if (!canInstallApks()) return false;
+  return installApkUpdate(await api.fileDownloadUrl(projectId, path), onProgress);
+}
+
 /**
  * APK only: tells the native background update check (UpdateCheckWorker.java)
  * which repo publishes the releases. Older APKs lack the method — fine.

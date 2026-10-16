@@ -9,6 +9,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -25,14 +27,31 @@ import java.util.concurrent.ConcurrentHashMap;
  * progress/"download complete" notification; the call resolves once the
  * download has finished.
  *
+ * Completion is read from the download's row, not from the broadcast alone:
+ * some devices send ACTION_DOWNLOAD_COMPLETE while the download is still
+ * pending or running (it then read as "failed, code 0"), others drop it. A
+ * broadcast for an unfinished download is ignored, and a poll catches
+ * downloads whose broadcast never came.
+ *
  * Error codes: UNAVAILABLE / no code → not started (caller falls back to the
  * system browser), DOWNLOAD_FAILED → started but did not complete.
  */
 @CapacitorPlugin(name = "FileDownload")
 public class FileDownloadPlugin extends Plugin {
 
+    private static final long POLL_MS = 2000;
+
     private final Map<Long, PluginCall> pending = new ConcurrentHashMap<>();
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver receiver;
+
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            for (Long id : pending.keySet()) settle(id);
+            if (!pending.isEmpty()) handler.postDelayed(this, POLL_MS);
+        }
+    };
 
     @Override
     public void load() {
@@ -40,8 +59,7 @@ public class FileDownloadPlugin extends Plugin {
             @Override
             public void onReceive(Context context, Intent intent) {
                 long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-                PluginCall call = pending.remove(id);
-                if (call != null) finish(call, id);
+                if (pending.containsKey(id)) settle(id);
             }
         };
         // Exported: the broadcast is sent by the system's download provider.
@@ -55,6 +73,7 @@ public class FileDownloadPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        handler.removeCallbacks(poll);
         if (receiver != null) {
             try {
                 getContext().unregisterReceiver(receiver);
@@ -99,14 +118,17 @@ public class FileDownloadPlugin extends Plugin {
             DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
             long id = manager.enqueue(request);
             pending.put(id, call);
+            handler.removeCallbacks(poll);
+            handler.postDelayed(poll, POLL_MS);
         } catch (Exception e) {
             call.reject("Could not start the download: " + e.getMessage());
         }
     }
 
-    private void finish(PluginCall call, long id) {
+    /** Settles the call for download `id` once its row shows a final state; no-op while it is still running. */
+    private void settle(long id) {
         DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-        int status = DownloadManager.STATUS_FAILED;
+        Integer status = null;
         int reason = 0;
         try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id))) {
             if (cursor != null && cursor.moveToFirst()) {
@@ -114,13 +136,42 @@ public class FileDownloadPlugin extends Plugin {
                 reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
             }
         } catch (Exception ignored) {
-            // treated as failed
+            return; // try again on the next poll
         }
-        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+        if (status != null && status != DownloadManager.STATUS_SUCCESSFUL && status != DownloadManager.STATUS_FAILED) {
+            return; // pending, running or paused (waiting for network / retry)
+        }
+        PluginCall call = pending.remove(id);
+        if (call == null) return;
+        if (status == null) {
+            // The row is gone: the download was cancelled (notification swiped, removed in Downloads).
+            call.reject("Download was cancelled", "DOWNLOAD_FAILED");
+        } else if (status == DownloadManager.STATUS_SUCCESSFUL) {
             call.resolve();
         } else {
-            // `reason` is the HTTP status for server errors, else a DownloadManager.ERROR_* code.
-            call.reject("Download failed (code " + reason + ")", "DOWNLOAD_FAILED");
+            call.reject(failureMessage(reason), "DOWNLOAD_FAILED");
+        }
+    }
+
+    /** `reason` is the HTTP status for server errors, else a DownloadManager.ERROR_* code. */
+    private static String failureMessage(int reason) {
+        if (reason >= 400 && reason < 600) return "Download failed (HTTP " + reason + ")";
+        switch (reason) {
+            case DownloadManager.ERROR_INSUFFICIENT_SPACE:
+                return "Download failed: not enough storage space";
+            case DownloadManager.ERROR_FILE_ALREADY_EXISTS:
+                return "Download failed: the file already exists in Downloads";
+            case DownloadManager.ERROR_FILE_ERROR:
+            case DownloadManager.ERROR_DEVICE_NOT_FOUND:
+                return "Download failed: could not write to Downloads";
+            case DownloadManager.ERROR_HTTP_DATA_ERROR:
+            case DownloadManager.ERROR_CANNOT_RESUME:
+                return "Download failed: the connection dropped";
+            case DownloadManager.ERROR_TOO_MANY_REDIRECTS:
+            case DownloadManager.ERROR_UNHANDLED_HTTP_CODE:
+                return "Download failed: unexpected server response";
+            default:
+                return "Download failed (code " + reason + ")";
         }
     }
 }

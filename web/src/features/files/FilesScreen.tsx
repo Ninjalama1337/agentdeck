@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
   Loader2,
   MoreVertical,
+  PackageOpen,
   RefreshCw,
   Trash2,
   Upload,
@@ -23,7 +24,7 @@ import { clsx } from 'clsx';
 import type { FileEntry } from '@agentdeck/shared';
 import { api, fetchBlob, uploadFile } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
-import { downloadFile, isShareCancel } from '../../util/download';
+import { canInstallApks, downloadFile, installApkFile, isShareCancel } from '../../util/download';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Button, IconButton } from '../../components/ui/Button';
 import { MenuRow } from '../../components/ui/MenuRow';
@@ -85,6 +86,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const [showDot, setShowDot] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [actionEntry, setActionEntry] = useState<FileEntry | null>(null);
+  const [installing, setInstalling] = useState<{ name: string; progress: number } | null>(null);
   const [editorPath, setEditorPath] = useState<string | null>(null);
   const [createKind, setCreateKind] = useState<'file' | 'dir' | null>(null);
   const [createName, setCreateName] = useState('');
@@ -162,6 +164,21 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
       else if (via === 'browser') toast('info', `Downloading ${entry.name} in your browser`);
     } catch (err) {
       if (!isShareCancel(err)) toast('error', `Download failed: ${errorMessage(err)}`);
+    }
+  };
+
+  /** `.apk`: straight into Android's installer, with progress in the list. */
+  const install = async (entry: FileEntry) => {
+    setActionEntry(null);
+    if (installing) return;
+    setInstalling({ name: entry.name, progress: 0 });
+    try {
+      const done = await installApkFile(projectId, entry.path, (progress) => setInstalling({ name: entry.name, progress }));
+      if (!done) await download(entry);
+    } catch (err) {
+      toast('error', `Install failed: ${errorMessage(err)}`);
+    } finally {
+      setInstalling(null);
     }
   };
 
@@ -278,6 +295,14 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
         </span>
       </nav>
 
+      {installing && (
+        <div className="glass-soft mb-2 flex items-center gap-3 px-3.5 py-2.5" role="status">
+          <Loader2 size={16} className="shrink-0 animate-spin text-accent" />
+          <span className="min-w-0 flex-1 truncate text-[13px]">Downloading {installing.name} for install…</span>
+          <span className="shrink-0 text-[12px] tabular-nums text-dim">{Math.round(installing.progress * 100)}%</span>
+        </div>
+      )}
+
       {/* list */}
       {error ? (
         <div className="glass">
@@ -360,6 +385,13 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
                     void openFile(target);
                   }}
                 />
+                {canInstallApks() && actionEntry.name.toLowerCase().endsWith('.apk') && (
+                  <MenuRow
+                    icon={<PackageOpen size={18} strokeWidth={1.8} />}
+                    label="Install"
+                    onClick={() => void install(actionEntry)}
+                  />
+                )}
                 <MenuRow
                   icon={<Download size={18} strokeWidth={1.8} />}
                   label="Download"
