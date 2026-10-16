@@ -102,6 +102,13 @@ describe('terminal presets', () => {
       agent: true,
     });
     expect(resolveLaunch('codex', undefined, undefined).command).toBe('codex');
+    expect(resolveLaunch('opencode', 'auto', undefined)).toEqual({
+      command: 'opencode --auto',
+      title: 'OpenCode · Auto',
+      presetId: 'opencode',
+      variantId: 'auto',
+      agent: true,
+    });
     expect(resolveLaunch('zcode', 'continue', undefined)).toEqual({
       command: 'zcode -c',
       title: 'ZCode · Continue',

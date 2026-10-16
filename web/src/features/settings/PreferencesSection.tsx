@@ -316,6 +316,9 @@ export function PreferencesSection() {
         <Row title="Compose bar" hint="Type in a phone-friendly input (autocorrect, dictation) instead of directly into the terminal">
           <Toggle label="Compose bar" checked={prefs.termCompose} onChange={(v) => prefs.set('termCompose', v)} />
         </Row>
+        <Row title="Collapse header" hint="Hide the project bar and terminal tabs for a taller terminal — tap the slim bar to bring them back">
+          <Toggle label="Collapse header" checked={prefs.termChromeCollapsed} onChange={(v) => prefs.set('termChromeCollapsed', v)} />
+        </Row>
         <Row title="Font size" hint="Pinch the terminal to zoom, too">
           <div className="flex items-center gap-1.5">
             <button type="button" className="kbd" onClick={() => prefs.set('termFontSize', Math.max(8, prefs.termFontSize - 1))}>

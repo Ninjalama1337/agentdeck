@@ -22,6 +22,8 @@ export interface Prefs {
   termFontSize: number;
   /** Code tab: type into a compose bar (true) or directly into xterm. */
   termCompose: boolean;
+  /** Phone Code tab: header + terminal tabs collapsed to a slim bar while a terminal is open. */
+  termChromeCollapsed: boolean;
   dictation: DictationEngine;
   /** BCP-47 language for dictation, '' = device language. */
   dictationLang: string;
@@ -53,6 +55,7 @@ export const DEFAULT_PREFS: Prefs = {
   haptics: true,
   termFontSize: 12,
   termCompose: true,
+  termChromeCollapsed: true,
   dictation: 'auto',
   dictationLang: '',
   enterToSend: false,

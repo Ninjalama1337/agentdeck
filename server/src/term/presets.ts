@@ -80,6 +80,7 @@ export const PRESET_DEFS: PresetDef[] = [
     variants: [
       NEW,
       { id: 'continue', label: 'Continue', args: '--continue', hint: 'Resume the last session' },
+      { id: 'auto', label: 'Auto', args: '--auto', hint: 'Auto-approve permissions (dangerous)', danger: true },
     ],
     snippets: [
       { label: '/models', text: '/models' },

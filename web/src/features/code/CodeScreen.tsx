@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Cpu } from 'lucide-react';
+import { Plus, Cpu, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { usePrefs } from '../../store/prefs';
 import { ProjectSwitcher } from '../../components/ProjectSwitcher';
@@ -16,7 +16,7 @@ import { sendRaw, sendText } from './termInput';
 import { attachToTerminal } from './termAttach';
 import { AttachSheet } from '../../components/AttachSheet';
 import { readClipboard, useIncomingFiles } from '../../util/incomingFiles';
-import { AgentChips, TerminalTab, useTerminalLauncher } from './terminalParts';
+import { AgentChips, TerminalDot, TerminalTab, useTerminalLauncher } from './terminalParts';
 import { CodePanes } from './CodePanes';
 
 /**
@@ -41,6 +41,8 @@ function CodePhone() {
   const refreshTerminals = useAppStore((s) => s.refreshTerminals);
   const toast = useAppStore((s) => s.toast);
   const compose = usePrefs((s) => s.termCompose);
+  const chromeCollapsed = usePrefs((s) => s.termChromeCollapsed);
+  const setPref = usePrefs((s) => s.set);
 
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -90,52 +92,80 @@ function CodePhone() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* header: project switcher + inbox + new */}
-      <header className="flex items-center gap-1 px-4 pb-1.5 pt-2">
-        <ProjectSwitcher
-          className="min-w-0 flex-1"
-          subtitle={terminals.length ? `${terminals.length} live ${terminals.length === 1 ? 'terminal' : 'terminals'}` : 'Terminals & agents'}
-        />
-        <InboxButton />
-        <button
-          type="button"
-          aria-label="Resources"
-          title="CPU and memory per terminal"
-          onClick={openResources}
-          className="press flex h-10 w-10 items-center justify-center rounded-full text-dim hover:text-ink active:bg-white/10"
-        >
-          <Cpu size={18} />
-        </button>
-        <button
-          type="button"
-          aria-label="New terminal"
-          onClick={() => setLauncherOpen(true)}
-          className="press btn-primary flex h-10 w-10 items-center justify-center rounded-full text-white"
-        >
-          <Plus size={20} />
-        </button>
-      </header>
-
-      <PortChips className="px-4 pb-2" />
-
-      {/* terminal tabs */}
+      {/* collapse handle: a terminal gets the full height, one tap brings the header back */}
       {terminals.length > 0 && (
-        <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 pb-2" role="tablist">
-          {terminals.map((t) => (
-            <TerminalTab
-              key={t.id}
-              term={t}
-              preset={presets?.find((p) => p.id === t.presetId)}
-              active={t.id === activeTerminalId}
-              foreign={t.projectId !== activeProjectId ? projectName(t.projectId) : undefined}
-              onSelect={() => {
-                haptic();
-                setActiveTerminal(t.id);
-              }}
-              onClose={() => void killTerminal(t.id)}
+        <button
+          type="button"
+          aria-expanded={!chromeCollapsed}
+          aria-label={chromeCollapsed ? 'Show header and terminal tabs' : 'Hide header and terminal tabs'}
+          onClick={() => {
+            haptic();
+            setPref('termChromeCollapsed', !chromeCollapsed);
+          }}
+          className="press flex h-7 shrink-0 items-center gap-2 px-4 text-left text-dim"
+        >
+          {chromeCollapsed ? <ChevronDown size={16} className="shrink-0" /> : <ChevronUp size={16} className="shrink-0" />}
+          {chromeCollapsed ? (
+            <>
+              {active && <TerminalDot term={active} accent={activePreset?.accent ?? '#99A1B3'} />}
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{active?.title ?? 'shell'}</span>
+            </>
+          ) : (
+            <span className="flex-1 text-[12px]">Hide header</span>
+          )}
+        </button>
+      )}
+
+      {/* header + ports + tabs (hidden while collapsed and a terminal is open) */}
+      {(terminals.length === 0 || !chromeCollapsed) && (
+        <>
+          <header className="flex items-center gap-1 px-4 pb-1.5 pt-2">
+            <ProjectSwitcher
+              className="min-w-0 flex-1"
+              subtitle={terminals.length ? `${terminals.length} live ${terminals.length === 1 ? 'terminal' : 'terminals'}` : 'Terminals & agents'}
             />
-          ))}
-        </div>
+            <InboxButton />
+            <button
+              type="button"
+              aria-label="Resources"
+              title="CPU and memory per terminal"
+              onClick={openResources}
+              className="press flex h-10 w-10 items-center justify-center rounded-full text-dim hover:text-ink active:bg-white/10"
+            >
+              <Cpu size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="New terminal"
+              onClick={() => setLauncherOpen(true)}
+              className="press btn-primary flex h-10 w-10 items-center justify-center rounded-full text-white"
+            >
+              <Plus size={20} />
+            </button>
+          </header>
+
+          <PortChips className="px-4 pb-2" />
+
+          {/* terminal tabs */}
+          {terminals.length > 0 && (
+            <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 pb-2" role="tablist">
+              {terminals.map((t) => (
+                <TerminalTab
+                  key={t.id}
+                  term={t}
+                  preset={presets?.find((p) => p.id === t.presetId)}
+                  active={t.id === activeTerminalId}
+                  foreign={t.projectId !== activeProjectId ? projectName(t.projectId) : undefined}
+                  onSelect={() => {
+                    haptic();
+                    setActiveTerminal(t.id);
+                  }}
+                  onClose={() => void killTerminal(t.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {terminals.length === 0 ? (
