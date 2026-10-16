@@ -469,7 +469,7 @@ export function UsageSheet({ open, onClose }: { open?: boolean; onClose?: () => 
     <Sheet open={isOpen} onClose={handleClose} title="Agent Usages" subtitle="Plan limits & quota of your coding tools">
       <div className="flex items-center justify-between px-1 pb-3">
         <span className="text-[12px] text-dim">
-          {newest ? `updated ${ago(newest)} · cached 60s` : 'Reading live agent quotas…'}
+          {newest ? `updated ${ago(newest)} · cached 30s` : 'Reading live agent quotas…'}
         </span>
         <button
           type="button"

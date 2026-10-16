@@ -34,7 +34,11 @@ export function SendPromptSheet({
   const presets = useAppStore((s) => s.terminalPresets);
   const sessions = useAppStore((s) => s.sessionsByProject[projectId]);
   const [preview, setPreview] = useState(false);
-  const terminals = useMemo(() => allTerminals.filter((t) => t.projectId === projectId), [allTerminals, projectId]);
+  // Only agent terminals take a prompt — a shell or dev server would run it as a command.
+  const terminals = useMemo(
+    () => allTerminals.filter((t) => t.projectId === projectId && presets?.some((p) => p.id === t.presetId && p.kind === 'agent')),
+    [allTerminals, presets, projectId],
+  );
   const starters = useMemo(() => (presets ?? []).filter((p) => p.kind === 'agent' && p.available && p.promptArg), [presets]);
   const chats = [...(sessions ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
 

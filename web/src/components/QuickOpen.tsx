@@ -62,15 +62,37 @@ export function QuickOpen() {
   const presets = useAppStore((s) => s.terminalPresets);
   const sessionsByProject = useAppStore((s) => s.sessionsByProject);
 
+  // Keys typed right after the shortcut, before the field is up, belong to the search.
+  const stopBuffering = useRef<(() => void) | null>(null);
   useEffect(() => {
     const show = () => {
       setQuery('');
       setCursor(0);
       setOpen(true);
+      stopBuffering.current?.();
+      const buffer = (e: KeyboardEvent) => {
+        if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setQuery((q) => q + e.key);
+      };
+      window.addEventListener('keydown', buffer, true);
+      stopBuffering.current = () => {
+        window.removeEventListener('keydown', buffer, true);
+        stopBuffering.current = null;
+      };
     };
     window.addEventListener(OPEN_QUICK_OPEN, show);
-    return () => window.removeEventListener(OPEN_QUICK_OPEN, show);
+    return () => {
+      window.removeEventListener(OPEN_QUICK_OPEN, show);
+      stopBuffering.current?.();
+    };
   }, []);
+
+  // The field has focus once it rendered (autoFocus) — it takes the keys from here on.
+  useEffect(() => {
+    if (open) stopBuffering.current?.();
+  }, [open]);
 
   const close = () => setOpen(false);
 
