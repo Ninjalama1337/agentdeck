@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronsUpDown, FolderGit2, GitBranch, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAppStore } from '../store/appStore';
@@ -84,50 +85,55 @@ export function ProjectSwitcher({ subtitle, className, sidebar }: { subtitle?: s
         </button>
       )}
 
-      <Sheet open={open} onClose={() => setOpen(false)} title="Projects" subtitle={`${projects.length} on this server`}>
-        <div className="flex flex-col gap-1.5">
-          {projects.map((p) => {
-            const active = p.id === activeProjectId;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  haptic();
-                  setOpen(false);
-                  if (!active) void openProject(p.id);
-                }}
-                className={clsx(
-                  'press tap flex w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left',
-                  active ? 'border-accent/40 bg-accent/10' : 'border-line bg-white/[0.03] active:bg-white/[0.07]',
-                )}
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-dim">
-                  <FolderGit2 size={17} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14.5px] font-semibold">{p.name}</span>
-                  <span className="block truncate text-[12px] text-dim">
-                    {p.git?.branch ? `${p.git.branch}${p.git.dirty ? ` · ${p.git.dirty} changed` : ''}` : 'no git'}
+      {/* Portal: a translucent header (e.g. Git's `.appbar` with backdrop-filter)
+          would otherwise become the containing block and trap the fixed sheet. */}
+      {createPortal(
+        <Sheet open={open} onClose={() => setOpen(false)} title="Projects" subtitle={`${projects.length} on this server`}>
+          <div className="flex flex-col gap-1.5">
+            {projects.map((p) => {
+              const active = p.id === activeProjectId;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    haptic();
+                    setOpen(false);
+                    if (!active) void openProject(p.id);
+                  }}
+                  className={clsx(
+                    'press tap flex w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left',
+                    active ? 'border-accent/40 bg-accent/10' : 'border-line bg-white/[0.03] active:bg-white/[0.07]',
+                  )}
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-dim">
+                    <FolderGit2 size={17} />
                   </span>
-                </span>
-                {active && <Check size={17} className="shrink-0 text-accent" />}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              setNewOpen(true);
-            }}
-            className="press tap mt-1 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-2.5 text-[14px] font-medium text-dim active:bg-white/[0.05]"
-          >
-            <Plus size={16} /> New or cloned project
-          </button>
-        </div>
-      </Sheet>
-      <NewProjectSheet open={newOpen} onClose={() => setNewOpen(false)} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] font-semibold">{p.name}</span>
+                    <span className="block truncate text-[12px] text-dim">
+                      {p.git?.branch ? `${p.git.branch}${p.git.dirty ? ` · ${p.git.dirty} changed` : ''}` : 'no git'}
+                    </span>
+                  </span>
+                  {active && <Check size={17} className="shrink-0 text-accent" />}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setNewOpen(true);
+              }}
+              className="press tap mt-1 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong px-4 py-2.5 text-[14px] font-medium text-dim active:bg-white/[0.05]"
+            >
+              <Plus size={16} /> New or cloned project
+            </button>
+          </div>
+        </Sheet>,
+        document.body,
+      )}
+      {createPortal(<NewProjectSheet open={newOpen} onClose={() => setNewOpen(false)} />, document.body)}
     </>
   );
 }
