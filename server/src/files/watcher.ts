@@ -1,6 +1,8 @@
 /**
- * Live filesystem watcher: one recursive fs.watch per project, debounced and
- * batched into `files:changed` socket broadcasts.
+ * Live filesystem watcher: one recursive watch per project, debounced and
+ * batched into `files:changed` socket broadcasts. On Linux it watches folders
+ * only and skips dependency trees (see treeWatch.ts); elsewhere the native
+ * recursive fs.watch is cheap.
  *
  * - API-driven writes (PUT content / create / delete) push synthetic events
  *   into the SAME per-project batch, so real watcher events and API events
@@ -19,6 +21,7 @@ import type { FileChangeEvent, FileChangeEventKind } from '@agentdeck/shared';
 import type { Broadcaster } from '../ws/gateway.js';
 import type { Logger } from '../logging.js';
 import { isGitInternalPath } from './sandbox.js';
+import { watchTree, type TreeWatcher } from './treeWatch.js';
 
 /** Debounce window per project; events inside one window collapse to one batch. */
 export const FILE_WATCH_DEBOUNCE_MS = 400;
@@ -45,7 +48,7 @@ interface WatchState {
   projectId: string;
   /** Absolute root passed by the caller (fs.watch reports paths relative to it). */
   root: string;
-  watcher: fs.FSWatcher | null;
+  watcher: TreeWatcher | null;
   degraded: boolean;
   /** A re-watch retry has already been scheduled/spent for this failure episode. */
   retryPending: boolean;
@@ -144,18 +147,34 @@ export class FileWatchers {
 
   private openWatcher(state: WatchState): void {
     try {
-      const watcher = fs.watch(state.root, { recursive: true, persistent: false });
-      watcher.on('change', (eventType: string, filename: string | Buffer) => {
-        const type: fs.WatchEventType = eventType === 'change' ? 'change' : 'rename';
-        this.onFsEvent(state, type, filename);
-      });
-      watcher.on('error', (err) => this.onWatcherError(state, err));
-      state.watcher = watcher;
+      state.watcher = process.platform === 'linux' ? this.openTree(state) : this.openNative(state);
       state.degraded = false;
       state.retryPending = false;
     } catch (err) {
       this.degrade(state, err);
     }
+  }
+
+  private openTree(state: WatchState): TreeWatcher {
+    return watchTree(state.root, {
+      onChange: (type, rel) => this.onFsEvent(state, type, rel),
+      onError: (err) => this.onWatcherError(state, err),
+      onCapped: () =>
+        this.opts.log.warn(
+          { projectId: state.projectId, root: state.root },
+          'file watcher capped — folders beyond the limit get no live fs events',
+        ),
+    });
+  }
+
+  private openNative(state: WatchState): TreeWatcher {
+    const watcher = fs.watch(state.root, { recursive: true, persistent: false });
+    watcher.on('change', (eventType: string, filename: string | Buffer) => {
+      const type: fs.WatchEventType = eventType === 'change' ? 'change' : 'rename';
+      this.onFsEvent(state, type, filename);
+    });
+    watcher.on('error', (err) => this.onWatcherError(state, err));
+    return watcher;
   }
 
   private onWatcherError(state: WatchState, err: Error): void {
