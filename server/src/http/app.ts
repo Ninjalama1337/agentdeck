@@ -35,6 +35,7 @@ import { buildDailySummary, DigestScheduler } from '../stats/digest.js';
 import { AdminJobRunner } from '../admin/runner.js';
 import { RateLimiter } from '../util/rateLimit.js';
 import { attachGateway, makeBroadcaster, type Broadcaster, type DeckIo } from '../ws/gateway.js';
+import { ioTerminalStream } from '../ws/termStream.js';
 import { FileWatchers } from '../files/watcher.js';
 import { TerminalManager, type TerminalTurn } from '../term/manager.js';
 import { RoutineScheduler } from '../routines/scheduler.js';
@@ -382,6 +383,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     bridgeToken,
     bridgeGuard: makeBridgeGuard(bridgeToken),
     broadcast,
+    terminalStream: ioTerminalStream(io),
     fileWatchers,
     pairingCode,
     ...(webDist ? { webDist } : {}),

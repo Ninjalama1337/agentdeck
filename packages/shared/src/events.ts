@@ -65,7 +65,7 @@ export interface ServerToClientEvents {
   'admin:job': (payload: { job: AdminJob }) => void;
   /** Server self-update progress (scripts/update.sh output, status). */
   'update:state': (payload: { update: UpdateInfo }) => void;
-  /** PTY output chunk (UTF-8) for a terminal. */
+  /** PTY output (UTF-8, coalesced) — only for terminals this client watches. */
   'terminal:data': (payload: { id: string; data: string }) => void;
   /** PTY process ended. */
   'terminal:exit': (payload: { id: string; code: number }) => void;
@@ -93,6 +93,12 @@ export interface ClientToServerEvents {
   'terminal:input': (payload: { id: string; data: string }) => void;
   /** `cellWidth`/`cellHeight`: one cell in CSS pixels, for images (newer apps). */
   'terminal:resize': (payload: { id: string; cols: number; rows: number; cellWidth?: number; cellHeight?: number }) => void;
+  /**
+   * The terminals this client shows right now (full list, replaces the last
+   * one). `terminal:data` then only arrives for these; a client that never
+   * sends it gets every terminal.
+   */
+  'terminal:watch': (payload: { ids: string[] }) => void;
   /** Client viewed the terminal — clears its attention flag. */
   'terminal:seen': (payload: { id: string }) => void;
 }

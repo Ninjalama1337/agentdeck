@@ -11,6 +11,10 @@ import type { Logger } from '../logging.js';
 import { verifyDeviceToken } from '../auth/jwt.js';
 import type { AgentManager } from '../agents/manager.js';
 import type { TerminalManager } from '../term/manager.js';
+import { ALL_TERMINALS_ROOM, terminalRoom } from './termStream.js';
+
+/** Terminals one socket may watch at once — more than any screen shows. */
+const MAX_WATCHED = 32;
 
 export type DeckIo = Server<ClientToServerEvents, ServerToClientEvents, DefaultEventsMap, SocketData>;
 
@@ -37,7 +41,10 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
     path: '/socket.io',
     cors: { origin: opts.corsOrigins, credentials: true },
     transports: ['websocket', 'polling'],
-    perMessageDeflate: false,
+    // Terminal output and session streams are ANSI/JSON text that shrinks
+    // several times over — on mobile data that is the difference. Keystrokes
+    // and other small frames stay uncompressed (no latency for them).
+    perMessageDeflate: { threshold: 1024 },
   });
 
   io.use(async (socket, next) => {
@@ -58,6 +65,8 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
 
   io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, never, SocketData>) => {
     opts.logger.debug({ deviceId: socket.data.deviceId, socketId: socket.id }, 'device connected');
+    // Until the app says which terminals it shows, it gets all of them (older apps never say).
+    void socket.join(ALL_TERMINALS_ROOM);
     socket.on('session:interrupt', (payload, ack) => {
       const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
       const ok = sessionId ? opts.manager.interrupt(sessionId, 'Interrupted from device') : false;
@@ -84,6 +93,17 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
           ? { width: cellWidth, height: cellHeight }
           : undefined;
       opts.terminals.resize(payload.id, payload.cols, payload.rows, cell);
+    });
+    socket.on('terminal:watch', (payload) => {
+      const ids = Array.isArray(payload?.ids)
+        ? payload.ids.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64).slice(0, MAX_WATCHED)
+        : null;
+      if (!ids) return;
+      const wanted = new Set(ids.map(terminalRoom));
+      for (const room of socket.rooms) {
+        if (room.startsWith('term:') && !wanted.has(room)) void socket.leave(room);
+      }
+      for (const room of wanted) void socket.join(room);
     });
     socket.on('terminal:seen', (payload) => {
       if (typeof payload?.id !== 'string') return;

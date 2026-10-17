@@ -412,6 +412,8 @@ export interface AppStore {
   refreshTerminals(): Promise<void>;
   /** Streams terminal output to a subscriber (xterm). Returns an unsubscribe. */
   subscribeTerminal(id: string, onData: (data: string) => void, onExit?: (code: number) => void): () => void;
+  /** Ask the server for this terminal's output (only shown terminals stream). Returns an unwatch. */
+  watchTerminal(id: string): () => void;
   sendTerminalInput(id: string, data: string): void;
   /** `cell`: one cell in CSS pixels — the server tells tmux, which places images by it. */
   resizeTerminal(id: string, cols: number, rows: number, cell?: { width: number; height: number }): void;
@@ -461,6 +463,20 @@ function loadInbox(): DeckNotification[] {
 /** Per-terminal output subscribers (xterm instances). Keyed by terminal id. */
 const terminalSubs = new Map<string, { onData: (data: string) => void; onExit?: (code: number) => void }>();
 
+/** Terminals on screen, with a count (a pane and a tab can show the same one). The server streams only these. */
+const watchedTerminals = new Map<string, number>();
+let watchQueued = false;
+
+/** Sends the watch list once per tick, however many views changed in it. */
+function sendWatchList(): void {
+  if (watchQueued) return;
+  watchQueued = true;
+  queueMicrotask(() => {
+    watchQueued = false;
+    getSocket()?.emit('terminal:watch', { ids: [...watchedTerminals.keys()] });
+  });
+}
+
 /** Client mirror of the server's pure nextRunAt (docs/CONTRACT.md). */
 export function routineNextRunAt(routine: Routine, now = Date.now()): number | null {
   if (!routine.enabled) return null;
@@ -491,6 +507,8 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
     socketAttached = true;
 
     socket.on('connect', () => {
+      // A new connection starts with every terminal; narrow it to the ones on screen.
+      sendWatchList();
       // Whatever was streamed while the socket was down never arrived: other
       // sessions reload when they are opened, the open one right away.
       const open = get().activeSessionId;
@@ -1590,6 +1608,20 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       terminalSubs.set(id, { onData, onExit });
       return () => {
         terminalSubs.delete(id);
+      };
+    },
+
+    watchTerminal(id) {
+      watchedTerminals.set(id, (watchedTerminals.get(id) ?? 0) + 1);
+      sendWatchList();
+      let done = false;
+      return () => {
+        if (done) return;
+        done = true;
+        const n = (watchedTerminals.get(id) ?? 1) - 1;
+        if (n > 0) watchedTerminals.set(id, n);
+        else watchedTerminals.delete(id);
+        sendWatchList();
       };
     },
 

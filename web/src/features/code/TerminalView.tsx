@@ -43,6 +43,13 @@ export const TERM_THEME = {
   brightWhite: '#ffffff',
 };
 
+/**
+ * A hidden tab keeps streaming this long — switching back and forth stays
+ * instant. After that it stops (no output for it over the network or into
+ * xterm) and repaints from the server once it is shown again.
+ */
+const HIDDEN_STREAM_MS = 15_000;
+
 /** Sticky modifier shared by key bar and direct typing ("Ctrl" then a key). */
 export interface ModifierRef {
   current: { ctrl: boolean; alt: boolean };
@@ -72,6 +79,10 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   const fitRef = useRef<FitAddon | null>(null);
   const mouseRef = useRef<MouseMode | null>(null);
   const endedRef = useRef(false);
+  const repaintRef = useRef<((reset: boolean) => void) | null>(null);
+  /** No stream and no paint yet/any more — the next show repaints from the server. */
+  const staleRef = useRef(!visible);
+  const lingerRef = useRef<{ timer: number; unwatch: () => void } | null>(null);
   const [ended, setEnded] = useState<number | null>(null);
   /** Long-press menu, at a position inside the terminal. */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -190,14 +201,17 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
           for (const chunk of pending.splice(0)) term.write(chunk);
         });
     };
-    repaint(false);
+    // A tab that starts hidden is fetched when it is first shown.
+    if (!staleRef.current) repaint(false);
+    repaintRef.current = repaint;
     const unsubscribeReconnect = useAppStore.subscribe((st, prev) => {
-      if (st.socketEpoch !== prev.socketEpoch) repaint(true);
+      if (st.socketEpoch !== prev.socketEpoch && !staleRef.current) repaint(true);
     });
 
     const unsubscribe = store.subscribeTerminal(
       id,
       (data) => {
+        if (staleRef.current) return; // an older server streams every terminal
         if (live) term.write(data);
         else pending.push(data);
       },
@@ -244,6 +258,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       disposed = true;
       unsubscribeReconnect();
       unsubscribe();
+      repaintRef.current = null;
       disposeTouchScroll();
       disposeLongPress();
       osc52.dispose();
@@ -291,6 +306,43 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     ta.setAttribute('inputmode', quiet ? 'none' : 'text');
     if (quiet && document.activeElement === ta) ta.blur();
   }, [compose, pane, touchMenu]);
+
+  // Only terminals on screen stream (see HIDDEN_STREAM_MS).
+  useEffect(() => {
+    if (!visible) return;
+    let unwatch: () => void;
+    const linger = lingerRef.current;
+    if (linger) {
+      window.clearTimeout(linger.timer);
+      lingerRef.current = null;
+      unwatch = linger.unwatch;
+    } else {
+      unwatch = useAppStore.getState().watchTerminal(id);
+      if (staleRef.current) {
+        staleRef.current = false;
+        repaintRef.current?.(true);
+      }
+    }
+    return () => {
+      const timer = window.setTimeout(() => {
+        lingerRef.current = null;
+        staleRef.current = true;
+        unwatch();
+      }, HIDDEN_STREAM_MS);
+      lingerRef.current = { timer, unwatch };
+    };
+  }, [visible, id]);
+  // Unmounted: stop right away (runs after the cleanup above armed the delay).
+  useEffect(
+    () => () => {
+      const linger = lingerRef.current;
+      if (!linger) return;
+      window.clearTimeout(linger.timer);
+      lingerRef.current = null;
+      linger.unwatch();
+    },
+    [],
+  );
 
   // Seen while visible; refit when becoming visible (size may have changed).
   useEffect(() => {

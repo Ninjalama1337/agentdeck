@@ -328,9 +328,13 @@ Real PTY shells on the server, one per open tab, project-scoped.
 - REST: `POST /api/terminals {projectId, cols?, rows?, timeZone?}` → `TerminalInfo`
   (`timeZone`: IANA zone of the device, set as `TZ` in the terminal);
   `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
-- WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`.
-- WS server→clients: `terminal:data {id, data}` (UTF-8 chunk),
-  `terminal:exit {id, code}`, `terminal:list {terminals}` (create/kill).
+- WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`,
+  `terminal:watch {ids}` (the terminals on screen; full list, replaces the last).
+- WS server→clients: `terminal:data {id, data}` (UTF-8, chunks coalesced ~8 ms)
+  only to sockets watching that terminal — a socket that never sent
+  `terminal:watch` gets every terminal. `terminal:exit {id, code}` (after the
+  last data) and `terminal:list {terminals}` (create/kill) go to everyone.
+  WS frames from 1 KB on are compressed (permessage-deflate).
 - Constraints: cwd = project path, `$SHELL` (fallback `/bin/bash`), max 6
   concurrent terminals, idle timeout 15 min, all killed on server shutdown.
   Login flows for agent accounts happen here (e.g. `claude` with a custom

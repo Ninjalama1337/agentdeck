@@ -50,8 +50,8 @@ const ATTENTION_TEXT = {
 
 export function terminalBroadcasts(deps: AppDeps): TerminalBroadcasts {
   return {
-    onData: (id: string, data: string) => deps.broadcast('terminal:data', { id, data }),
-    onExit: (id: string, code: number) => deps.broadcast('terminal:exit', { id, code }),
+    onData: (id: string, data: string) => deps.terminalStream.data(id, data),
+    onExit: (id: string, code: number) => deps.terminalStream.exit(id, code),
     onList: () => deps.broadcast('terminal:list', { terminals: deps.terminals.list() }),
     onAttention: (info, reason, { state, detail, prompt }) => {
       deps.broadcast('terminal:attention', { id: info.id, reason, state, ...(detail ? { text: detail } : {}) });

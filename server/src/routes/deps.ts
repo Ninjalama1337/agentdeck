@@ -28,6 +28,7 @@ import type { TerminalManager } from '../term/manager.js';
 import type { RoutineScheduler } from '../routines/scheduler.js';
 import type { NotificationHub } from '../notify/hub.js';
 import type { VoiceService } from '../voice/transcribe.js';
+import type { TerminalStream } from '../ws/termStream.js';
 
 export interface AppDeps {
   config: Config;
@@ -76,6 +77,8 @@ export interface AppDeps {
   bridgeToken: string;
   bridgeGuard: (req: import('fastify').FastifyRequest) => Promise<void>;
   broadcast: Broadcaster;
+  /** PTY output, coalesced and sent to the devices watching each terminal. */
+  terminalStream: TerminalStream;
   /** Per-project recursive fs.watchers feeding the `files:changed` stream. */
   fileWatchers: FileWatchers;
   /** Absolute path to the built web app, when present. */
