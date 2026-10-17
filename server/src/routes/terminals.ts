@@ -9,6 +9,7 @@ import { httpError, notFound } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
 import { listPresets, resolveLaunch } from '../term/presets.js';
+import { withLaunchModels } from '../term/launchModels.js';
 import type { TerminalBroadcasts } from '../term/manager.js';
 import { stateTitle } from '../notify/hub.js';
 import { accountAgentOfPreset } from '../accounts/active.js';
@@ -27,6 +28,9 @@ const CreateSchema = z.object({
   prompt: z.string().max(8000).optional(),
   /** Account profile to run on; omitted = the agent's active account. */
   accountId: z.string().max(80).optional(),
+  /** Model and effort to start the agent with (presets with modelArg/effortArg). */
+  model: z.string().max(120).optional(),
+  effort: z.string().max(16).optional(),
 });
 
 /** A zone name this machine knows — it ends up in the terminal's environment. */
@@ -81,7 +85,8 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
 
   fastify.get('/terminals/presets', async (req) => {
     const query = z.object({ refresh: z.string().optional() }).parse(req.query ?? {});
-    return listPresets(query.refresh === '1');
+    const refresh = query.refresh === '1';
+    return withLaunchModels(listPresets(refresh), refresh);
   });
 
   fastify.get('/terminals/:id', async (req) => {
@@ -96,7 +101,7 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const project = getProjectOr404(deps, body.projectId);
     let launch: ReturnType<typeof resolveLaunch>;
     try {
-      launch = resolveLaunch(body.presetId, body.variantId, body.command, body.prompt);
+      launch = resolveLaunch(body.presetId, body.variantId, body.command, body.prompt, { model: body.model, effort: body.effort });
     } catch (err) {
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }

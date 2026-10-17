@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import { ChevronRight, Clock, Download, Play, RefreshCw, TerminalSquare, GitFork } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, Clock, Cpu, Download, Play, RefreshCw, Sparkles, TerminalSquare, GitFork } from 'lucide-react';
 import { clsx } from 'clsx';
 import { openParallel } from './ParallelSheet';
 import type { TerminalPreset } from '@agentdeck/shared';
 import { useAppStore } from '../../store/appStore';
 import { Sheet } from '../../components/ui/Sheet';
 import { haptic } from '../../util/haptics';
+import { effortName, effortsFor, launchChoice, rememberLaunchChoice, type LaunchChoice } from './launchChoice';
 
 export interface LaunchSpec {
   presetId?: string;
@@ -14,6 +15,9 @@ export interface LaunchSpec {
   title?: string;
   /** First prompt for an agent that takes one on start (preset.promptArg). */
   prompt?: string;
+  /** Model and effort to start the agent with; omitted = what this device remembers for it. */
+  model?: string;
+  effort?: string;
 }
 
 const RECENT_KEY = 'agentdeck:recent-commands';
@@ -228,11 +232,19 @@ export function LauncherGrid({
 
 function PresetCard({ preset, onLaunch }: { preset: TerminalPreset; onLaunch: (spec: LaunchSpec) => void }) {
   const extra = preset.variants.filter((v) => v.id !== 'new');
+  const [choice, setChoice] = useState<LaunchChoice>(() => launchChoice(preset));
+  // The model list can arrive later (agy asks the network) — a remembered pick applies then.
+  useEffect(() => setChoice(launchChoice(preset)), [preset]);
+  const pick = (next: LaunchChoice) => {
+    setChoice(next);
+    rememberLaunchChoice(preset.id, next);
+  };
+  const start = (variantId: string) => onLaunch({ presetId: preset.id, variantId, model: choice.model, effort: choice.effort });
   return (
     <div className="glass overflow-hidden p-0" style={{ boxShadow: `inset 3px 0 0 ${preset.accent}` }}>
       <button
         type="button"
-        onClick={() => onLaunch({ presetId: preset.id, variantId: 'new' })}
+        onClick={() => start('new')}
         className="press flex w-full items-center gap-3 px-3.5 pb-2.5 pt-3 text-left active:bg-white/[0.04]"
       >
         <PresetGlyph preset={preset} />
@@ -247,6 +259,7 @@ function PresetCard({ preset, onLaunch }: { preset: TerminalPreset; onLaunch: (s
           <Play size={12} fill="currentColor" /> Start
         </span>
       </button>
+      <LaunchOptions preset={preset} choice={choice} onChange={pick} />
       {extra.length > 0 && (
         <div className="no-scrollbar flex gap-1.5 overflow-x-auto px-3.5 pb-3">
           {extra.map((v) => (
@@ -254,7 +267,7 @@ function PresetCard({ preset, onLaunch }: { preset: TerminalPreset; onLaunch: (s
               key={v.id}
               type="button"
               title={v.hint}
-              onClick={() => onLaunch({ presetId: preset.id, variantId: v.id })}
+              onClick={() => start(v.id)}
               className={clsx(
                 'press flex h-8 shrink-0 items-center rounded-full border px-3 text-[12px] font-medium',
                 v.danger ? 'border-danger/35 bg-danger/10 text-danger' : 'border-line bg-white/[0.04] text-dim active:text-ink',
@@ -266,6 +279,101 @@ function PresetCard({ preset, onLaunch }: { preset: TerminalPreset; onLaunch: (s
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Model and effort for every start of this agent (Start and the variants),
+ * remembered per agent. Native pickers: a long model list scrolls in the
+ * phone's own dialog.
+ */
+function LaunchOptions({ preset, choice, onChange }: { preset: TerminalPreset; choice: LaunchChoice; onChange: (next: LaunchChoice) => void }) {
+  const models = preset.modelArg ? (preset.models ?? []) : [];
+  const efforts = effortsFor(preset, choice.model);
+  if (models.length === 0 && efforts.length === 0) return null;
+  const model = models.find((m) => m.id === choice.model);
+  return (
+    <div className="flex gap-1.5 px-3.5 pb-2.5">
+      {models.length > 0 && (
+        <OptionPill
+          label="Model"
+          value={choice.model ?? ''}
+          text={model?.label ?? 'Default model'}
+          icon={<Cpu size={12} className="shrink-0" />}
+          accent={model ? preset.accent : undefined}
+          onChange={(id) => {
+            // An effort the new model does not take falls back to the default.
+            const effort = choice.effort && effortsFor(preset, id || undefined).includes(choice.effort) ? choice.effort : undefined;
+            onChange({ ...(id ? { model: id } : {}), ...(effort ? { effort } : {}) });
+          }}
+        >
+          <option value="">Default model</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.description && m.description !== m.label ? `${m.label} — ${m.description}` : m.label}
+            </option>
+          ))}
+        </OptionPill>
+      )}
+      {efforts.length > 0 && (
+        <OptionPill
+          label="Effort"
+          value={choice.effort ?? ''}
+          text={choice.effort ? effortName(choice.effort) : 'Default effort'}
+          icon={<Sparkles size={12} className="shrink-0" />}
+          accent={choice.effort ? preset.accent : undefined}
+          onChange={(level) => onChange({ ...(choice.model ? { model: choice.model } : {}), ...(level ? { effort: level } : {}) })}
+        >
+          <option value="">Default effort</option>
+          {efforts.map((level) => (
+            <option key={level} value={level}>
+              {effortName(level)}
+            </option>
+          ))}
+        </OptionPill>
+      )}
+    </div>
+  );
+}
+
+/** A chip that opens the platform's select. Tinted with the agent's colour once set. */
+function OptionPill({
+  label,
+  value,
+  text,
+  icon,
+  accent,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  text: string;
+  icon: React.ReactNode;
+  accent?: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <label
+      className={clsx(
+        'press relative flex h-8 min-w-0 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium',
+        accent ? 'text-ink' : 'border-line bg-white/[0.04] text-dim',
+      )}
+      style={accent ? { borderColor: `${accent}73`, background: `${accent}1f` } : undefined}
+    >
+      {icon}
+      <span className="truncate">{text}</span>
+      <ChevronDown size={12} className="shrink-0 opacity-70" />
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      >
+        {children}
+      </select>
+    </label>
   );
 }
 

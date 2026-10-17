@@ -7,7 +7,8 @@ import { lanAddresses } from './util/net.js';
 import { loadConfig } from './config.js';
 import { buildApp } from './http/app.js';
 import { findWebDist } from './http/webDist.js';
-import { augmentedPath } from './term/presets.js';
+import { augmentedPath, listPresets } from './term/presets.js';
+import { withLaunchModels } from './term/launchModels.js';
 import { removePidFile, writePidFile } from './util/pidfile.js';
 import { NAME, VERSION } from './version.js';
 
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
 
   // Recurring agent runs ("agents on routines") — pure timers, no I/O at boot.
   deps.routines.start();
+
+  // `agy models` asks the network — have the launcher's model lists ready before it first opens.
+  void withLaunchModels(listPresets()).catch(() => undefined);
 
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;

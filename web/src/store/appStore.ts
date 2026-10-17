@@ -77,6 +77,7 @@ import type { IncomingShare } from '../util/shareTarget';
 import { currentPushSubscription, fcmRegistered, showSystemNotification, stateOf } from '../util/notify';
 import { desktopLayoutNow } from '../hooks/useDesktopLayout';
 import { usePanes } from '../features/code/paneStore';
+import { launchChoice } from '../features/code/launchChoice';
 import { parseHash, routeToHash, startHash, validRoute, validSessionId, type Route } from './route';
 
 /* ------------------------------------------------------------------ router */
@@ -396,7 +397,7 @@ export interface AppStore {
     projectId: string,
     cols: number,
     rows: number,
-    launch?: Pick<CreateTerminalRequest, 'presetId' | 'variantId' | 'command' | 'title' | 'prompt' | 'accountId'>,
+    launch?: Pick<CreateTerminalRequest, 'presetId' | 'variantId' | 'command' | 'title' | 'prompt' | 'accountId' | 'model' | 'effort'>,
   ): Promise<TerminalInfo>;
   refreshTerminalPresets(force?: boolean): Promise<void>;
   /** Tells the server the user looked at a terminal (clears attention). */
@@ -1507,7 +1508,17 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
 
     async createTerminal(projectId, cols, rows, launch) {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const { terminal } = await api.createTerminal({ projectId, cols, rows, ...(launch ?? {}), ...(timeZone ? { timeZone } : {}) });
+      // An agent starts with the model and effort last picked for it in the launcher.
+      const preset = launch?.presetId && !launch.command ? get().terminalPresets?.find((p) => p.id === launch.presetId) : undefined;
+      const remembered = preset ? launchChoice(preset) : {};
+      const { terminal } = await api.createTerminal({
+        projectId,
+        cols,
+        rows,
+        ...remembered,
+        ...(launch ?? {}),
+        ...(timeZone ? { timeZone } : {}),
+      });
       set((st) => ({
         // The server's terminal:list WS broadcast usually beats the POST
         // response — append only when the list event hasn't landed yet.

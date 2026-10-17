@@ -24,6 +24,15 @@ export const PRESET_DEFS: PresetDef[] = [
     kind: 'agent',
     command: 'claude',
     promptArg: '{prompt}',
+    modelArg: '--model {value}',
+    models: [
+      { id: 'fable', label: 'Fable', description: 'Latest Fable' },
+      { id: 'opus', label: 'Opus', description: 'Latest Opus' },
+      { id: 'sonnet', label: 'Sonnet', description: 'Latest Sonnet' },
+      { id: 'haiku', label: 'Haiku', description: 'Latest Haiku' },
+    ],
+    effortArg: '--effort {value}',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     accent: '#FF6A3D',
     variants: [
       NEW,
@@ -53,6 +62,10 @@ export const PRESET_DEFS: PresetDef[] = [
     kind: 'agent',
     command: 'codex',
     promptArg: '{prompt}',
+    // Models (and the efforts each takes) come from Codex's model cache — launchModels.ts.
+    modelArg: '-m {value}',
+    effortArg: '-c model_reasoning_effort={value}',
+    efforts: ['low', 'medium', 'high'],
     accent: '#10B981',
     variants: [
       NEW,
@@ -76,6 +89,8 @@ export const PRESET_DEFS: PresetDef[] = [
     kind: 'agent',
     command: 'opencode',
     promptArg: '--prompt {prompt}',
+    // Favourite and recent models from OpenCode's state — launchModels.ts.
+    modelArg: '--model {value}',
     accent: '#F5A524',
     variants: [
       NEW,
@@ -117,6 +132,10 @@ export const PRESET_DEFS: PresetDef[] = [
     kind: 'agent',
     command: 'agy',
     bin: 'agy',
+    // Models from `agy models` — launchModels.ts.
+    modelArg: '--model {value}',
+    effortArg: '--effort {value}',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     accent: '#4E8CFF',
     variants: [
       NEW,
@@ -289,21 +308,37 @@ export function listPresets(force = false): TerminalPreset[] {
   return presets;
 }
 
-/**
- * Resolves what to type into the fresh shell. Returns undefined for a plain
- * shell. Throws on unknown preset/variant ids.
- */
 /** Single-quoted for a POSIX shell. */
 export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, "'\\''")}'`;
 }
 
+/** `template` with `{key}` replaced by `value`, shell-quoted (taken literally — no `$&` patterns). */
+function fillArg(template: string, key: string, value: string): string {
+  return template.replace(`{${key}}`, () => shellQuote(value));
+}
+
+/** Model ids (aliases, provider/model, [1m] suffixes) and effort levels a launch accepts. */
+const MODEL_ID = /^[A-Za-z0-9._:/@+[\]-]{1,120}$/;
+const EFFORT = /^[a-z]{2,16}$/;
+
+/** Model and effort to start an agent with; omitted = the CLI's default. */
+export interface LaunchChoice {
+  model?: string;
+  effort?: string;
+}
+
+/**
+ * Resolves what to type into the fresh shell. Returns undefined for a plain
+ * shell. Throws on unknown preset/variant ids.
+ */
 export function resolveLaunch(
   presetId: string | undefined,
   variantId: string | undefined,
   command: string | undefined,
   /** First prompt for the agent (presets with `promptArg` only). */
   prompt?: string,
+  choice: LaunchChoice = {},
 ): { command?: string; title: string; presetId: string; variantId?: string; agent: boolean } {
   const custom = command?.trim();
   if (custom) {
@@ -316,8 +351,16 @@ export function resolveLaunch(
   if (!variant) throw new Error(`Unknown variant ${variantId} for ${presetId}`);
   const first = prompt?.trim();
   if (first && !def.promptArg) throw new Error(`${def.label} cannot take a prompt on start`);
-  const promptArgs = first && def.promptArg ? def.promptArg.replace('{prompt}', shellQuote(first)) : '';
-  const cmd = [def.command, variant.args, promptArgs].filter((s) => s.trim()).join(' ');
+  const promptArgs = first && def.promptArg ? fillArg(def.promptArg, 'prompt', first) : '';
+  const model = choice.model?.trim();
+  if (model && !def.modelArg) throw new Error(`${def.label} cannot take a model on start`);
+  if (model && !MODEL_ID.test(model)) throw new Error(`Not a model id: ${model}`);
+  const effort = choice.effort?.trim();
+  if (effort && !def.effortArg) throw new Error(`${def.label} cannot take an effort on start`);
+  if (effort && !EFFORT.test(effort)) throw new Error(`Not an effort level: ${effort}`);
+  const modelArgs = model && def.modelArg ? fillArg(def.modelArg, 'value', model) : '';
+  const effortArgs = effort && def.effortArg ? fillArg(def.effortArg, 'value', effort) : '';
+  const cmd = [def.command, variant.args, modelArgs, effortArgs, promptArgs].filter((s) => s.trim()).join(' ');
   const title = variant.id === 'new' ? def.label : `${def.label} · ${variant.label}`;
   return { command: cmd, title, presetId: def.id, variantId: variant.id, agent: def.kind === 'agent' };
 }

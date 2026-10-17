@@ -707,6 +707,20 @@ export interface CreateTerminalRequest {
   prompt?: string;
   /** Account profile to run on; omitted = the agent's active account. */
   accountId?: string;
+  /** Model to start the agent with (presets with `modelArg`); omitted = the CLI's default. */
+  model?: string;
+  /** Reasoning effort to start the agent with (presets with `effortArg`); omitted = the CLI's default. */
+  effort?: string;
+}
+
+/** A model the launcher offers for an agent preset. */
+export interface LaunchModel {
+  /** Value handed to the CLI (alias or full id). */
+  id: string;
+  label: string;
+  description?: string;
+  /** Effort levels this model takes, when they differ from the preset's. */
+  efforts?: string[];
 }
 
 export interface TerminalPresetVariant {
@@ -741,6 +755,14 @@ export interface TerminalPreset {
    * shell-quoted text). Presets with it can run in parallel worktrees.
    */
   promptArg?: string;
+  /** How the CLI takes a model on start ("{value}" → the shell-quoted id). */
+  modelArg?: string;
+  /** Models to pick from at launch — read from the CLI's own lists where it keeps them. */
+  models?: LaunchModel[];
+  /** How the CLI takes a reasoning effort on start ("{value}" → the level). */
+  effortArg?: string;
+  /** Effort levels to pick from at launch. */
+  efforts?: string[];
 }
 
 /** One process below a terminal (GET /api/terminals/resources). */
