@@ -90,12 +90,31 @@ export class NotificationHub {
     } catch {
       this.subs = [];
     }
-    this.fcm = await FcmClient.load(path.join(this.opts.dataDir, 'fcm-service-account.json'));
+    this.fcm = await FcmClient.load(this.fcmKeyFile);
     try {
       this.fcmTokens = JSON.parse(await fsp.readFile(this.fcmTokensFile, 'utf8')) as StoredFcmToken[];
     } catch {
       this.fcmTokens = [];
     }
+  }
+
+  private get fcmKeyFile(): string {
+    return path.join(this.opts.dataDir, 'fcm-service-account.json');
+  }
+
+  /**
+   * Installs a Firebase service-account key (JSON text) and turns FCM on
+   * right away. Checked with Google first, so a wrong or revoked key fails
+   * here instead of silently at the next alert.
+   */
+  async setFcmKey(text: string, fetchFn?: typeof fetch): Promise<{ projectId: string }> {
+    const client = FcmClient.parse(text, fetchFn);
+    await client.verify();
+    const tmp = `${this.fcmKeyFile}.tmp`;
+    await fsp.writeFile(tmp, text, { mode: 0o600 });
+    await fsp.rename(tmp, this.fcmKeyFile);
+    this.fcm = client;
+    return { projectId: client.projectId };
   }
 
   /** Server can send FCM (service-account key present). */

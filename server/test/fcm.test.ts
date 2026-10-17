@@ -91,6 +91,36 @@ describe('NotificationHub FCM tokens', () => {
   });
 });
 
+describe('NotificationHub.setFcmKey', () => {
+  const key = JSON.stringify({ type: 'service_account', project_id: 'demo', client_email: 'sa@demo.iam', private_key: privateKey });
+
+  it('turns FCM on at once and stores the key privately', async () => {
+    const dir = await dataDir(false);
+    const hub = new NotificationHub({ dataDir: dir, log: { warn() {} } as never, broadcast: () => {} });
+    await hub.init();
+    expect(await hub.setFcmKey(key, fetchMock(200))).toEqual({ projectId: 'demo' });
+    expect(hub.fcmEnabled).toBe(true);
+    const file = path.join(dir, 'fcm-service-account.json');
+    expect(await fs.readFile(file, 'utf8')).toBe(key);
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it('rejects wrong files and keys Google refuses, keeping FCM off', async () => {
+    const dir = await dataDir(false);
+    const hub = new NotificationHub({ dataDir: dir, log: { warn() {} } as never, broadcast: () => {} });
+    await hub.init();
+    await expect(hub.setFcmKey('{"project_info":{}}')).rejects.toThrow(/service-account/);
+    await expect(hub.setFcmKey(JSON.stringify({ type: 'authorized_user' }))).rejects.toThrow(/authorized_user/);
+    await expect(hub.setFcmKey('nope')).rejects.toThrow(/JSON/);
+    const refused = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid JWT Signature.' }), { status: 400 }),
+    ) as unknown as typeof fetch;
+    await expect(hub.setFcmKey(key, refused)).rejects.toThrow(/Invalid JWT Signature/);
+    expect(hub.fcmEnabled).toBe(false);
+    await expect(fs.access(path.join(dir, 'fcm-service-account.json'))).rejects.toThrow();
+  });
+});
+
 describe('inQuietHours', () => {
   const at = (h: number, m = 0) => Date.UTC(2026, 0, 1, h, m);
 

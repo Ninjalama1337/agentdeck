@@ -51,12 +51,37 @@ export class FcmClient {
   /** Undefined when no (valid) service-account file exists. */
   static async load(file: string, fetchFn: Fetch = fetch): Promise<FcmClient | undefined> {
     try {
-      const account = JSON.parse(await fsp.readFile(file, 'utf8')) as Partial<ServiceAccount>;
-      if (!account.project_id || !account.client_email || !account.private_key) return undefined;
-      return new FcmClient(account as ServiceAccount, fetchFn);
+      return FcmClient.parse(await fsp.readFile(file, 'utf8'), fetchFn);
     } catch {
       return undefined;
     }
+  }
+
+  /** A client for a service-account key (JSON text); throws with a readable reason. */
+  static parse(text: string, fetchFn: Fetch = fetch): FcmClient {
+    let account: Partial<ServiceAccount> & { type?: string };
+    try {
+      account = JSON.parse(text) as typeof account;
+    } catch {
+      throw new Error('Not a JSON file.');
+    }
+    if (account?.type !== undefined && account.type !== 'service_account') {
+      throw new Error(`This is a "${account.type}" file, not a service-account key.`);
+    }
+    if (!account.project_id || !account.client_email || !account.private_key) {
+      throw new Error('Not a service-account key (project_id, client_email or private_key missing).');
+    }
+    try {
+      crypto.createPrivateKey(account.private_key);
+    } catch {
+      throw new Error('The private key in this file is unreadable.');
+    }
+    return new FcmClient(account as ServiceAccount, fetchFn);
+  }
+
+  /** Asks Google for an access token — proves the key is live. */
+  async verify(): Promise<void> {
+    await this.accessToken();
   }
 
   get projectId(): string {
@@ -84,7 +109,14 @@ export class FcmClient {
         assertion: `${unsigned}.${signature}`,
       }),
     });
-    if (!res.ok) throw new Error(`FCM auth failed: HTTP ${res.status}`);
+    if (!res.ok) {
+      // Google says why (`invalid_grant`: key deleted or revoked, clock off …).
+      const reason = await res
+        .json()
+        .then((b: { error?: string; error_description?: string }) => b.error_description ?? b.error)
+        .catch(() => undefined);
+      throw new Error(`FCM auth failed: HTTP ${res.status}${reason ? ` (${reason})` : ''}`);
+    }
     const json = (await res.json()) as { access_token: string; expires_in?: number };
     this.token = { value: json.access_token, expires: Date.now() + (json.expires_in ?? 3600) * 1000 };
     return json.access_token;

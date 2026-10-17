@@ -215,3 +215,18 @@ solange ein Terminal offen ist oder eine Session läuft. Abschaltbar unter
 Settings → *Notifications* → *Stay connected in background*. Der Dienst hält
 einen Wake-Lock und kostet Akku; im tiefen Doze-Modus kann Android die
 Verbindung trotzdem pausieren — Meldungen kommen dann verspätet.
+
+### Google-Push (FCM)
+
+Zuverlässig auch im Doze kommen Meldungen über Firebase Cloud Messaging.
+Dafür braucht es zwei Teile aus **demselben** Firebase-Projekt:
+
+1. **App:** `google-services.json` als Repo-Secret `GOOGLE_SERVICES_JSON`
+   (siehe `android.yml`) — die APK aus GitHub Actions bringt es dann mit.
+2. **Server:** den Service-Account-Schlüssel. Firebase-Konsole →
+   Projekteinstellungen → *Dienstkonten* → *Neuen privaten Schlüssel
+   generieren*, dann in der App unter Settings → *Notifications* → *Why no
+   alert?* → **add the key file** auswählen. Der Server prüft ihn bei Google,
+   legt ihn als `fcm-service-account.json` (0600) im Datenordner ab und
+   schaltet FCM sofort ein, ohne Neustart. Von Hand dorthin kopiert wirkt er
+   nach dem nächsten Serverstart.

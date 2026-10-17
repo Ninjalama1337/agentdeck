@@ -92,6 +92,17 @@ export async function notificationRoutes(fastify: FastifyInstance, deps: AppDeps
     reply.code(204).send();
   });
 
+  // Firebase service-account key, uploaded from the app (Settings → notifications).
+  fastify.post('/push/fcm/key', async (req) => {
+    deviceOf(req);
+    const body = z.object({ key: z.string().min(1).max(20_000) }).parse(req.body);
+    try {
+      return { fcm: true, ...(await deps.notifications.setFcmKey(body.key)) };
+    } catch (err) {
+      throw httpError(400, 'INVALID_FCM_KEY', `Key not accepted: ${(err as Error).message}`);
+    }
+  });
+
   fastify.post('/push/test', async (req) => {
     const delivered = await deps.notifications.test(deviceOf(req));
     return { delivered };

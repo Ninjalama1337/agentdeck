@@ -658,6 +658,11 @@ export const api = {
     return request('GET', '/api/push');
   },
 
+  /** Installs the Firebase service-account key (JSON text); the server checks it with Google. */
+  setFcmKey(key: string): Promise<{ fcm: true; projectId: string }> {
+    return request('POST', '/api/push/fcm/key', { json: { key } });
+  },
+
   pushSubscribe(body: PushSubscribeRequest): Promise<void> {
     return request('POST', '/api/push/subscribe', { json: body });
   },

@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, BellRing, Mic, SquareTerminal, Vibrate } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { DeckNotificationKind, PushStatus, VoiceStatus } from '@agentdeck/shared';
 import { api } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import { usePrefs, type DictationEngine } from '../../store/prefs';
-import { disablePush, enablePush, fcmRegistered, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
+import { disablePush, enableFcm, enablePush, fcmRegistered, permissionState, pushSupported, requestPermission, syncPushKinds, type Permission } from '../../util/notify';
 import { speechCtor } from '../../hooks/useDictation';
 import { backgroundServiceSupported } from '../../util/backgroundService';
 import { isNativePlatform } from '../../util/platform';
@@ -114,6 +114,8 @@ export function PreferencesSection() {
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
   const [status, setStatus] = useState<PushStatus | null>(null);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const keyInput = useRef<HTMLInputElement | null>(null);
   const connection = useAppStore((s) => s.connection);
 
   useEffect(() => {
@@ -124,6 +126,21 @@ export function PreferencesSection() {
 
   const native = isNativePlatform();
   const canPush = pushSupported();
+
+  /** Firebase key picked from the device's files → server, which turns FCM on at once. */
+  const installFcmKey = async (file: File) => {
+    setKeyBusy(true);
+    try {
+      const { projectId } = await api.setFcmKey(await file.text());
+      toast('info', `Firebase key for "${projectId}" installed`);
+      if (native && prefs.notifications) await enableFcm();
+      setStatus(await api.pushStatus());
+    } catch (err) {
+      toast('error', errorMessage(err));
+    } finally {
+      setKeyBusy(false);
+    }
+  };
 
   const toggleNotifications = async (on: boolean) => {
     prefs.set('notifications', on);
@@ -253,10 +270,35 @@ export function PreferencesSection() {
                 {status === null
                   ? 'Server unreachable'
                   : !status.fcm
-                    ? 'Server has no Firebase key (fcm-service-account.json) — alerts only while the app is connected'
+                    ? 'Server has no Firebase key — alerts only while the app is connected'
                     : fcmRegistered()
                       ? 'This phone is registered for Google push'
                       : 'This phone is not registered for push yet — toggle "Notify me" off and on'}
+              </li>
+            )}
+            {!native && status && !status.fcm && <li>✗ Server has no Firebase key — the Android app alerts only while it is connected</li>}
+            {status && !status.fcm && (
+              <li className="pl-4">
+                Firebase console → Project settings → Service accounts → “Generate new private key”, then{' '}
+                <button
+                  type="button"
+                  disabled={keyBusy}
+                  onClick={() => keyInput.current?.click()}
+                  className="font-semibold text-accent underline-offset-2 active:underline disabled:opacity-50"
+                >
+                  {keyBusy ? 'checking key…' : 'add the key file'}
+                </button>
+                <input
+                  ref={keyInput}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) void installFcmKey(file);
+                  }}
+                />
               </li>
             )}
             {!native && (
