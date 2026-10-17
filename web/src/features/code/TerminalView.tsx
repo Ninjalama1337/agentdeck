@@ -78,9 +78,7 @@ interface Props {
 export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart, onClose, pane = false, focused = false }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
-  /** Fits the terminal to its host (keeping the rows while the soft keyboard is up). */
-  const refitRef = useRef<(() => void) | null>(null);
-  /** Sends the size to the server when this device is in use (termClaim.ts). */
+  /** Fits the terminal and, when this device is in use, sends the size to the server (termClaim.ts). */
   const claimRef = useRef<(() => void) | null>(null);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -210,21 +208,32 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       }
     };
     const sliceEvents = [term.onCursorMove(schedulePlace), term.onScroll(schedulePlace), term.buffer.onBufferChange(schedulePlace)];
-    const refit = () => {
+    /** This device sizes the PTY now (termClaim.ts). */
+    const mayClaim = () => visibleRef.current && !endedRef.current && deviceInUse();
+    /** The PTY's size as the server last reported it. */
+    const ptySize = () => {
+      const info = useAppStore.getState().terminals.find((t) => t.id === id);
+      return info && info.cols > 0 && info.rows > 0 ? { cols: info.cols, rows: info.rows } : null;
+    };
+    /**
+     * Fits the terminal to the host when this device sizes it, else draws it
+     * at the PTY's size: a screen laid out for other rows or columns than the
+     * PTY has garbles as soon as the agent redraws part of it.
+     */
+    const refit = (own = mayClaim()) => {
       hostHeight = host.clientHeight;
       const held = !pane && useAppStore.getState().keyboardOpen;
       if (!held) openHeight = parseInt(getComputedStyle(host).height) || 0;
-      const dims = fit.proposeDimensions();
-      const cell = cellSize(term);
-      if (held && openHeight && cell && dims && !Number.isNaN(dims.cols) && !Number.isNaN(dims.rows)) {
-        const rows = Math.max(dims.rows, rowsFor(openHeight, padTop + padBottom, cell.height));
+      const pty = own ? null : ptySize();
+      const dims = pty ?? fit.proposeDimensions();
+      if (dims && !Number.isNaN(dims.cols) && !Number.isNaN(dims.rows)) {
+        const cell = cellSize(term);
+        let rows = dims.rows;
+        if (!pty && held && openHeight && cell) rows = Math.max(rows, rowsFor(openHeight, padTop + padBottom, cell.height));
         if (dims.cols !== term.cols || rows !== term.rows) term.resize(dims.cols, rows);
-      } else {
-        fit.fit();
       }
       placeSlice();
     };
-    refitRef.current = refit;
     try {
       refit();
     } catch {
@@ -234,7 +243,9 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const store = useAppStore.getState();
     const sendSize = () => store.resizeTerminal(id, term.cols, term.rows, cellSize(term));
     const claim = () => {
-      if (visibleRef.current && !endedRef.current && deviceInUse()) sendSize();
+      const own = mayClaim();
+      refit(own);
+      if (own) sendSize();
     };
     claimRef.current = claim;
     // Every touch or key on this device takes the size back (throttled — typing
@@ -244,7 +255,21 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       const now = performance.now();
       if (!visibleRef.current || endedRef.current || now - claimedAt < 1000) return;
       claimedAt = now;
+      refit(true);
       sendSize();
+    });
+    // Another device took the size: draw at it until this one is used again.
+    const unsubscribeSize = useAppStore.subscribe((st, prev) => {
+      if (st.terminals === prev.terminals) return;
+      const now = st.terminals.find((t) => t.id === id);
+      const before = prev.terminals.find((t) => t.id === id);
+      if (!now || (before && now.cols === before.cols && now.rows === before.rows)) return;
+      if (now.cols === term.cols && now.rows === term.rows) return;
+      try {
+        refit(false);
+      } catch {
+        /* not measurable */
+      }
     });
     let live = false;
     let disposed = false;
@@ -329,7 +354,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       if (placeFrame) cancelAnimationFrame(placeFrame);
       for (const d of sliceEvents) d.dispose();
       unsubscribeUse();
-      refitRef.current = null;
+      unsubscribeSize();
       claimRef.current = null;
       input.dispose();
       disposed = true;
@@ -366,7 +391,6 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     if (!term || term.options.fontSize === fontSize) return;
     term.options.fontSize = fontSize;
     try {
-      refitRef.current?.();
       claimRef.current?.();
     } catch {
       /* hidden */
@@ -428,7 +452,6 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     useAppStore.getState().markTerminalSeen(id);
     const t = window.setTimeout(() => {
       try {
-        refitRef.current?.();
         claimRef.current?.();
       } catch {
         /* not measurable */

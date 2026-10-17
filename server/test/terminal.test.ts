@@ -95,8 +95,13 @@ describe('TerminalManager (real PTY)', () => {
     expect(manager.list('p1')).toHaveLength(1);
     expect(manager.replayOf(info.id)).toContain('AGENTDECK_PTY_42');
 
-    expect(manager.resize(info.id, 100, 30)).toBe(true);
+    // A new size goes out to every device; the same size again does not.
+    const listedBefore = listed.length;
+    expect(manager.resize(info.id, 100, 30, undefined, broadcasts)).toBe(true);
     expect(manager.get(info.id)?.info.cols).toBe(100);
+    expect(listed.length).toBe(listedBefore + 1);
+    expect(manager.resize(info.id, 100, 30, undefined, broadcasts)).toBe(true);
+    expect(listed.length).toBe(listedBefore + 1);
 
     manager.kill(info.id, broadcasts);
     expect(exited).toContain(info.id); // synchronous broadcast + removal

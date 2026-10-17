@@ -337,7 +337,9 @@ Real PTY shells on the server, one per open tab, project-scoped.
   `terminal:watch {ids}` (the terminals on screen; full list, replaces the last).
   A PTY has one size, the last one sent; clients send theirs only while in use
   (input in the last 30 s, a touch or key, return to the app) — a device left
-  open does not take the size from the one in hand. Unchanged sizes are ignored.
+  open does not take the size from the one in hand. Unchanged sizes are ignored;
+  a new size is broadcast as `terminal:list`, and devices not in use draw the
+  terminal at the PTY's size (a screen at another size garbles on the next redraw).
 - WS server→clients: `terminal:data {id, data}` (UTF-8, chunks coalesced ~8 ms)
   only to sockets watching that terminal — a socket that never sent
   `terminal:watch` gets every terminal. `terminal:exit {id, code}` (after the

@@ -231,6 +231,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     logger: log,
     manager,
     terminals,
+    terminalBroadcasts: () => terminalBroadcasts(deps),
     onTerminalSeen: (id) => terminals.markSeen(id, terminalBroadcasts(deps)),
     touchDevice: (deviceId) => store.touchDevice(deviceId),
     corsOrigins: config.corsOrigins,

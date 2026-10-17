@@ -10,7 +10,7 @@ import type {
 import type { Logger } from '../logging.js';
 import { verifyDeviceToken } from '../auth/jwt.js';
 import type { AgentManager } from '../agents/manager.js';
-import type { TerminalManager } from '../term/manager.js';
+import type { TerminalBroadcasts, TerminalManager } from '../term/manager.js';
 import { ALL_TERMINALS_ROOM, terminalRoom } from './termStream.js';
 
 /** Terminals one socket may watch at once — more than any screen shows. */
@@ -30,6 +30,8 @@ export interface GatewayOptions {
   manager: AgentManager;
   /** PTY terminals — input/resize arrive as WS events from the Code tab. */
   terminals: TerminalManager;
+  /** Tells the clients about a terminal change (here: a new size). */
+  terminalBroadcasts?: () => TerminalBroadcasts;
   /** Called when a client viewed a terminal (clears its attention flag). */
   onTerminalSeen?: (id: string) => void;
   touchDevice: (deviceId: string) => Promise<void>;
@@ -92,7 +94,7 @@ export function attachGateway(opts: GatewayOptions): DeckIo {
         typeof cellWidth === 'number' && typeof cellHeight === 'number' && Number.isFinite(cellWidth) && Number.isFinite(cellHeight)
           ? { width: cellWidth, height: cellHeight }
           : undefined;
-      opts.terminals.resize(payload.id, payload.cols, payload.rows, cell);
+      opts.terminals.resize(payload.id, payload.cols, payload.rows, cell, opts.terminalBroadcasts?.());
     });
     socket.on('terminal:watch', (payload) => {
       const ids = Array.isArray(payload?.ids)

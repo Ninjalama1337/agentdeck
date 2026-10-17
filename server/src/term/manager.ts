@@ -710,7 +710,8 @@ export class TerminalManager {
     }
   }
 
-  resize(id: string, cols: number, rows: number, cell?: CellSize): boolean {
+  /** `broadcast` tells every device the new size — the ones not sizing it draw at it too. */
+  resize(id: string, cols: number, rows: number, cell?: CellSize, broadcast?: TerminalBroadcasts): boolean {
     const term = this.active.get(id);
     if (!term) return false;
     if (cell && cell.width >= 2 && cell.width <= 100 && cell.height >= 4 && cell.height <= 200) {
@@ -732,6 +733,7 @@ export class TerminalManager {
         resizeTmuxWindow(term.tmuxSession, c, r);
       }
       this.savePersisted();
+      broadcast?.onList();
       return true;
     } catch {
       return false;
