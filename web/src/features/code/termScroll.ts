@@ -134,3 +134,39 @@ export function installTouchWheelScroll(
     host.removeEventListener('touchcancel', onTouchEnd);
   };
 }
+
+/**
+ * A mouse button report (press, release, drag) in SGR or X10 encoding — wheel
+ * reports (button bit 64) are not.
+ */
+export function isMouseButtonReport(data: string): boolean {
+  const sgr = /^\u001b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
+  if (sgr) return (Number(sgr[1]) & 64) === 0;
+  return data.length === 6 && data.startsWith('\u001b[M') && ((data.charCodeAt(3) - 32) & 64) === 0;
+}
+
+/** Window after a touch in which mouse events count as the browser's tap emulation. */
+const TAP_EMULATION_MS = 1000;
+
+/**
+ * Remembers the last touch on `host`. A tap reaches xterm as an emulated
+ * click, which it reports to a TUI with mouse tracking — Claude Code then
+ * moves its prompt cursor to the tapped cell, and whatever is typed next lands
+ * mid-text. The caller drops button reports while `touched()` holds.
+ */
+export function trackTouches(host: HTMLElement): { touched: () => boolean; dispose: () => void } {
+  let last = -Infinity;
+  const mark = (): void => {
+    last = performance.now();
+  };
+  const opts = { capture: true, passive: true };
+  host.addEventListener('touchstart', mark, opts);
+  host.addEventListener('touchend', mark, opts);
+  return {
+    touched: () => performance.now() - last < TAP_EMULATION_MS,
+    dispose: () => {
+      host.removeEventListener('touchstart', mark, opts);
+      host.removeEventListener('touchend', mark, opts);
+    },
+  };
+}

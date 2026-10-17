@@ -11,7 +11,7 @@ import { useUnread } from '../../store/unread';
 import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
 import { installMobileIme } from './termIme';
-import { installTouchWheelScroll, sendWheelBurst, trackMouseMode, type MouseMode } from './termScroll';
+import { installTouchWheelScroll, isMouseButtonReport, sendWheelBurst, trackMouseMode, trackTouches, type MouseMode } from './termScroll';
 import { openExternal } from '../../util/openExternal';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
@@ -149,6 +149,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       },
     );
     mouseRef.current = mouse;
+    // Taps must not click into the TUI: Claude Code would move its prompt cursor there.
+    const touches = trackTouches(host);
     const disposeLongPress = installLongPress(host, (x, y) => {
       // No soft keyboard while the menu is up (see the inputmode effect below).
       term.textarea?.setAttribute('inputmode', 'none');
@@ -221,6 +223,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const input = term.onData((data) => {
       if (endedRef.current) return;
       if (isTerminalReply(data)) return;
+      if (touches.touched() && isMouseButtonReport(data)) return;
       const mod = modifier.current;
       if ((mod.ctrl || mod.alt) && data.length === 1) {
         let out = data;
@@ -260,6 +263,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       unsubscribe();
       repaintRef.current = null;
       disposeTouchScroll();
+      touches.dispose();
       disposeLongPress();
       osc52.dispose();
       disposeWebgl();
