@@ -57,6 +57,14 @@ export function wheelSequence(down: boolean, col: number, row: number): string {
   return `\u001b[<${down ? 65 : 64};${col};${row}M`;
 }
 
+/**
+ * The rows themselves — taller than the host and shifted while the phone
+ * keyboard is up (termFit.ts), so cells are measured on it, not on the host.
+ */
+function screenRect(term: Terminal, host: HTMLElement): DOMRect {
+  return (term.element?.querySelector<HTMLElement>('.xterm-screen') ?? host).getBoundingClientRect();
+}
+
 /** 1-based cell under a viewport position, clamped to the screen. */
 export function cellAt(
   term: Terminal,
@@ -64,7 +72,7 @@ export function cellAt(
   clientX: number,
   clientY: number,
 ): { col: number; row: number } {
-  const rect = host.getBoundingClientRect();
+  const rect = screenRect(term, host);
   const col = Math.min(term.cols, Math.max(1, Math.ceil((clientX - rect.left) / (rect.width / Math.max(1, term.cols)))));
   const row = Math.min(term.rows, Math.max(1, Math.ceil((clientY - rect.top) / (rect.height / Math.max(1, term.rows)))));
   return { col, row };
@@ -93,7 +101,7 @@ export function installTouchWheelScroll(
 
   /** Drag distance per wheel event — ~1.2 terminal rows, never below 14 px. */
   const step = (): number => {
-    const rect = host.getBoundingClientRect();
+    const rect = screenRect(term, host);
     return Math.max(14, (rect.height / Math.max(1, term.rows)) * 1.2);
   };
   const onTouchStart = (e: TouchEvent): void => {

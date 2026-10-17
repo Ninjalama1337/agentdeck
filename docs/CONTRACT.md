@@ -327,11 +327,17 @@ Real PTY shells on the server, one per open tab, project-scoped.
 
 - `node-pty` (server-only dep, compiles on this machine) behind
   `server/src/term/manager.ts`.
-- REST: `POST /api/terminals {projectId, cols?, rows?, timeZone?}` → `TerminalInfo`
-  (`timeZone`: IANA zone of the device, set as `TZ` in the terminal);
-  `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
+- REST: `POST /api/terminals {projectId, cols?, rows?, timeZone?, presetId?, variantId?, model?, effort?}` → `TerminalInfo`
+  (`timeZone`: IANA zone of the device, set as `TZ` in the terminal; `model`/`effort`
+  for presets with `modelArg`/`effortArg`, omitted = the CLI's default);
+  `GET /api/terminals/presets` → launchers, with the models each installed CLI
+  offers (Claude Code aliases, Codex's model cache, OpenCode favourites/recents,
+  `agy models`); `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
 - WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`,
   `terminal:watch {ids}` (the terminals on screen; full list, replaces the last).
+  A PTY has one size, the last one sent; clients send theirs only while in use
+  (input in the last 30 s, a touch or key, return to the app) — a device left
+  open does not take the size from the one in hand. Unchanged sizes are ignored.
 - WS server→clients: `terminal:data {id, data}` (UTF-8, chunks coalesced ~8 ms)
   only to sockets watching that terminal — a socket that never sent
   `terminal:watch` gets every terminal. `terminal:exit {id, code}` (after the

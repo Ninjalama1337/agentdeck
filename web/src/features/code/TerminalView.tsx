@@ -17,6 +17,8 @@ import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
 import { copyText, installLongPress, installTouchSelect } from './termSelect';
 import { applyUnicode11, cellSize, handleOsc52, loadImages, tryWebgl } from './termExtras';
+import { rowsFor, sliceOffset } from './termFit';
+import { deviceInUse, onDeviceUse } from './termClaim';
 import { HandoverSheet } from './HandoverSheet';
 
 export const TERM_THEME = {
@@ -76,7 +78,12 @@ interface Props {
 export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart, onClose, pane = false, focused = false }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  /** Fits the terminal to its host (keeping the rows while the soft keyboard is up). */
+  const refitRef = useRef<(() => void) | null>(null);
+  /** Sends the size to the server when this device is in use (termClaim.ts). */
+  const claimRef = useRef<(() => void) | null>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const mouseRef = useRef<MouseMode | null>(null);
   const endedRef = useRef(false);
   const repaintRef = useRef<((reset: boolean) => void) | null>(null);
@@ -165,7 +172,6 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       viewport.style.overscrollBehaviorY = 'contain';
     }
     termRef.current = term;
-    fitRef.current = fit;
     const ta = term.textarea;
     if (ta) {
       ta.setAttribute('autocapitalize', 'off');
@@ -173,13 +179,73 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
       ta.setAttribute('autocomplete', 'off');
       ta.setAttribute('spellcheck', 'false');
     }
+
+    // Phone: while the soft keyboard is up the PTY keeps the rows it had
+    // without it, and the host shows the slice around the cursor (termFit.ts).
+    const xtermStyle = term.element ? getComputedStyle(term.element) : null;
+    const padTop = parseInt(xtermStyle?.paddingTop ?? '') || 0;
+    const padBottom = parseInt(xtermStyle?.paddingBottom ?? '') || 0;
+    /** Host height (as FitAddon reads it) the last time the keyboard was down. */
+    let openHeight = 0;
+    let hostHeight = 0;
+    const placeSlice = () => {
+      const el = term.element;
+      const cell = cellSize(term);
+      if (!el) return;
+      const buf = term.buffer.active;
+      const cursorRow = buf.viewportY === buf.baseY ? buf.cursorY : term.rows - 1;
+      const offset = cell ? sliceOffset(term.rows, cell.height, hostHeight - padTop, cursorRow) : 0;
+      const transform = offset > 0 ? `translateY(${-offset}px)` : '';
+      if (el.style.transform !== transform) el.style.transform = transform;
+      // Focusing the input scrolls the clipped host to it — the slice shows it already.
+      if (host.scrollTop) host.scrollTop = 0;
+    };
+    let placeFrame = 0;
+    const schedulePlace = () => {
+      if (!placeFrame) {
+        placeFrame = requestAnimationFrame(() => {
+          placeFrame = 0;
+          placeSlice();
+        });
+      }
+    };
+    const sliceEvents = [term.onCursorMove(schedulePlace), term.onScroll(schedulePlace), term.buffer.onBufferChange(schedulePlace)];
+    const refit = () => {
+      hostHeight = host.clientHeight;
+      const held = !pane && useAppStore.getState().keyboardOpen;
+      if (!held) openHeight = parseInt(getComputedStyle(host).height) || 0;
+      const dims = fit.proposeDimensions();
+      const cell = cellSize(term);
+      if (held && openHeight && cell && dims && !Number.isNaN(dims.cols) && !Number.isNaN(dims.rows)) {
+        const rows = Math.max(dims.rows, rowsFor(openHeight, padTop + padBottom, cell.height));
+        if (dims.cols !== term.cols || rows !== term.rows) term.resize(dims.cols, rows);
+      } else {
+        fit.fit();
+      }
+      placeSlice();
+    };
+    refitRef.current = refit;
     try {
-      fit.fit();
+      refit();
     } catch {
       // zero-size host on first paint — the ResizeObserver fits later
     }
 
     const store = useAppStore.getState();
+    const sendSize = () => store.resizeTerminal(id, term.cols, term.rows, cellSize(term));
+    const claim = () => {
+      if (visibleRef.current && !endedRef.current && deviceInUse()) sendSize();
+    };
+    claimRef.current = claim;
+    // Every touch or key on this device takes the size back (throttled — typing
+    // fires this per key, and the server ignores a size it already has).
+    let claimedAt = -Infinity;
+    const unsubscribeUse = onDeviceUse(() => {
+      const now = performance.now();
+      if (!visibleRef.current || endedRef.current || now - claimedAt < 1000) return;
+      claimedAt = now;
+      sendSize();
+    });
     let live = false;
     let disposed = false;
     const pending: string[] = [];
@@ -207,7 +273,10 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     if (!staleRef.current) repaint(false);
     repaintRef.current = repaint;
     const unsubscribeReconnect = useAppStore.subscribe((st, prev) => {
-      if (st.socketEpoch !== prev.socketEpoch && !staleRef.current) repaint(true);
+      if (st.socketEpoch !== prev.socketEpoch && !staleRef.current) {
+        claim();
+        repaint(true);
+      }
     });
 
     const unsubscribe = store.subscribeTerminal(
@@ -241,12 +310,12 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     let lastRows = term.rows;
     const observer = new ResizeObserver(() => {
       try {
-        fit.fit();
+        refit();
         if (term.cols !== lastCols || term.rows !== lastRows) {
           lastCols = term.cols;
           lastRows = term.rows;
           if (resizeTimer) window.clearTimeout(resizeTimer);
-          resizeTimer = window.setTimeout(() => store.resizeTerminal(id, term.cols, term.rows, cellSize(term)), 80);
+          resizeTimer = window.setTimeout(claim, 80);
         }
       } catch {
         return; // host not measurable yet
@@ -257,6 +326,11 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     return () => {
       observer.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
+      if (placeFrame) cancelAnimationFrame(placeFrame);
+      for (const d of sliceEvents) d.dispose();
+      unsubscribeUse();
+      refitRef.current = null;
+      claimRef.current = null;
       input.dispose();
       disposed = true;
       unsubscribeReconnect();
@@ -292,8 +366,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     if (!term || term.options.fontSize === fontSize) return;
     term.options.fontSize = fontSize;
     try {
-      fitRef.current?.fit();
-      useAppStore.getState().resizeTerminal(id, term.cols, term.rows, cellSize(term));
+      refitRef.current?.();
+      claimRef.current?.();
     } catch {
       /* hidden */
     }
@@ -354,9 +428,8 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     useAppStore.getState().markTerminalSeen(id);
     const t = window.setTimeout(() => {
       try {
-        fitRef.current?.fit();
-        const term = termRef.current;
-        if (term) useAppStore.getState().resizeTerminal(id, term.cols, term.rows, cellSize(term));
+        refitRef.current?.();
+        claimRef.current?.();
       } catch {
         /* not measurable */
       }

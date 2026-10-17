@@ -719,6 +719,8 @@ export class TerminalManager {
     }
     const c = Math.min(Math.max(10, Math.round(cols)), 500);
     const r = Math.min(Math.max(4, Math.round(rows)), 300);
+    // Devices re-send their size on every touch (see the web app's termClaim.ts).
+    if (c === term.info.cols && r === term.info.rows) return true;
     try {
       term.proc.resize(c, r);
       term.screen.resize(c, r);

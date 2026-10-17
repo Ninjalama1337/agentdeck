@@ -38,11 +38,16 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 
 - **Agent-Terminals mit einem Tipp** — Claude Code, Codex, OpenCode, Gemini CLI,
   Aider (und lazygit/btop) direkt als echte TUI im Handy-Terminal starten:
-  *Neu*, *Weiter*, *Auswählen*, *YOLO* oder *Auto*. Eingabezeile mit
+  *Neu*, *Weiter*, *Auswählen*, *YOLO* oder *Auto* — Modell und Effort direkt
+  auf der Karte wählbar (die Liste kommt aus der jeweiligen CLI), pro Agent
+  gemerkt. Eingabezeile mit
   Autokorrektur und Diktat, Tastenleiste (Ctrl, Esc, ⇧Tab, Pfeile, ^C …),
   Schnellantworten für Rechte-Abfragen (1/2/3, y/n) und Slash-Befehle je Agent,
   Pinch-Zoom. Scrollen in der History per Wischgeste oder Scroll-Tasten; die
-  Kopfleiste lässt sich für ein größeres Terminal einklappen.
+  Kopfleiste lässt sich für ein größeres Terminal einklappen. Bei offener
+  Tastatur behält das Terminal seine Höhe und zeigt den Teil um den Cursor —
+  Eingabebox und Statuszeile bleiben sichtbar. Zeigen Handy und Desktop dasselbe
+  Terminal, bestimmt das Gerät die Größe, das gerade benutzt wird.
 - **Benachrichtigungen** — „Claude ist fertig“, „Run fehlgeschlagen“,
   „Terminal wartet auf dich“ (Claude Code meldet Rückfragen und Ende selbst per
   Hook, sonst Bell, OSC 9/777 oder Stille nach Arbeit):
