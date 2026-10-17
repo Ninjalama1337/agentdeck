@@ -374,6 +374,38 @@ export interface CreateEntryRequest {
   kind: 'file' | 'dir';
 }
 
+export interface RenameEntryRequest {
+  /** Current project-relative path. */
+  from: string;
+  /** New project-relative path (409 EXISTS when taken). */
+  to: string;
+}
+
+export interface RenameEntryResponse {
+  path: string;
+}
+
+/** Details of one file or folder (`GET /projects/:id/files/info`). */
+export interface FileInfoResponse {
+  path: string;
+  name: string;
+  kind: 'file' | 'dir';
+  /** Absolute path on the server. */
+  absPath: string;
+  /** Bytes (files; for a folder what the filesystem reports). */
+  size: number;
+  mime?: string;
+  modifiedAt: number;
+  /** Not every filesystem records it. */
+  createdAt?: number;
+  /** `rwxr-xr-x` form. */
+  permissions: string;
+  /** Entries directly inside a folder. */
+  items?: number;
+  /** Set when the entry is a symbolic link. */
+  symlinkTarget?: string;
+}
+
 export type FileChangeEventKind = 'change' | 'create' | 'delete';
 
 export interface FileChangeEvent {

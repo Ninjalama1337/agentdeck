@@ -1,5 +1,6 @@
 /**
- * In-app file editing: content read/write, entry create/delete. Every path is
+ * In-app file editing: content read/write, entry create/rename/delete, entry
+ * info. Every path is
  * sandbox-resolved (realpath, no traversal) and `.git/` internals are blocked
  * outright. Writes are atomic (temp file in the target dir + rename) and push
  * watcher-style change events through the same batching pipeline as fs.watch,
@@ -9,12 +10,13 @@ import fsp from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import type { FileContentResponse, SaveFileResponse } from '@agentdeck/shared';
+import type { FileContentResponse, FileInfoResponse, RenameEntryResponse, SaveFileResponse } from '@agentdeck/shared';
 import { z } from 'zod';
 import { httpError, notFound } from '../http/errors.js';
 import { assertNotGitPath, resolveInsideRoot } from '../files/sandbox.js';
 import { guessMime } from '../files/browser.js';
 import { EDIT_TEMP_PREFIX } from '../files/watcher.js';
+import { isInside } from '../util/paths.js';
 import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
 
@@ -49,6 +51,31 @@ async function resolveEditable(projectPath: string, relPath: string) {
     throw httpError(400, 'INVALID_PATH', 'Path must name a file or directory inside the project, not the project root.');
   }
   return resolved;
+}
+
+/**
+ * Like `resolveEditable`, but the last segment is not followed: a symlink is
+ * renamed or described itself, not the file it points to.
+ */
+async function resolveEntry(projectPath: string, relPath: string): Promise<{ abs: string; rel: string }> {
+  assertNotGitPath(toPosix(relPath));
+  const clean = toPosix(relPath).replace(/\/+$/, '');
+  const name = path.posix.basename(clean);
+  if (name === '' || name === '.' || name === '..') {
+    throw httpError(400, 'INVALID_PATH', 'Path must name a file or directory inside the project, not the project root.');
+  }
+  const parent = await resolveInsideRoot(projectPath, path.posix.dirname(clean));
+  const rel = path.join(parent.rel, name);
+  assertNotGitPath(toPosix(rel));
+  return { abs: path.join(parent.abs, name), rel };
+}
+
+/** `rwxr-xr-x` for the permission bits of `mode`. */
+export function permissionString(mode: number): string {
+  const flags = 'rwxrwxrwx';
+  let out = '';
+  for (let i = 0; i < 9; i++) out += mode & (1 << (8 - i)) ? flags[i] : '-';
+  return out;
 }
 
 /**
@@ -166,6 +193,63 @@ export async function fileEditRoutes(fastify: FastifyInstance, deps: AppDeps): P
     }
     deps.fileWatchers.push(project.id, { type: 'create', path: toPosix(resolved.rel) });
     reply.code(204).send();
+  });
+
+  // Rename ------------------------------------------------------------------
+
+  fastify.post('/projects/:id/files/rename', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const body = z.object({ from: pathSchema, to: pathSchema }).parse(req.body);
+    const from = await resolveEntry(project.path, body.from);
+    const to = await resolveEntry(project.path, body.to);
+    deps.fileWatchers.ensureStarted(project.id, project.path);
+
+    const stats = await fsp.lstat(from.abs).catch(() => undefined);
+    if (!stats) throw notFound('Entry not found');
+    const result: RenameEntryResponse = { path: toPosix(to.rel) };
+    if (from.abs === to.abs) return result;
+    const existing = await fsp.lstat(to.abs).catch(() => undefined);
+    // Same inode: only the case changes on a case-insensitive filesystem.
+    if (existing && existing.ino !== stats.ino) {
+      throw httpError(409, 'EXISTS', 'An entry with this path already exists.');
+    }
+    if (stats.isDirectory() && isInside(from.abs, to.abs)) {
+      throw httpError(400, 'INVALID_PATH', 'A folder cannot be moved into itself.');
+    }
+    await fsp.mkdir(path.dirname(to.abs), { recursive: true });
+    await fsp.rename(from.abs, to.abs);
+    deps.fileWatchers.push(project.id, { type: 'delete', path: toPosix(from.rel) });
+    deps.fileWatchers.push(project.id, { type: 'create', path: toPosix(to.rel) });
+    return result;
+  });
+
+  // Info --------------------------------------------------------------------
+
+  fastify.get('/projects/:id/files/info', async (req) => {
+    const project = getProjectOr404(deps, (req.params as { id: string }).id);
+    const query = z.object({ path: pathSchema }).parse(req.query ?? {});
+    const entry = await resolveEntry(project.path, query.path);
+
+    const link = await fsp.lstat(entry.abs).catch(() => undefined);
+    if (!link) throw notFound('Entry not found');
+    const isLink = link.isSymbolicLink();
+    // A link describes what it points to; a broken one describes itself.
+    const stats = isLink ? await fsp.stat(entry.abs).catch(() => link) : link;
+    const isDir = stats.isDirectory();
+    const info: FileInfoResponse = {
+      path: toPosix(entry.rel),
+      name: path.basename(entry.abs),
+      kind: isDir ? 'dir' : 'file',
+      absPath: entry.abs,
+      size: stats.size,
+      modifiedAt: stats.mtimeMs,
+      permissions: permissionString(stats.mode),
+    };
+    if (stats.birthtimeMs > 0) info.createdAt = stats.birthtimeMs;
+    if (isDir) info.items = (await fsp.readdir(entry.abs).catch(() => [])).length;
+    else info.mime = guessMime(entry.abs);
+    if (isLink) info.symlinkTarget = await fsp.readlink(entry.abs);
+    return info;
   });
 
   // Delete ------------------------------------------------------------------

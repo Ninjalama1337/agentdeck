@@ -15,6 +15,9 @@ import type {
   CloneProjectRequest,
   CreateAccountRequest,
   CreateEntryRequest,
+  FileInfoResponse,
+  RenameEntryRequest,
+  RenameEntryResponse,
   CreateProjectRequest,
   CreateRoutineRequest,
   CreateSessionRequest,
@@ -430,6 +433,17 @@ export const api = {
     return request('POST', `/api/projects/${encodeURIComponent(projectId)}/files/create`, { json: body });
   },
 
+  /** Rename or move an entry (409 EXISTS when `to` is taken). */
+  renameEntry(projectId: string, from: string, to: string): Promise<RenameEntryResponse> {
+    const body: RenameEntryRequest = { from, to };
+    return request('POST', `/api/projects/${encodeURIComponent(projectId)}/files/rename`, { json: body });
+  },
+
+  /** Size, dates, permissions … of one file or folder. */
+  fileInfo(projectId: string, path: string): Promise<FileInfoResponse> {
+    return request('GET', `/api/projects/${encodeURIComponent(projectId)}/files/info`, { query: { path } });
+  },
+
   /** Delete a file (always) or a directory (non-empty only with recursive). */
   deleteEntry(projectId: string, path: string, recursive = false): Promise<void> {
     return request('DELETE', `/api/projects/${encodeURIComponent(projectId)}/files/entry`, {
@@ -732,6 +746,8 @@ export const api = {
  * /api/projects/:id/files/upload?dir=… (multipart field `file`) and returns a
  * signed Attachment — session attachments use the same route, and so do files
  * for a terminal (`terminalId`; the answer then carries the server `path`).
+ * `save.name` stores a project upload under exactly that name (409 EXISTS
+ * when taken, unless `save.overwrite`); without it the server prefixes an id.
  */
 export function uploadFile(
   projectId: string,
@@ -740,12 +756,13 @@ export function uploadFile(
   onProgress?: (fraction: number) => void,
   sessionId?: string,
   terminalId?: string,
+  save?: { name: string; overwrite?: boolean },
 ): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(
       'POST',
-      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?${terminalId ? `terminalId=${encodeURIComponent(terminalId)}&dir=${encodeURIComponent(dir)}` : sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : `dir=${encodeURIComponent(dir)}`}`,
+      `${base()}/api/projects/${encodeURIComponent(projectId)}/files/upload?${terminalId ? `terminalId=${encodeURIComponent(terminalId)}&dir=${encodeURIComponent(dir)}` : sessionId ? `sessionId=${encodeURIComponent(sessionId)}` : `dir=${encodeURIComponent(dir)}${save ? `&name=${encodeURIComponent(save.name)}${save.overwrite ? '&overwrite=1' : ''}` : ''}`}`,
     );
     const token = getToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FocusEvent } from 'react';
 import {
   ChevronRight,
+  Copy,
   Download,
   Eye,
   EyeOff,
@@ -13,16 +14,18 @@ import {
   FolderOpen,
   FolderPlus,
   Image as ImageIcon,
+  Info,
   Loader2,
   MoreVertical,
   PackageOpen,
+  Pencil,
   RefreshCw,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { FileEntry } from '@agentdeck/shared';
-import { api, fetchBlob, uploadFile } from '../../api/client';
+import type { FileEntry, FileInfoResponse } from '@agentdeck/shared';
+import { api, ApiError, fetchBlob, uploadFile } from '../../api/client';
 import { errorMessage, useAppStore } from '../../store/appStore';
 import { canInstallApks, downloadFile, installApkFile, isShareCancel } from '../../util/download';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -33,6 +36,7 @@ import { ProjectSwitcher } from '../../components/ProjectSwitcher';
 import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 import { Sheet } from '../../components/ui/Sheet';
 import { FileEditorSheet } from './FileEditorSheet';
+import { copyText } from '../code/termSelect';
 import { bytes, fileVisualKind, relTime, type FileVisualKind } from '../../util/format';
 
 const KIND_ICONS: Record<FileVisualKind, typeof FileIcon> = {
@@ -42,6 +46,34 @@ const KIND_ICONS: Record<FileVisualKind, typeof FileIcon> = {
   archive: FileArchive,
   file: FileIcon,
 };
+
+/** Folder last open per project — the screen unmounts when another tab is shown. */
+const lastFolder = new Map<string, string>();
+
+/** Why `name` cannot name a file or folder, or null. */
+function nameProblem(name: string): string | null {
+  const n = name.trim();
+  if (!n) return 'Enter a name';
+  if (/[/\\]/.test(n)) return 'A name cannot contain “/”';
+  if (n === '.' || n === '..') return 'Not a valid name';
+  return null;
+}
+
+/** Focus selects the name without its extension, ready to be typed over. */
+function selectStem(e: FocusEvent<HTMLInputElement>) {
+  const el = e.currentTarget;
+  const dot = el.value.lastIndexOf('.');
+  el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
+}
+
+function parentOf(entryPath: string): string {
+  const i = entryPath.lastIndexOf('/');
+  return i < 0 ? '' : entryPath.slice(0, i);
+}
+
+function fullDate(ts: number): string {
+  return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
 
 export function FilesScreen() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
@@ -79,7 +111,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const setLightbox = useAppStore((s) => s.setLightbox);
   const filesVersion = useAppStore((s) => s.filesVersion[projectId] ?? 0);
 
-  const [path, setPath] = useState('');
+  const [path, setPath] = useState(() => lastFolder.get(projectId) ?? '');
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,8 +125,18 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<{ file: File; name: string }[] | null>(null);
+  const [renameTarget, setRenameTarget] = useState<FileEntry | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [infoTarget, setInfoTarget] = useState<FileEntry | null>(null);
+  const [info, setInfo] = useState<FileInfoResponse | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
   const uploadInput = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    lastFolder.set(projectId, path);
+  }, [projectId, path]);
 
   const load = useCallback(
     async (silent = false) => {
@@ -108,6 +150,11 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
         });
         setEntries(sorted);
       } catch (err) {
+        // The folder is gone (deleted, or remembered from before): back to the root.
+        if (path && err instanceof ApiError && err.status === 404) {
+          setPath('');
+          return;
+        }
         setError(errorMessage(err));
         setEntries([]);
       } finally {
@@ -182,12 +229,15 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
     }
   };
 
-  const upload = async (files: File[]) => {
-    for (const file of files) {
+  /** Uploads into the open folder, each file under the name chosen for it. */
+  const upload = async (items: { file: File; name: string }[]) => {
+    for (const { file, name } of items) {
+      // The sheet warned about it: an existing file of that name is replaced.
+      const overwrite = entries?.some((e) => e.kind === 'file' && e.name === name) ?? false;
       setUploading((n) => n + 1);
       try {
-        await uploadFile(projectId, file, path || 'uploads');
-        toast('info', `Uploaded ${file.name}`);
+        await uploadFile(projectId, file, path, undefined, undefined, undefined, { name, overwrite });
+        toast('info', `Uploaded ${name}`);
       } catch (err) {
         toast('error', `Upload failed: ${errorMessage(err)}`);
       } finally {
@@ -195,6 +245,66 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
       }
     }
     useAppStore.getState().bumpFilesVersion(projectId);
+  };
+
+  const uploadProblems = (pendingUploads ?? []).map(({ name }, i, all) => {
+    const n = name.trim();
+    const problem = nameProblem(n);
+    if (problem) return { error: problem };
+    if (all.some((other, j) => j !== i && other.name.trim() === n)) return { error: 'Same name twice in this upload' };
+    const existing = entries?.find((e) => e.name === n);
+    if (existing?.kind === 'dir') return { error: 'A folder has this name' };
+    if (existing) return { warning: 'Replaces the file that is already there' };
+    return {};
+  });
+
+  const startUpload = () => {
+    if (!pendingUploads || uploadProblems.some((p) => p.error)) return;
+    const items = pendingUploads.map(({ file, name }) => ({ file, name: name.trim() }));
+    setPendingUploads(null);
+    void upload(items);
+  };
+
+  const openRename = (entry: FileEntry) => {
+    setRenameName(entry.name);
+    setRenameTarget(entry);
+  };
+
+  const submitRename = async () => {
+    const target = renameTarget;
+    if (!target || renaming) return;
+    const name = renameName.trim();
+    const problem = nameProblem(name);
+    if (problem) {
+      toast('error', problem);
+      return;
+    }
+    if (name === target.name) {
+      setRenameTarget(null);
+      return;
+    }
+    const parent = parentOf(target.path);
+    setRenaming(true);
+    try {
+      await api.renameEntry(projectId, target.path, parent ? `${parent}/${name}` : name);
+      toast('info', `Renamed to ${name}`);
+      setRenameTarget(null);
+      useAppStore.getState().bumpFilesVersion(projectId);
+    } catch (err) {
+      toast('error', errorMessage(err));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const openInfo = (entry: FileEntry) => {
+    setInfo(null);
+    setInfoError(null);
+    setInfoTarget(entry);
+    api
+      .fileInfo(projectId, entry.path)
+      .then(setInfo)
+      .catch((err: unknown) => setInfoError(errorMessage(err)));
   };
 
   const submitCreate = async () => {
@@ -400,6 +510,24 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
               </>
             )}
             <MenuRow
+              icon={<Pencil size={18} strokeWidth={1.8} />}
+              label="Rename"
+              onClick={() => {
+                const target = actionEntry;
+                setActionEntry(null);
+                openRename(target);
+              }}
+            />
+            <MenuRow
+              icon={<Info size={18} strokeWidth={1.8} />}
+              label="Info"
+              onClick={() => {
+                const target = actionEntry;
+                setActionEntry(null);
+                openInfo(target);
+              }}
+            />
+            <MenuRow
               icon={<Trash2 size={18} strokeWidth={1.8} />}
               label="Delete"
               danger
@@ -445,6 +573,133 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
         </div>
       </Sheet>
 
+      {/* upload: target names */}
+      <Sheet
+        open={pendingUploads !== null}
+        onClose={() => setPendingUploads(null)}
+        title={pendingUploads && pendingUploads.length > 1 ? `Upload ${pendingUploads.length} files` : 'Upload file'}
+        subtitle={path ? `Into ${path}/` : 'Into the project root'}
+      >
+        {pendingUploads && (
+          <div className="flex flex-col gap-3 px-1 pb-1">
+            {pendingUploads.map((item, i) => {
+              const { error: problem, warning } = uploadProblems[i] ?? {};
+              return (
+                <label key={i} className="flex flex-col gap-1">
+                  <span className="truncate px-1 text-[12px] text-dim">
+                    {item.file.name} · {bytes(item.file.size)}
+                  </span>
+                  <input
+                    className="field font-mono text-[13.5px]"
+                    value={item.name}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      setPendingUploads((list) => list && list.map((it, j) => (j === i ? { ...it, name } : it)));
+                    }}
+                    onFocus={selectStem}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') startUpload();
+                    }}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label={`Save ${item.file.name} as`}
+                  />
+                  {(problem ?? warning) && (
+                    <span className={clsx('px-1 text-[12px]', problem ? 'text-danger' : 'text-warn')}>{problem ?? warning}</span>
+                  )}
+                </label>
+              );
+            })}
+            <Button variant="primary" full disabled={uploadProblems.some((p) => p.error)} onClick={startUpload}>
+              Upload
+            </Button>
+          </div>
+        )}
+      </Sheet>
+
+      {/* rename */}
+      <Sheet
+        open={renameTarget !== null}
+        onClose={() => (renaming ? null : setRenameTarget(null))}
+        title={renameTarget?.kind === 'dir' ? 'Rename folder' : 'Rename file'}
+        subtitle={renameTarget?.path}
+      >
+        <div className="flex flex-col gap-3 px-1 pb-1">
+          <input
+            className="field font-mono text-[13.5px]"
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            onFocus={renameTarget?.kind === 'dir' ? undefined : selectStem}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitRename();
+            }}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-label="New name"
+          />
+          <Button variant="primary" full loading={renaming} disabled={nameProblem(renameName) !== null} onClick={() => void submitRename()}>
+            Rename
+          </Button>
+        </div>
+      </Sheet>
+
+      {/* info */}
+      <Sheet open={infoTarget !== null} onClose={() => setInfoTarget(null)} title={infoTarget?.name} subtitle="Info">
+        {infoError ? (
+          <p className="px-1 pb-2 text-[13px] text-danger">{infoError}</p>
+        ) : !info ? (
+          <div className="flex justify-center py-6">
+            <Loader2 size={20} className="animate-spin text-dim" />
+          </div>
+        ) : (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 px-1 pb-2 text-[13px]">
+            <dt className="text-dim">Type</dt>
+            <dd className="min-w-0 break-all">{info.kind === 'dir' ? 'Folder' : (info.mime ?? 'File')}</dd>
+            <dt className="text-dim">{info.kind === 'dir' ? 'Contents' : 'Size'}</dt>
+            <dd>
+              {info.kind === 'dir'
+                ? `${info.items ?? 0} ${info.items === 1 ? 'item' : 'items'}`
+                : info.size < 1024
+                  ? bytes(info.size)
+                  : `${bytes(info.size)} (${info.size.toLocaleString()} bytes)`}
+            </dd>
+            <dt className="text-dim">Modified</dt>
+            <dd>
+              {fullDate(info.modifiedAt)} <span className="text-dim">· {relTime(info.modifiedAt)}</span>
+            </dd>
+            {info.createdAt !== undefined && (
+              <>
+                <dt className="text-dim">Created</dt>
+                <dd>{fullDate(info.createdAt)}</dd>
+              </>
+            )}
+            <dt className="text-dim">Permissions</dt>
+            <dd className="font-mono">{info.permissions}</dd>
+            {info.symlinkTarget !== undefined && (
+              <>
+                <dt className="text-dim">Link to</dt>
+                <dd className="min-w-0 break-all font-mono text-[12px]">{info.symlinkTarget}</dd>
+              </>
+            )}
+            <dt className="text-dim">Path</dt>
+            <dd className="flex min-w-0 items-start gap-1">
+              <span className="min-w-0 flex-1 break-all font-mono text-[12px]">{info.absPath}</span>
+              <IconButton
+                label="Copy path"
+                className="-my-2 h-9 w-9 shrink-0"
+                onClick={() =>
+                  void copyText(info.absPath).then((ok) => toast(ok ? 'info' : 'error', ok ? 'Path copied' : 'Could not copy'))
+                }
+              >
+                <Copy size={15} />
+              </IconButton>
+            </dd>
+          </dl>
+        )}
+      </Sheet>
+
       {/* delete confirm */}
       <Modal open={deleteTarget !== null} onClose={() => (deleting ? null : setDeleteTarget(null))} title={deleteTarget?.kind === 'dir' ? 'Delete folder' : 'Delete file'}>
         {deleteTarget && (
@@ -477,7 +732,7 @@ function FilesScreenInner({ projectId }: { projectId: string }) {
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (files.length) void upload(files);
+          if (files.length) setPendingUploads(files.map((file) => ({ file, name: file.name })));
         }}
       />
     </div>

@@ -6,7 +6,8 @@ import type { FastifyInstance } from 'fastify';
 import type { Attachment, FileDownloadUrlResponse } from '@agentdeck/shared';
 import { z } from 'zod';
 import { notFound, httpError } from '../http/errors.js';
-import { resolveInsideRoot } from '../files/sandbox.js';
+import { assertNotGitPath, resolveInsideRoot } from '../files/sandbox.js';
+import { EDIT_TEMP_PREFIX } from '../files/watcher.js';
 import { guessMime, isInlineMime, listDirectory } from '../files/browser.js';
 import { fileIndex } from '../files/fileIndex.js';
 import { sanitizeFileName } from '../util/paths.js';
@@ -104,7 +105,14 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
   fastify.post('/projects/:id/files/upload', async (req, reply) => {
     const projectId = (req.params as { id: string }).id;
     const query = z
-      .object({ sessionId: z.string().optional(), terminalId: z.string().optional(), dir: z.string().optional() })
+      .object({
+        sessionId: z.string().optional(),
+        terminalId: z.string().optional(),
+        dir: z.string().optional(),
+        // Project uploads only: save under exactly this name (no id prefix).
+        name: z.string().min(1).max(255).optional(),
+        overwrite: z.string().optional(),
+      })
       .parse(req.query ?? {});
     const project = getProjectOr404(deps, projectId);
 
@@ -139,32 +147,62 @@ export async function fileRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
     await fsp.mkdir(destDir, { recursive: true });
 
     const fileId = newFileId();
+    const exactName = query.name !== undefined && !query.sessionId && !query.terminalId;
     // A terminal gets the path typed in: nothing in the name a shell or a TUI would split at.
     const safeName = query.terminalId
       ? sanitizeFileName(file.filename).replace(/[^A-Za-z0-9._-]+/g, '_')
-      : sanitizeFileName(file.filename);
-    const dest = path.join(destDir, `${fileId}__${safeName}`);
+      : sanitizeFileName(exactName ? (query.name ?? file.filename) : file.filename);
+    const dest = path.join(destDir, exactName ? safeName : `${fileId}__${safeName}`);
     if (!dest.startsWith(destDir + path.sep)) {
       throw httpError(400, 'BAD_REQUEST', 'Invalid filename.');
     }
+    // A chosen name may collide: refuse, or replace only on request — and
+    // write next to it first, so a failed upload leaves the old file intact.
+    let tmpDir: string | null = null;
+    if (exactName) {
+      try {
+        assertNotGitPath(path.relative(signRoot, dest).split(path.sep).join('/'));
+        const existing = await fsp.lstat(dest).catch(() => undefined);
+        if (existing?.isDirectory()) throw httpError(409, 'EXISTS', 'A folder with this name already exists.');
+        if (existing && query.overwrite !== '1') {
+          throw httpError(409, 'EXISTS', 'A file with this name already exists.');
+        }
+      } catch (err) {
+        file.file.resume();
+        throw err;
+      }
+      tmpDir = await fsp.mkdtemp(path.join(destDir, EDIT_TEMP_PREFIX));
+    }
+    const writeTo = tmpDir ? path.join(tmpDir, 'file') : dest;
 
     let tooLarge = false;
     file.file.on('limit', () => {
       tooLarge = true;
     });
+    const cleanup = async (): Promise<void> => {
+      await fsp.rm(tmpDir ?? dest, { recursive: true, force: true }).catch(() => undefined);
+    };
     try {
-      await pipeline(file.file, createWriteStream(dest));
+      await pipeline(file.file, createWriteStream(writeTo));
     } catch (err) {
-      await fsp.rm(dest, { force: true }).catch(() => undefined);
+      await cleanup();
       throw err;
     }
     if (tooLarge) {
-      await fsp.rm(dest, { force: true }).catch(() => undefined);
+      await cleanup();
       throw httpError(
         413,
         'FILE_TOO_LARGE',
         `Attachment exceeds the ${Math.round(deps.config.maxUploadBytes / (1024 * 1024))} MB limit.`,
       );
+    }
+
+    if (tmpDir) {
+      try {
+        await fsp.rename(writeTo, dest);
+      } finally {
+        await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
 
     const stats = await fsp.stat(dest);
