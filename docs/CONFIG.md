@@ -85,7 +85,17 @@ Server neu starten — es gibt kein Hot-Reload.
       "command": "flatpak run --command=antigravity com.google.Antigravity",
       "ideCommand": "flatpak run com.google.Antigravity"
     },
-    "codex":       { "mode": "headless", "command": "codex" }
+    "codex":       { "mode": "headless", "command": "codex" },
+    "opencode":    { "mode": "auto",     "command": "opencode" },
+
+    // Generischer CLI-Agent: läuft JEDEN ein-Zeilen-CLI-Agent headless.
+    // Feste Flags gehören in "command"; "promptArg" sagt, wo der Prompt hin
+    // ({prompt}, z. B. "--message {prompt}"); leer = Prompt über stdin.
+    // Standard ist "off" — erst hier aktivieren. Beispiele:
+    //   gemini   -> { "mode": "headless", "command": "gemini -p", "promptArg": "{prompt}" }
+    //   aider    -> { "mode": "headless", "command": "aider --message", "promptArg": "{prompt} --yes" }
+    //   einen beliebigen eigenen Agenten ebenso.
+    "custom":      { "mode": "off", "command": "custom-agent", "promptArg": "{prompt}" }
   }
 }
 ```
@@ -113,6 +123,7 @@ Server neu starten — es gibt kein Hot-Reload.
 | `agents.<id>.mode` | string | s. o. | `headless` \| `ide` \| `auto` \| `off` |
 | `agents.<id>.command` | string | pro Agent | CLI-Befehl (Pfad erlaubt) |
 | `agents.<id>.ideCommand` | string | abgeleitet | Befehl zum Öffnen der IDE |
+| `agents.custom.promptArg` | string | `"{prompt}"` | Custom-CLI: Stelle des Prompts (`{prompt}`), leer = über stdin |
 | `voice.provider` | string | `"auto"` | Diktat-Backend: `auto` \| `openai` \| `groq` \| `command` \| `off` |
 | `voice.apiKey` | string | `""` | API-Key (Fallback: `OPENAI_API_KEY` / `GROQ_API_KEY`) |
 | `voice.baseUrl` | string | `""` | OpenAI-kompatible Base-URL (Default `https://api.openai.com/v1`) |

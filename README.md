@@ -195,13 +195,20 @@ systemd-User-Service-Beispiel in [docs/CONFIG.md](docs/CONFIG.md).
 | Agent | Fernsteuerung | Standard-Modus | Hinweise |
 |---|---|---|---|
 | **Claude Code** | voll headless | `headless` | stream-json, Resume, Bildanhänge, Permission-Modes |
+| **Codex** | headless | `headless` | `codex exec --json`, Resume, `-C <dir>` |
+| **OpenCode** | headless | `auto` | `opencode run --format json`, echte Modell-Liste, Go-Abo-Usage |
 | **ZCode** | über MCP-Bridge | `ide` | Desktop-App ohne Headless-CLI: Projekt wird geöffnet, Steuerung als Orchestrator über die Bridge |
 | **Antigravity** | Sonde + IDE-Fallback | `auto` | Headless nicht verifiziert — günstiger Probe-Versuch, sonst öffnet die IDE (`flatpak run …`) |
-| **Codex** | headless | `headless` | `codex exec --json`, Resume, `-C <dir>` |
+| **Custom CLI** | headless | `off` | Generisch: jeder ein-Zeilen-CLI-Agent aus der Config (`agents.custom`), Output als Text gestreamt |
 
 Die Modi (`headless` / `ide` / `auto` / `off`) stellst du pro Agent in
 `~/.config/agentdeck/config.json` unter `agents.<id>.mode` um — alle Details in
-[docs/CONFIG.md](docs/CONFIG.md).
+[docs/CONFIG.md](docs/CONFIG.md). Der **Custom CLI**-Agent ist standardmäßig
+`off`: trag in `agents.custom.command` dein Kommando ein (feste Flags inklusive)
+und sag mit `promptArg`, wo der Prompt hin soll — z. B.
+`{ "mode": "headless", "command": "gemini -p", "promptArg": "{prompt}" }`.
+So läuft praktisch jeder CLI-Agent (Gemini, Aider, Qwen, Goose, …) im Chat,
+ohne dass er fest eingebaut sein muss.
 
 ## Sicherheit (Kurzfassung)
 

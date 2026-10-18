@@ -106,6 +106,9 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
         { kind: 'install', label: 'npm install -g @opencode/cli' },
         { kind: 'login', label: 'opencode auth login opencode' },
       ];
+    // The custom CLI is user-configured — there is nothing to update or install.
+    case 'custom':
+      return [];
   }
 }
 
@@ -248,5 +251,9 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
         args: ['install', '-g', '@opencode/cli'],
         cwd: home(),
       };
+    // Reached only if a recipe was wrongly requested for the custom CLI — the
+    // capability lookup above already answers 404, this keeps the switch total.
+    case 'custom':
+      throw httpError(404, 'NOT_FOUND', 'The custom CLI has no install recipes.');
   }
 }

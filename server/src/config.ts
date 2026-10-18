@@ -23,6 +23,12 @@ const AgentConfigSchema = z.object({
   mode: z.enum(['headless', 'ide', 'auto', 'off']).default('auto'),
   command: z.string().min(1),
   ideCommand: z.string().optional(),
+  /**
+   * Custom CLI only: a template saying where the prompt goes. `{prompt}` is
+   * replaced with the turn's text (one argument); e.g. `-p {prompt}` or
+   * `--message {prompt}`. Empty string sends the prompt on stdin instead.
+   */
+  promptArg: z.string().optional(),
 });
 
 export const TunnelConfigSchema = z.object({
@@ -81,6 +87,9 @@ export const ConfigSchema = z.object({
       }),
       codex: AgentConfigSchema.default({ mode: 'headless', command: 'codex' }),
       opencode: AgentConfigSchema.default({ mode: 'auto', command: 'opencode' }),
+      // Off until configured: set agents.custom.command (and mode) to drive any
+      // one-shot CLI agent headlessly.
+      custom: AgentConfigSchema.default({ mode: 'off', command: 'custom-agent', promptArg: '{prompt}' }),
     })
     .default({}),
 });

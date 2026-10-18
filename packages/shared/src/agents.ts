@@ -4,7 +4,7 @@
 import type { AdminCapability } from './api.js';
 
 /** The one canonical list of agents — server schemas and clients derive from it. */
-export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex', 'opencode'] as const;
+export const AGENT_IDS = ['claude', 'zcode', 'antigravity', 'codex', 'opencode', 'custom'] as const;
 
 export type AgentId = (typeof AGENT_IDS)[number];
 
@@ -69,6 +69,7 @@ export const AGENT_ACCENTS: Record<AgentId, string> = {
   antigravity: '#4E8CFF',
   codex: '#10B981',
   opencode: '#F59E0B',
+  custom: '#8B5CF6',
 };
 
 export const AGENT_LABELS: Record<AgentId, string> = {
@@ -77,6 +78,7 @@ export const AGENT_LABELS: Record<AgentId, string> = {
   antigravity: 'Antigravity (AGY)',
   codex: 'Codex',
   opencode: 'OpenCode',
+  custom: 'Custom CLI',
 };
 
 export const AGENT_SHORT_LABELS: Record<AgentId, string> = {
@@ -85,4 +87,5 @@ export const AGENT_SHORT_LABELS: Record<AgentId, string> = {
   antigravity: 'AGY',
   codex: 'Codex',
   opencode: 'OpenCode',
+  custom: 'Custom',
 };

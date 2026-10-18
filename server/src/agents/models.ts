@@ -48,4 +48,12 @@ export const MODEL_PRESETS: Record<AgentId, ModelPreset[]> = {
       description: 'Enter any provider/model id supported by OpenCode',
     },
   ],
+  custom: [
+    { id: 'inherit', label: 'Default', description: "Use the CLI's own model" },
+    {
+      id: 'custom',
+      label: 'Custom…',
+      description: 'Enter any model id the CLI accepts',
+    },
+  ],
 };

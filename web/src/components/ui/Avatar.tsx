@@ -1,4 +1,4 @@
-import { Bot, Braces, Rocket, Sparkles, Terminal } from 'lucide-react';
+import { Bot, Braces, Rocket, Sparkles, Terminal, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AGENT_ACCENTS } from '@agentdeck/shared';
@@ -10,6 +10,7 @@ const ICONS: Record<AgentId, LucideIcon> = {
   antigravity: Rocket,
   codex: Braces,
   opencode: Bot,
+  custom: Wrench,
 };
 
 const SIZES = {

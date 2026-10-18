@@ -14,6 +14,7 @@ import { CodexAdapter } from './codex.js';
 import { ZCodeAdapter } from './zcode.js';
 import { AntigravityAdapter } from './antigravity.js';
 import { OpenCodeAdapter } from './opencode.js';
+import { CustomCliAdapter } from './custom.js';
 import type { AgentAdapter, DetectResult } from './types.js';
 
 const DETECT_TIMEOUT_MS = 5000;
@@ -33,6 +34,7 @@ export class AgentService {
       new AntigravityAdapter(cfg.agents.antigravity),
       new CodexAdapter(cfg.agents.codex),
       new OpenCodeAdapter(cfg.agents.opencode),
+      new CustomCliAdapter(cfg.agents.custom),
     ];
   }
 

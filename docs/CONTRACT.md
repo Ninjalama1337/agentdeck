@@ -111,7 +111,11 @@ Env prefix `AGENTDECK_`, optional JSON config at `~/.config/agentdeck/config.jso
     "claude":      { "mode": "headless", "command": "claude" },
     "zcode":       { "mode": "auto",    "command": "zcode" },
     "antigravity": { "mode": "auto",    "command": "flatpak run --command=antigravity com.google.Antigravity", "ideCommand": "flatpak run com.google.Antigravity" },
-    "codex":       { "mode": "headless", "command": "codex" }
+    "codex":       { "mode": "headless", "command": "codex" },
+    "opencode":    { "mode": "auto",    "command": "opencode" },
+    // Generic CLI agent: drives any one-shot CLI headlessly. {prompt} marks the
+    // prompt's place; empty promptArg sends it on stdin. Off by default.
+    "custom":      { "mode": "off", "command": "custom-agent", "promptArg": "{prompt}" }
   },
   "tunnel": {
     "provider": "cloudflared",              // "off" (default) | "cloudflared"
