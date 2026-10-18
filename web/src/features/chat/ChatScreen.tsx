@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ExternalLink,
+  Frame,
   MessageSquare,
   Monitor,
   MoreVertical,
@@ -27,6 +28,7 @@ import { TeamComposer } from './TeamComposer';
 import { UsageSheet } from '../settings/UsageSheet';
 import { ChatSearch, messageMatches } from './ChatSearch';
 import { SessionListPanel } from '../sessions/SessionListPanel';
+import { DesignMode } from '../design/DesignMode';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useDesktopLayout } from '../../hooks/useDesktopLayout';
 
@@ -80,6 +82,7 @@ function ChatPane({ embedded = false }: { embedded?: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [designOpen, setDesignOpen] = useState(false);
   const [query, setQuery] = useState('');
 
   const agent: AgentInfo | undefined = session ? agents[session.agentId] : undefined;
@@ -182,6 +185,9 @@ function ChatPane({ embedded = false }: { embedded?: boolean }) {
             </span>
           </span>
         </button>
+        <IconButton label="Design mode" onClick={() => setDesignOpen(true)} className="h-9 w-9">
+          <Frame size={17} />
+        </IconButton>
         <IconButton label="Team run" onClick={() => setTeamOpen(true)} className="h-9 w-9">
           <Users size={17} />
         </IconButton>
@@ -304,6 +310,7 @@ function ChatPane({ embedded = false }: { embedded?: boolean }) {
       <NewSessionSheet open={newSessionOpen} onClose={() => setNewSessionOpen(false)} projectId={session.projectId} />
       <TeamComposer open={teamOpen} onClose={() => setTeamOpen(false)} projectId={session.projectId} />
       <UsageSheet open={usageOpen} onClose={() => setUsageOpen(false)} />
+      <DesignMode open={designOpen} sessionId={session.id} onClose={() => setDesignOpen(false)} />
     </div>
   );
 }

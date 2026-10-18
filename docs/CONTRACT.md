@@ -331,6 +331,20 @@ download and Android's installer right away.
 
 Features adopted from bridgemind.ai, mapped to a phone-first remote deck.
 
+### Design mode (v0.11.74)
+
+`POST /api/ports/:port/preview {design: true}` returns the same signed preview
+link with `&design=1`; the proxy then sets an extra `agentdeck_design=1` cookie,
+serves the picker at `/__agentdeck_design.js` and injects
+`<script src="/__agentdeck_design.js"></script>` before `</body>` of every HTML
+response in that session (its responses are requested with `accept-encoding:
+identity` so the body can be rewritten; compressed or non-HTML responses pass
+through untouched). The script runs in the preview's origin, highlights the
+element under the pointer and posts the pick — selector, outer HTML, and the
+computed styles that differ from a fresh element of the same tag — to the app,
+which puts it into the composer. No screenshot; opening a plain preview link
+never includes the bridge.
+
 ### Terminals ("Code" tab)
 
 Real PTY shells on the server, one per open tab, project-scoped.

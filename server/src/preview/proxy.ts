@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import type { Duplex } from 'node:stream';
+import { DESIGN_BRIDGE_PATH, DESIGN_COOKIE, designBridgeScript, injectBridge } from './designBridge.js';
 
 export const PREVIEW_TOKEN_TTL_SECONDS = 12 * 3600;
 const COOKIE = 'agentdeck_preview';
@@ -49,9 +50,13 @@ export function localPath(path: string | null): string {
 }
 
 function cookieToken(header: string | undefined): string | undefined {
+  return cookieValue(header, COOKIE);
+}
+
+function cookieValue(header: string | undefined, name: string): string | undefined {
   for (const part of (header ?? '').split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === COOKIE) return v.join('=');
+    if (k === name) return v.join('=');
   }
   return undefined;
 }
@@ -128,21 +133,54 @@ export class PreviewProxy {
     const url = new URL(req.url ?? '/', 'http://preview');
     if (url.pathname === ENTRY) {
       const token = url.searchParams.get('t') ?? undefined;
-      if (verifyPreviewToken(this.opts.secretHex, token) === null) return this.deny(res);
+      const port = verifyPreviewToken(this.opts.secretHex, token);
+      if (port === null) return this.deny(res);
+      const cookies = [`${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${PREVIEW_TOKEN_TTL_SECONDS}`];
+      // Design Mode: the session is flagged so the proxy injects the picker into
+      // the HTML it serves (drop the flag by opening a plain preview link).
+      if (url.searchParams.get('design') === '1') {
+        cookies.push(`${DESIGN_COOKIE}=1; SameSite=Lax; Path=/; Max-Age=${PREVIEW_TOKEN_TTL_SECONDS}`);
+      }
       res.writeHead(302, {
-        'set-cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${PREVIEW_TOKEN_TTL_SECONDS}`,
+        'set-cookie': cookies,
         location: localPath(url.searchParams.get('path')),
       });
       res.end();
       return;
     }
-    const port = verifyPreviewToken(this.opts.secretHex, cookieToken(req.headers.cookie));
+    const cookie = req.headers.cookie;
+    if (url.pathname === DESIGN_BRIDGE_PATH) {
+      if (verifyPreviewToken(this.opts.secretHex, cookieToken(cookie)) === null) return this.deny(res);
+      res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(designBridgeScript());
+      return;
+    }
+    const port = verifyPreviewToken(this.opts.secretHex, cookieToken(cookie));
     if (port === null) return this.deny(res);
+    const design = cookieValue(cookie, DESIGN_COOKIE) === '1';
+    const headers = forwardHeaders(req.headers, port);
+    // The bridge is injected into the HTML, which needs the body uncompressed.
+    if (design) headers['accept-encoding'] = 'identity';
     const upstream = http.request(
-      { host: '127.0.0.1', port, method: req.method, path: req.url, headers: forwardHeaders(req.headers, port) },
+      { host: '127.0.0.1', port, method: req.method, path: req.url, headers },
       (up) => {
-        res.writeHead(up.statusCode ?? 502, up.headers);
-        up.pipe(res);
+        const type = String(up.headers['content-type'] ?? '');
+        const html = design && /text\/html/i.test(type) && !up.headers['content-encoding'];
+        if (!html) {
+          res.writeHead(up.statusCode ?? 502, up.headers);
+          up.pipe(res);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        up.on('data', (chunk: Buffer) => chunks.push(chunk));
+        up.on('end', () => {
+          const body = injectBridge(Buffer.concat(chunks).toString('utf8'));
+          const out = { ...up.headers };
+          delete out['content-length'];
+          delete out['transfer-encoding'];
+          res.writeHead(up.statusCode ?? 502, { ...out, 'content-length': Buffer.byteLength(body) });
+          res.end(body);
+        });
       },
     );
     upstream.on('error', () => {

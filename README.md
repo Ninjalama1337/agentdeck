@@ -70,6 +70,11 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   (`localhost:5173` …), erscheint der Port als Chip im Code-Tab; ein Tipp öffnet
   ihn über den Vorschau-Proxy (AgentDeck-Port + 1, signierter Link) auch am
   Handy im selben Netz, inklusive Hot Reload. Über den Tunnel geht das nicht.
+- **Design Mode** — im Chat auf das Rahmen-Symbol: die Vorschau läuft im
+  App-Fenster, der Proxy schiebt einen Picker in die Seite. Ein Tipp auf ein
+  Element schickt Selektor, HTML und die tatsächlich wirkenden Styles ins
+  Eingabefeld (was ein Inspector zeigen würde), ohne dass du DevTools am
+  Rechner aufmachen musst. Lädt nur die signierte Vorschau, kein Screenshot.
 - **Ressourcen & Rechner wach** — CPU und RAM je Terminal mit Prozessliste,
   einzelne Prozesse beenden; solange Agents arbeiten, schläft der Rechner nicht
   ein (`systemd-inhibit`/`caffeinate`, abschaltbar).

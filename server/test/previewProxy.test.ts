@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { localPath, PreviewProxy, signPreviewToken, verifyPreviewToken } from '../src/preview/proxy.js';
+import { DESIGN_BRIDGE_PATH, DESIGN_BRIDGE_TAG, injectBridge } from '../src/preview/designBridge.js';
 import { parseLsof, parseProcNetTcp } from '../src/preview/ports.js';
 
 const SECRET = 'ab'.repeat(32);
@@ -48,6 +49,11 @@ describe('PreviewProxy', () => {
     target = http.createServer((req, res) => {
       seen.host = req.headers.host;
       seen.cookie = req.headers.cookie;
+      if (req.url === '/page') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><html><body><h1>hi</h1></body></html>');
+        return;
+      }
       res.end(`hello ${req.url}`);
     });
     target.on('upgrade', (_req, socket) => {
@@ -95,6 +101,35 @@ describe('PreviewProxy', () => {
     expect(seen.cookie).toBe('other=1');
   });
 
+  it('injects the design bridge only for a design-mode session', async () => {
+    const token = signPreviewToken(SECRET, targetPort);
+    const plain = await get(`/__agentdeck_preview?t=${encodeURIComponent(token)}&path=/page`);
+    const plainCookie = String(plain.headers['set-cookie']![0]).split(';')[0]!;
+    expect(String(plain.headers['set-cookie']![0])).not.toContain('agentdeck_design');
+    const untouched = await get('/page', plainCookie);
+    expect(untouched.body).toContain('<h1>hi</h1>');
+    expect(untouched.body).not.toContain(DESIGN_BRIDGE_TAG);
+
+    const design = await get(`/__agentdeck_preview?t=${encodeURIComponent(token)}&path=/page&design=1`);
+    const cookies = design.headers['set-cookie']!.map((c) => String(c).split(';')[0]);
+    expect(cookies.some((c) => c.startsWith('agentdeck_design='))).toBe(true);
+    const res = await get('/page', cookies.join('; '));
+    expect(res.body).toContain(DESIGN_BRIDGE_TAG);
+    expect(res.body.indexOf(DESIGN_BRIDGE_TAG)).toBeLessThan(res.body.indexOf('</body>'));
+    // Plain text responses are forwarded unchanged.
+    const json = await get('/data.json', cookies.join('; '));
+    expect(json.body).toBe('hello /data.json');
+  });
+
+  it('serves the bridge script to a preview session only', async () => {
+    expect((await get(DESIGN_BRIDGE_PATH)).status).toBe(401);
+    const token = signPreviewToken(SECRET, targetPort);
+    const script = await get(DESIGN_BRIDGE_PATH, `agentdeck_preview=${token}`);
+    expect(script.status).toBe(200);
+    expect(script.headers['content-type']).toContain('javascript');
+    expect(script.body).toContain('agentdeck-design');
+  });
+
   it('tunnels WebSocket upgrades', async () => {
     const token = signPreviewToken(SECRET, targetPort);
     const reply = await new Promise<string>((resolve, reject) => {
@@ -114,6 +149,22 @@ describe('PreviewProxy', () => {
     });
     expect(reply).toContain('101 Switching Protocols');
     expect(reply).toContain('ping');
+  });
+});
+
+describe('design bridge injection', () => {
+  it('inserts the tag before the closing body and keeps the markup', () => {
+    const html = '<!doctype html><html><body><h1>hi</h1></body></html>';
+    const out = injectBridge(html);
+    expect(out).toBe(`<!doctype html><html><body><h1>hi</h1>${DESIGN_BRIDGE_TAG}</body></html>`);
+  });
+
+  it('appends when there is no body tag to anchor on', () => {
+    expect(injectBridge('<h1>fragment</h1>')).toBe(`<h1>fragment</h1>${DESIGN_BRIDGE_TAG}`);
+  });
+
+  it('anchors on the last body close tag', () => {
+    expect(injectBridge('<body>a</body><!-- x -->')).toBe(`<body>a${DESIGN_BRIDGE_TAG}</body><!-- x -->`);
   });
 });
 

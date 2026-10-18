@@ -326,8 +326,8 @@ export const api = {
     return request('GET', '/api/ports');
   },
 
-  previewLink(port: number): Promise<PreviewLinkResponse> {
-    return request('POST', `/api/ports/${port}/preview`);
+  previewLink(port: number, design = false): Promise<PreviewLinkResponse> {
+    return request('POST', `/api/ports/${port}/preview`, design ? { json: { design: true } } : {});
   },
 
   resources(): Promise<ResourcesResponse> {

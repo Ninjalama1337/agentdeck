@@ -28,11 +28,13 @@ export async function portRoutes(fastify: FastifyInstance, deps: AppDeps): Promi
 
   fastify.post('/ports/:port/preview', async (req): Promise<PreviewLinkResponse> => {
     const port = z.coerce.number().int().min(1).max(65535).parse((req.params as { port: string }).port);
+    // Design Mode: the proxy then injects the element picker into the page.
+    const design = z.object({ design: z.boolean().optional() }).safeParse(req.body ?? {}).data?.design === true;
     if (!deps.preview.running) throw httpError(503, 'PREVIEW_OFF', `The preview proxy could not start (port ${deps.preview.port} busy?)`);
     const token = signPreviewToken(deps.jwtSecret, port);
     // The same machine name the app used, on the proxy's port.
     const host = (req.headers.host ?? 'localhost').replace(/:\d+$/, '');
     const remote = req.headers['cf-ray'] !== undefined;
-    return { url: `http://${host}:${deps.preview.port}/__agentdeck_preview?t=${encodeURIComponent(token)}`, remote };
+    return { url: `http://${host}:${deps.preview.port}/__agentdeck_preview?t=${encodeURIComponent(token)}${design ? '&design=1' : ''}`, remote };
   });
 }
