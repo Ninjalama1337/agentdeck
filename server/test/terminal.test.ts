@@ -137,6 +137,24 @@ describe('TerminalManager (real PTY)', () => {
     manager.killAll();
   });
 
+  it('notifies once when a rate limit ends several turns', async () => {
+    const manager = new TerminalManager(quietLogger);
+    let announced = 0;
+    const broadcasts = {
+      onData: () => undefined,
+      onExit: () => undefined,
+      onList: () => undefined,
+      onAttention: () => (announced += 1),
+    };
+    const info = manager.spawn('/tmp', 'p1', 60, 20, broadcasts);
+    const stop = { hook_event_name: 'Stop', last_assistant_message: "You've hit your usage limit · resets 9pm" };
+    // Claude retries and ends turn after turn: every hook reports the same limit.
+    for (let i = 0; i < 5; i++) manager.hookEvent(info.id, stop, broadcasts);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(announced).toBe(1);
+    manager.killAll();
+  });
+
   it('caps concurrency by reaping the oldest terminal', async () => {
     const manager = new TerminalManager(quietLogger);
     const broadcasts = { onData: () => undefined, onExit: () => undefined, onList: () => undefined };

@@ -786,7 +786,11 @@ export class TerminalManager {
         });
       }
       this.log.info({ terminal: id, reason, state: verdict.state }, 'terminal attention');
-      broadcast.onAttention?.(term.info, reason, verdict);
+      // One notification per attention state: when a rate limit keeps ending
+      // turns, Claude sends several Stop/StopFailure hooks for the same limit
+      // and each one used to buzz again. A waiting terminal still re-asks on
+      // purpose (ASK_REPEAT_MS in hookEvent).
+      if (changed || verdict.state === 'waiting') broadcast.onAttention?.(term.info, reason, verdict);
       if (changed) broadcast.onList();
     });
   }
