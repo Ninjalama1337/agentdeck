@@ -3,9 +3,9 @@
  *
  * - claude: `claude -p "/usage"` for session/week limits and request stats.
  * - antigravity: `agy -p /usage` for subscription limits and model quotas.
- * - opencode: `opencode stats` for total cost, tokens, sessions and messages,
- *   overlaid with the OpenCode Go subscription quota (rolling 5h / weekly /
- *   monthly) from the official usage API when a Go key exists.
+ * - opencode: `opencode stats --json` for total cost, tokens, sessions and
+ *   prompts, overlaid with the OpenCode Go subscription quota (rolling 5h /
+ *   weekly / monthly) from the official usage API when a Go key exists.
  * - codex: local app-server `account/rateLimits/read`, with login fallback.
  * - zcode: plan data and local usage statistics.
  *
@@ -322,7 +322,80 @@ export interface OpenCodeUsageParse {
   last24h?: UsageWindow;
 }
 
+/** Compact token count the way `opencode stats` prints it ("58.1M", "1.8b"). */
+function compactTokens(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}b`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function statsNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * `opencode stats --json` (v2): totals for the range — `sessions`/`prompts`,
+ * `tokens.{input,output}` with `cache.read`, and a numeric `cost`. Read as JSON
+ * instead of scraping the compact human summary the v2 CLI prints. `undefined`
+ * when the text is not that JSON.
+ */
+function parseOpenCodeStatsJson(stdout: string): OpenCodeUsageParse | undefined {
+  const trimmed = stdout.trim();
+  if (!trimmed.startsWith('{')) return undefined;
+  let data: unknown;
+  try {
+    data = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  const stats = data as Record<string, unknown>;
+  const tokens = stats.tokens && typeof stats.tokens === 'object' ? (stats.tokens as Record<string, unknown>) : undefined;
+  const cache = tokens?.cache && typeof tokens.cache === 'object' ? (tokens.cache as Record<string, unknown>) : undefined;
+  const sessions = statsNumber(stats.sessions);
+  const prompts = statsNumber(stats.prompts);
+  const cost = statsNumber(stats.cost);
+  const input = statsNumber(tokens?.input);
+  const output = statsNumber(tokens?.output);
+  const cacheRead = statsNumber(cache?.read);
+  if (
+    sessions === undefined &&
+    prompts === undefined &&
+    cost === undefined &&
+    input === undefined &&
+    output === undefined &&
+    cacheRead === undefined
+  ) {
+    return undefined;
+  }
+  const tokensOut: { input?: string; output?: string; cache?: string } = {};
+  if (input !== undefined) tokensOut.input = compactTokens(input);
+  if (output !== undefined) tokensOut.output = compactTokens(output);
+  if (cacheRead !== undefined) tokensOut.cache = compactTokens(cacheRead);
+  const costText = cost !== undefined ? `$${cost.toFixed(2)}` : undefined;
+  return {
+    available: true,
+    plan: costText ? `${costText} spent · Pay-as-you-go` : 'OpenCode Pay-as-you-go',
+    ...(costText ? { cost: costText } : {}),
+    ...(Object.keys(tokensOut).length > 0 ? { tokens: tokensOut } : {}),
+    ...(sessions !== undefined || prompts !== undefined
+      ? {
+          session: {
+            ...(prompts !== undefined ? { requests: prompts } : {}),
+            ...(sessions !== undefined ? { sessions } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 export function parseOpenCodeUsage(stdout: string): OpenCodeUsageParse {
+  // v2 ships a JSON contract (`opencode stats --json`) — read that first; the
+  // human layout it replaced is only the fallback.
+  const json = parseOpenCodeStatsJson(stdout);
+  if (json) return json;
+
   if (!/overview|cost & tokens|total cost/i.test(stdout)) {
     return { available: false, reason: 'Could not read OpenCode stats (unexpected CLI output)' };
   }
@@ -705,7 +778,8 @@ export class UsageCollector {
     let res: SpawnResult | undefined;
     let parsed: OpenCodeUsageParse | undefined;
     try {
-      res = await this.spawn('opencode', ['stats'], {
+      // `--json` is the stable v2 contract; the human summary changed shape.
+      res = await this.spawn('opencode', ['stats', '--json'], {
         timeoutMs: OPENCODE_TIMEOUT_MS,
         cwd: os.homedir(),
       });
@@ -714,6 +788,19 @@ export class UsageCollector {
       if (!go.available) {
         return { ...base, reason: `opencode stats failed: ${errorMessage(err)}`, fetchedAt };
       }
+    }
+
+    // Today's numbers for the "Requests/Sessions (24h)" line; the totals above
+    // cover the whole range, so this is read on its own.
+    let today: OpenCodeUsageParse | undefined;
+    try {
+      const todayRes = await this.spawn('opencode', ['stats', '--json', '--days', '0'], {
+        timeoutMs: OPENCODE_TIMEOUT_MS,
+        cwd: os.homedir(),
+      });
+      today = parseOpenCodeUsage(todayRes.stdout);
+    } catch {
+      /* the 24h line is optional — the totals still show */
     }
 
     const raw = res ? capRaw(res.stdout || res.stderr) : undefined;
@@ -732,7 +819,7 @@ export class UsageCollector {
       ...(go.monthly ? { rateLimits: [{ name: 'Monthly limit', window: go.monthly }] } : {}),
       ...(local?.cost ? { cost: local.cost } : {}),
       ...(local?.tokens ? { tokens: local.tokens } : {}),
-      ...(local?.last24h ?? local?.session ? { last24h: (local!.last24h ?? local!.session) } : {}),
+      ...(today?.session ?? local?.session ? { last24h: (today!.session ?? local!.session) } : {}),
       ...(raw ? { raw } : {}),
       fetchedAt,
     };

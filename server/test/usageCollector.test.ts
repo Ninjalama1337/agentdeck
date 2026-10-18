@@ -54,6 +54,31 @@ const OPENCODE_SAMPLE = `┌─────────────────�
 └────────────────────────────────────────────────────────┘
 `;
 
+const OPENCODE_TOTALS_JSON = JSON.stringify({
+  range: { from: 1767222000000, to: 1792318000000 },
+  sessions: 94,
+  subagents: 101,
+  prompts: 383,
+  steps: 11897,
+  tokens: {
+    input: 58054870,
+    output: 4296394,
+    reasoning: 4048134,
+    cache: { read: 1843360615, write: 2333673 },
+  },
+  cost: 32.339652619500036,
+});
+
+const OPENCODE_TODAY_JSON = JSON.stringify({
+  range: { from: 1792274400000, to: 1792318000000 },
+  sessions: 8,
+  subagents: 0,
+  prompts: 13,
+  steps: 384,
+  tokens: { input: 716168, output: 71218, reasoning: 107475, cache: { read: 59820736, write: 0 } },
+  cost: 0.3932144879999996,
+});
+
 describe('parseClaudeUsage', () => {
   it('parses the recorded sample completely', () => {
     const parsed = parseClaudeUsage(CLAUDE_SAMPLE, Date.UTC(2026, 8, 30, 8));
@@ -136,9 +161,26 @@ describe('parseOpenCodeUsage', () => {
     expect(parsed.tokens?.cache).toBe('1280.2M');
   });
 
+  it('reads the v2 `opencode stats --json` contract', () => {
+    const parsed = parseOpenCodeUsage(OPENCODE_TOTALS_JSON);
+    expect(parsed.available).toBe(true);
+    expect(parsed.cost).toBe('$32.34');
+    expect(parsed.session?.sessions).toBe(94);
+    expect(parsed.session?.requests).toBe(383);
+    expect(parsed.tokens).toEqual({ input: '58.1M', output: '4.3M', cache: '1.8b' });
+  });
+
   it('marks unexpected output unavailable', () => {
     const parsed = parseOpenCodeUsage('command not found');
     expect(parsed.available).toBe(false);
+  });
+
+  it('marks the v2 human summary unavailable (no JSON, no v1 layout)', () => {
+    const parsed = parseOpenCodeUsage(
+      'opencode stats · 2026 so far · all projects\n\n94 sessions · 101 subagents\n383 prompts · 11.9k steps · 1.9b tokens',
+    );
+    expect(parsed.available).toBe(false);
+    expect(parsed.reason).toContain('unexpected CLI output');
   });
 });
 
@@ -194,7 +236,8 @@ describe('UsageCollector', () => {
     expect(zcode?.available).toBe(true);
     expect(zcode?.plan).toBe('Z.AI Coding Plan');
 
-    expect(calls).toBe(4);
+    // opencode runs twice: totals + today for the 24h line.
+    expect(calls).toBe(5);
   });
 
   it('caches within TTL and dedupes concurrent calls', async () => {
@@ -209,9 +252,9 @@ describe('UsageCollector', () => {
     });
     const [a, b] = await Promise.all([c.collect(), c.collect()]);
     expect(a).toEqual(b);
-    expect(spawns).toBe(4);
+    expect(spawns).toBe(5);
     await c.collect();
-    expect(spawns).toBe(4); // cache hit
+    expect(spawns).toBe(5); // cache hit
   });
 
   it('degrades gracefully on spawn errors', async () => {
@@ -269,6 +312,24 @@ describe('UsageCollector', () => {
     expect(opencode?.last24h?.requests).toBe(8282);
   });
 
+  it('reads OpenCode v2 JSON: totals, tokens, cost and today for the 24h line', async () => {
+    const c = new UsageCollector({
+      agents,
+      isAvailable: (id) => id === 'opencode',
+      spawn: async (cmd: string, args: string[]) =>
+        cmd === 'opencode' ? ok(args.includes('--days') ? OPENCODE_TODAY_JSON : OPENCODE_TOTALS_JSON) : ok(''),
+    });
+    const result = await c.collect();
+    const opencode = result.find((r) => r.agentId === 'opencode');
+    expect(opencode?.available).toBe(true);
+    expect(opencode?.cost).toBe('$32.34');
+    expect(opencode?.tokens).toEqual({ input: '58.1M', output: '4.3M', cache: '1.8b' });
+    expect(opencode?.session?.sessions).toBe(94);
+    expect(opencode?.session?.requests).toBe(383);
+    // The 24h line comes from the `--days 0` call, not the yearly totals.
+    expect(opencode?.last24h).toEqual({ requests: 13, sessions: 8 });
+  });
+
   it('shows the Go subscription even when opencode stats fails', async () => {
     const c = new UsageCollector({
       agents,
@@ -308,7 +369,7 @@ describe('UsageCollector', () => {
     // The hung agent must not poison later requests: a new run still completes.
     const second = await c.collect();
     expect(second.find((r) => r.agentId === 'opencode')?.available).toBe(true);
-    expect(opencodeRuns).toBe(2);
+    expect(opencodeRuns).toBe(4);
   });
 
   it('clears cache on clearCache()', async () => {
