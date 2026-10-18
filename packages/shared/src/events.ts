@@ -11,6 +11,7 @@ import type {
   PairRequestInfo,
   PermissionDecision,
   PermissionRequest,
+  PlanItem,
   Project,
   Routine,
   Session,
@@ -32,6 +33,8 @@ export type AgentEvent =
   | { type: 'message'; message: ChatMessage }
   | { type: 'tool-use'; tool: string; summary?: string }
   | { type: 'tool-result'; tool: string; ok: boolean; summary?: string; result?: string }
+  /** The agent replaced its plan checklist (TodoWrite / update_plan / todowrite). */
+  | { type: 'plan'; items: PlanItem[] }
   | {
       type: 'usage';
       inputTokens?: number;

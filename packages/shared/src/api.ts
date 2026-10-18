@@ -30,6 +30,17 @@ export interface MessageUsage {
   costUsd?: number;
 }
 
+export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
+
+/**
+ * One step of the agent's own plan (Claude `TodoWrite`, Codex `update_plan`,
+ * OpenCode `todowrite`). The chat renders it as a checklist above the answer.
+ */
+export interface PlanItem {
+  text: string;
+  status: PlanItemStatus;
+}
+
 /** One tool call of an assistant turn, kept with the message after the run. */
 export interface ToolRecord {
   tool: string;
@@ -240,6 +251,8 @@ export interface SessionDraft {
   usage?: MessageUsage;
   /** A note above the live answer (e.g. the run has gone quiet); missing on older servers. */
   notice?: string;
+  /** The run's plan checklist, as the agent last reported it. Missing on older servers. */
+  plan?: PlanItem[];
   /** Questions of this run still waiting for the user. Missing on older servers. */
   permissions?: PermissionRequest[];
 }

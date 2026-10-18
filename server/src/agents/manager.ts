@@ -22,6 +22,7 @@ import type {
   ChatMessage,
   MessageUsage,
   PermissionRequest,
+  PlanItem,
   Project,
   RunRecord,
   Session,
@@ -122,6 +123,8 @@ interface ActiveRun {
   /** Splits inline <think> tags out of the text stream. */
   splitter: ThinkTagSplitter;
   tools: ToolRecord[];
+  /** The agent's plan checklist, as last reported (TodoWrite / update_plan). */
+  planItems: PlanItem[];
   /** Tool calls still waiting for their result. */
   openTools: Set<ToolRecord>;
   /** A tool ran since the last text — next text starts a new paragraph. */
@@ -241,6 +244,7 @@ export class AgentManager {
         ...(t.result ? { result: t.result } : {}),
       })),
       ...(run.usage ? { usage: run.usage } : {}),
+      ...(run.planItems.length ? { plan: run.planItems } : {}),
       ...(run.notice ? { notice: run.notice } : {}),
       ...(run.permissions.size ? { permissions: [...run.permissions.values()].map((p) => p.request) } : {}),
     };
@@ -399,6 +403,7 @@ export class AgentManager {
       thinkingBuf: '',
       splitter: new ThinkTagSplitter(),
       tools: [],
+      planItems: [],
       openTools: new Set(),
       needSep: false,
       stderrTail: '',
@@ -687,6 +692,10 @@ export class AgentManager {
           run.openTools.add(rec);
         }
         run.needSep = true;
+        break;
+      case 'plan':
+        // Each update replaces the list; the chat renders it as a checklist.
+        run.planItems = event.items;
         break;
       case 'tool-result': {
         const open = [...run.openTools].find((t) => t.tool === event.tool);

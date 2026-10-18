@@ -16,6 +16,7 @@ import { rememberAttachmentUrl } from '../../util/attachments';
 import { prepareImage } from '../../util/imagePrep';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { haptic } from '../../util/haptics';
+import { TaskStrip } from './PlanChecklist';
 
 interface PendingAttachment {
   localId: string;
@@ -41,6 +42,8 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   const toast = useAppStore((s) => s.toast);
   const shareTarget = useAppStore((s) => s.share?.target ?? null);
   const projects = useAppStore((s) => s.projects);
+  // The running plan, if the agent reports one — stays visible while you type.
+  const plan = useAppStore((s) => s.drafts[session.id]?.plan);
 
   // Unsent input of this session, kept across leaving the chat and app restarts.
   const [restored] = useState(() => loadComposerDraft(session.id));
@@ -205,6 +208,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   return (
     <div ref={root} className="safe-b px-3 pb-3">
       <DictationHint dictation={dictation} />
+      <TaskStrip items={plan} accent={agent?.accentColor ?? '#7C5CFF'} />
       {/* attachment strip */}
       {atts.length > 0 && (
         <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto px-0.5 pr-2 pt-2">

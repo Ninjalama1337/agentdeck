@@ -15,6 +15,7 @@ import { Button } from '../../components/ui/Button';
 import { clock, cost, tokens } from '../../util/format';
 import { parseAttachmentUrl } from '../../util/attachments';
 import { downloadFile, isShareCancel } from '../../util/download';
+import { PlanChecklist } from './PlanChecklist';
 
 const EMPTY_DRAFT: StreamDraft = { text: '', tools: [] };
 
@@ -23,6 +24,7 @@ function draftHasContent(draft: StreamDraft | undefined): boolean {
     draft !== undefined &&
     (draft.text.length > 0 ||
       draft.tools.length > 0 ||
+      (draft.plan?.length ?? 0) > 0 ||
       (draft.thinking ?? '').trim() !== '' ||
       (draft.notice ?? '').trim() !== '' ||
       (draft.permissions?.length ?? 0) > 0)
@@ -307,6 +309,8 @@ function StreamingBubble({
             ))}
           </div>
         )}
+
+        <PlanChecklist items={draft.plan} accent={accent} />
 
         {(draft.thinking ?? '').trim() !== '' && (
           <ThinkingBlock thinking={draft.thinking ?? ''} accent={accent} streaming />

@@ -21,6 +21,7 @@ import { splitCommand } from '../util/cmd.js';
 import { withTimeoutFallback } from '../util/async.js';
 import { MODEL_PRESETS } from './models.js';
 import { AGENT_EFFORTS, effortArg } from './effort.js';
+import { isPlanTool, planItemsOf } from './plan.js';
 import {
   resolveModelArg,
   summarizeInput,
@@ -165,6 +166,8 @@ export class ClaudeAdapter implements AgentAdapter {
 
 export function createClaudeStreamParser() {
   const toolNames = new Map<string, string>();
+  /** Tool-call ids already rendered as a plan checklist — their result adds nothing. */
+  const planCalls = new Set<string>();
   let sawTextDelta = false;
   /** Message whose blocks are arriving as partial chunks right now. */
   let streamingId: string | undefined;
@@ -224,6 +227,15 @@ export function createClaudeStreamParser() {
             const id = typeof block.id === 'string' ? block.id : undefined;
             const name = typeof block.name === 'string' ? block.name : 'tool';
             if (id) toolNames.set(id, name);
+            // TodoWrite carries the checklist itself: show that instead of a tool row.
+            if (isPlanTool(name)) {
+              const items = planItemsOf(block.input);
+              if (items) {
+                if (id) planCalls.add(id);
+                emit({ type: 'plan', items });
+                continue;
+              }
+            }
             emit({
               type: 'tool-use',
               tool: name,
@@ -238,7 +250,10 @@ export function createClaudeStreamParser() {
         if (!Array.isArray(content)) return;
         for (const block of content as Record<string, unknown>[]) {
           if (block.type === 'tool_result') {
-            const tool = typeof block.tool_use_id === 'string' ? (toolNames.get(block.tool_use_id) ?? 'tool') : 'tool';
+            const callId = typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined;
+            // The plan already replaced this call in the chat.
+            if (callId && planCalls.has(callId)) continue;
+            const tool = callId ? (toolNames.get(callId) ?? 'tool') : 'tool';
             emit({
               type: 'tool-result',
               tool,

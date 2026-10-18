@@ -3,7 +3,14 @@
  * events and server snapshots turn into it. Pure logic — appStore wires it to
  * the socket and the REST calls.
  */
-import type { AgentEvent, ChatMessage, MessageUsage, PermissionRequest, SessionDraft } from '@agentdeck/shared';
+import type {
+  AgentEvent,
+  ChatMessage,
+  MessageUsage,
+  PermissionRequest,
+  PlanItem,
+  SessionDraft,
+} from '@agentdeck/shared';
 
 export interface ToolCard {
   id: number;
@@ -19,6 +26,8 @@ export interface StreamDraft {
   thinking?: string;
   tools: ToolCard[];
   usage?: MessageUsage;
+  /** The run's plan checklist, as the agent last reported it. */
+  plan?: PlanItem[];
   /** A note above the live answer (e.g. the run has gone quiet). */
   notice?: string;
   /** Questions the run waits on — the user answers them in the chat. */
@@ -60,6 +69,10 @@ export function reduceDraft(draft: StreamDraft | undefined, event: AgentEvent): 
       const base = draft ?? { text: '', tools: [] };
       const card: ToolCard = { id: ++toolSeq, tool: event.tool, state: 'running', summary: event.summary };
       return { ...base, tools: [...base.tools, card] };
+    }
+    case 'plan': {
+      const base = draft ?? { text: '', tools: [] };
+      return { ...base, plan: event.items };
     }
     case 'tool-result': {
       if (!draft) return draft;
@@ -126,6 +139,7 @@ export function draftFromSnapshot(snap: SessionDraft): StreamDraft {
     ...(snap.thinking ? { thinking: snap.thinking } : {}),
     tools: snap.tools.map((t) => ({ id: ++toolSeq, ...t })),
     ...(snap.usage ? { usage: snap.usage } : {}),
+    ...(snap.plan?.length ? { plan: snap.plan } : {}),
     ...(snap.notice ? { notice: snap.notice } : {}),
     ...(snap.permissions?.length ? { permissions: snap.permissions } : {}),
   };

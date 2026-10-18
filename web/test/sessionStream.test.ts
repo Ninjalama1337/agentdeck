@@ -79,6 +79,27 @@ describe('reduceDraft', () => {
     // A snapshot carries the note to a client joining mid-run.
     expect(draftFromSnapshot({ run: 'r', seq: 1, text: '', tools: [], notice: 'quiet' }).notice).toBe('quiet');
   });
+
+  it('keeps the plan checklist and replaces it on each update', () => {
+    const first = play([
+      { type: 'text-delta', text: 'ok' },
+      { type: 'plan', items: [{ text: 'Step one', status: 'in_progress' }] },
+    ]);
+    expect(first?.plan).toEqual([{ text: 'Step one', status: 'in_progress' }]);
+    const updated = reduceDraft(first, {
+      type: 'plan',
+      items: [
+        { text: 'Step one', status: 'completed' },
+        { text: 'Step two', status: 'in_progress' },
+      ],
+    });
+    expect(updated?.plan).toHaveLength(2);
+    expect(updated?.text).toBe('ok');
+    // A client joining mid-run gets the plan with the snapshot.
+    expect(
+      draftFromSnapshot({ run: 'r', seq: 2, text: '', tools: [], plan: [{ text: 'Step', status: 'pending' }] }).plan,
+    ).toEqual([{ text: 'Step', status: 'pending' }]);
+  });
 });
 
 describe('joining a run that is under way', () => {

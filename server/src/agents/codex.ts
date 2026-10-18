@@ -5,7 +5,7 @@
  * deliberately defensive: anything unrecognized is re-emitted as a raw event
  * so no output is ever lost.
  */
-import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset } from '@agentdeck/shared';
+import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset, PlanItem } from '@agentdeck/shared';
 import { execa } from 'execa';
 import type { ResolvedAgentConfig } from '../config.js';
 import { splitCommand } from '../util/cmd.js';
@@ -22,6 +22,7 @@ import {
   type RunPlan,
 } from './types.js';
 import { safeJson } from './claude.js';
+import { isPlanTool, planItemsOf } from './plan.js';
 
 export class CodexAdapter implements AgentAdapter {
   readonly id: AgentId = 'codex';
@@ -117,6 +118,26 @@ interface CodexItem {
   [key: string]: unknown;
 }
 
+/** A Codex plan item, or a plan-tool call, as checklist entries. */
+function planOfItem(item: CodexItem | undefined): PlanItem[] | undefined {
+  if (!item || typeof item !== 'object') return undefined;
+  if (item.type === 'plan' || item.type === 'todo_list' || item.type === 'todo') return planItemsOf(item);
+  const name = typeof item.name === 'string' ? item.name : typeof item.tool === 'string' ? item.tool : undefined;
+  if (name && isPlanTool(name)) {
+    const raw = item.arguments ?? item.input;
+    let args: unknown = raw;
+    if (typeof raw === 'string') {
+      try {
+        args = JSON.parse(raw);
+      } catch {
+        args = undefined;
+      }
+    }
+    return planItemsOf(args ?? item);
+  }
+  return undefined;
+}
+
 function textFromItem(item: CodexItem): string | undefined {
   if (typeof item.text === 'string' && item.text) return item.text;
   if (typeof item.message === 'string' && item.message) return item.message;
@@ -201,6 +222,11 @@ export function createCodexStreamParser() {
       case 'item.started':
       case 'item.updated': {
         const item = parsed['item'] as CodexItem | undefined;
+        const plan = planOfItem(item);
+        if (plan) {
+          emit({ type: 'plan', items: plan });
+          return;
+        }
         if (item && item.type === 'command_execution' && typeof item.command === 'string') {
           emit({ type: 'tool-use', tool: item.type, summary: summarizeInput(item.command) });
         }
@@ -210,6 +236,11 @@ export function createCodexStreamParser() {
         const item = parsed['item'] as CodexItem | undefined;
         if (!item || typeof item !== 'object') {
           emit({ type: 'raw', line });
+          return;
+        }
+        const plan = planOfItem(item);
+        if (plan) {
+          emit({ type: 'plan', items: plan });
           return;
         }
         const text = textFromItem(item);

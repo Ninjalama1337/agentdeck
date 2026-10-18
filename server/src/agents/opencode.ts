@@ -18,6 +18,7 @@ import {
   type RunContext,
   type RunPlan,
 } from './types.js';
+import { isPlanTool, planItemsOf } from './plan.js';
 
 interface OpenCodePart {
   id?: string;
@@ -230,6 +231,18 @@ export function createOpenCodeStreamParser() {
           const callID = part.callID ?? part.id ?? '';
           const tool = part.tool ?? 'tool';
           const state = part.state ?? {};
+          // `todowrite` is the plan checklist, not a tool call to list.
+          if (isPlanTool(tool)) {
+            const items = planItemsOf(state.input);
+            if (items) {
+              if (callID) {
+                usedTools.add(callID);
+                doneTools.add(callID);
+              }
+              emit({ type: 'plan', items });
+              break;
+            }
+          }
           // `state.title` is usually just the tool name ("shell"); the input is
           // what actually says what the call did, so it always wins.
           const inputSummary = summarizeInput(state.input);
