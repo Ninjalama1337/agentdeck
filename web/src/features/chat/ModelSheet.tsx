@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, Search, Sparkles, Star, Wand2, Zap } from 'lucide-react';
+import { Check, CircleDot, Search, Sparkles, Star, Wand2, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, ModelPreset, Session } from '@agentdeck/shared';
 import { api } from '../../api/client';
 import { Spinner } from '../../components/ui/Spinner';
 import { useAppStore } from '../../store/appStore';
 import { effortLabel } from './ModelBar';
-import { filterModels, groupModels, isDefaultModelSelection, pinnedModels, selectableModels } from './modelPicker';
+import {
+  filterModels,
+  groupModels,
+  isDefaultModelSelection,
+  pinnedModels,
+  savedDefaultModel,
+  selectableModels,
+} from './modelPicker';
 
 /** Rendering hundreds of OpenCode models at once makes the sheet sluggish; search narrows them. */
 const MAX_VISIBLE_MODELS = 150;
@@ -32,6 +39,8 @@ export function ModelSheet({
   const refreshUsage = useAppStore((s) => s.refreshUsage);
   const toast = useAppStore((s) => s.toast);
   const projects = useAppStore((s) => s.projects);
+  const modelPrefs = useAppStore((s) => s.modelPrefs);
+  const setModelPref = useAppStore((s) => s.setModelPref);
   const [presets, setPresets] = useState<ModelPreset[]>(agent?.models ?? []);
   const [defaultModel, setDefaultModel] = useState<ModelPreset | undefined>(agent?.defaultModel);
   const [custom, setCustom] = useState('');
@@ -79,6 +88,7 @@ export function ModelSheet({
   const defaultPreset = defaultModel ?? agent?.defaultModel;
 
   const selectable = useMemo(() => selectableModels(presets), [presets]);
+  const savedDefault = savedDefaultModel(agent ? modelPrefs[agent.id] : undefined, presets);
   const filtered = useMemo(() => filterModels(selectable, query), [selectable, query]);
   const shown = filtered.slice(0, MAX_VISIBLE_MODELS);
   const favoriteIds = agent ? (modelFavorites[agent.id] ?? []) : [];
@@ -105,6 +115,12 @@ export function ModelSheet({
   const pickEffort = (level: string) => {
     if (locked) return;
     setSessionEffort(session.id, level === 'default' ? 'default' : level);
+  };
+
+  const makeDefault = (model: string | undefined, label: string) => {
+    if (!agent) return;
+    setModelPref(agent.id, model);
+    toast('info', `Default model for new chats: ${label}`);
   };
 
   return (
@@ -159,12 +175,22 @@ export function ModelSheet({
         </div>
       )}
 
+      <div className="mb-2 flex items-center gap-2 rounded-2xl border border-line bg-white/[0.03] px-3.5 py-2">
+        <CircleDot size={13} className="shrink-0 text-accent" aria-hidden />
+        <span className="text-[12px] text-dim">Default model for new chats</span>
+        <span className="ml-auto min-w-0 truncate text-[12.5px] font-semibold text-ink">
+          {savedDefault?.label ?? defaultPreset?.label ?? 'Agent default'}
+        </span>
+      </div>
+
       <div className="flex flex-col gap-1.5">
         <ModelRow
           label={`Agent default${defaultPreset ? `: ${defaultPreset.label}` : ''}`}
           description={defaultPreset?.id ?? "The agent's configured model"}
           mono={defaultPreset !== undefined}
           selected={isDefault}
+          isDefault={!savedDefault}
+          onToggleDefault={() => makeDefault(undefined, defaultPreset?.label ?? 'Agent default')}
           onClick={() => pick(undefined)}
         />
       </div>
@@ -201,6 +227,8 @@ export function ModelSheet({
                 mono
                 selected={current === preset.id}
                 fav
+                isDefault={savedDefault?.id === preset.id}
+                onToggleDefault={() => makeDefault(preset.id, preset.label)}
                 onToggleFav={() => toggleFav(preset.id)}
                 onClick={() => pick(preset.id)}
               />
@@ -218,6 +246,8 @@ export function ModelSheet({
                 mono
                 selected={current === preset.id}
                 fav={false}
+                isDefault={savedDefault?.id === preset.id}
+                onToggleDefault={() => makeDefault(preset.id, preset.label)}
                 onToggleFav={() => toggleFav(preset.id)}
                 onClick={() => pick(preset.id)}
               />
@@ -241,6 +271,8 @@ export function ModelSheet({
                   mono
                   selected={current === preset.id}
                   fav={favoriteIds.includes(preset.id)}
+                  isDefault={savedDefault?.id === preset.id}
+                  onToggleDefault={() => makeDefault(preset.id, preset.label)}
                   onToggleFav={() => toggleFav(preset.id)}
                   onClick={() => pick(preset.id)}
                 />
@@ -321,7 +353,7 @@ export function ModelSheet({
         <Wand2 size={13} className="mt-0.5 shrink-0" />
         {locked
           ? 'A run is active — model and effort are locked until it finishes.'
-          : 'Changes take effect on your next message. They also become the default for new sessions with this agent.'}
+          : 'Changes take effect on your next message. The ◉ button sets a model as the default for new chats.'}
       </p>
     </>
   );
@@ -353,6 +385,8 @@ function ModelRow({
   mono,
   selected,
   fav,
+  isDefault,
+  onToggleDefault,
   onToggleFav,
   onClick,
 }: {
@@ -361,6 +395,8 @@ function ModelRow({
   mono?: boolean;
   selected: boolean;
   fav?: boolean;
+  isDefault?: boolean;
+  onToggleDefault?: () => void;
   onToggleFav?: () => void;
   onClick: () => void;
 }) {
@@ -378,6 +414,21 @@ function ModelRow({
         </span>
         {selected && <Check size={16} className="shrink-0 text-accent" />}
       </button>
+      {onToggleDefault && (
+        <button
+          type="button"
+          onClick={onToggleDefault}
+          aria-pressed={isDefault === true}
+          aria-label={isDefault ? `Default model for new chats: ${label}` : `Set ${label} as default model for new chats`}
+          title={isDefault ? 'Default model for new chats' : 'Set as default model for new chats'}
+          className={clsx(
+            'press tap shrink-0 rounded-full p-1.5',
+            isDefault ? 'bg-accent/15 text-accent' : 'text-dim hover:text-ink',
+          )}
+        >
+          <CircleDot size={15} />
+        </button>
+      )}
       {onToggleFav && (
         <button
           type="button"

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bot, Loader2, ShieldAlert } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentId, PermissionMode } from '@agentdeck/shared';
@@ -39,6 +39,22 @@ export function NewSessionSheet({
 
   const agent = agentId ? agents[agentId] : undefined;
   const agentAccounts = accounts.filter((a) => a.agentId === agentId);
+  const agentDefault = agent ? modelPrefs[agent.id] : undefined;
+
+  // Keep the saved default visible even when it comes from OpenCode's live
+  // catalog (it is not part of the agent's static preset list).
+  const modelChoices = useMemo(() => {
+    if (!agent) return [];
+    const choices = agent.models.filter((m) => m.id !== 'custom');
+    if (
+      agentDefault &&
+      agentDefault !== 'custom' &&
+      !choices.some((m) => m.id === agentDefault)
+    ) {
+      choices.push({ id: agentDefault, label: agentDefault });
+    }
+    return choices;
+  }, [agent, agentDefault]);
 
   useEffect(() => {
     if (!open) return;
@@ -113,27 +129,25 @@ export function NewSessionSheet({
           </div>
 
           {/* model */}
-          {agent && agent.models.length > 0 && (
+          {agent && modelChoices.length > 0 && (
             <div>
               <p className="mb-1.5 text-[12px] font-medium uppercase tracking-wider text-dim">Model</p>
               <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
-                {agent.models
-                  .filter((m) => m.id !== 'custom')
-                  .map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setModel(m.id)}
-                      className={clsx(
-                        'press tap shrink-0 rounded-full border px-3.5 text-[13px] font-medium',
-                        model === m.id ? 'border-accent/45 bg-accent/15 text-ink' : 'border-line bg-white/[0.04] text-dim',
-                      )}
-                    >
-                      {m.id === 'inherit' && agent.defaultModel
-                        ? `Default · ${agent.defaultModel.label}`
-                        : m.label}
-                    </button>
-                  ))}
+                {modelChoices.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setModel(m.id)}
+                    className={clsx(
+                      'press tap shrink-0 rounded-full border px-3.5 text-[13px] font-medium',
+                      model === m.id ? 'border-accent/45 bg-accent/15 text-ink' : 'border-line bg-white/[0.04] text-dim',
+                    )}
+                  >
+                    {m.id === 'inherit' && agent.defaultModel
+                      ? `Default · ${agent.defaultModel.label}`
+                      : m.label}
+                  </button>
+                ))}
               </div>
               <p className="mt-1.5 px-1 text-[11.5px] text-dim">
                 More models are one tap away in the chat bar after the session starts.

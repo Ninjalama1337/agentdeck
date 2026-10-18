@@ -5,6 +5,7 @@ import {
   groupModels,
   isDefaultModelSelection,
   pinnedModels,
+  savedDefaultModel,
   selectableModels,
 } from '../src/features/chat/modelPicker';
 
@@ -19,6 +20,17 @@ describe('model picker helpers', () => {
     expect(isDefaultModelSelection(undefined)).toBe(true);
     expect(isDefaultModelSelection('inherit')).toBe(true);
     expect(isDefaultModelSelection('opencode-go/glm-5.3')).toBe(false);
+  });
+
+  it('resolves the saved default model for new chats', () => {
+    const models = [preset('opencode-go/glm-5.3', 'GLM 5.3', 'opencode-go')];
+    expect(savedDefaultModel(undefined, models)).toBeUndefined();
+    expect(savedDefaultModel('inherit', models)).toBeUndefined();
+    expect(savedDefaultModel('opencode-go/glm-5.3', models)).toEqual(models[0]);
+    expect(savedDefaultModel('custom/provider-model', models)).toEqual({
+      id: 'custom/provider-model',
+      label: 'custom/provider-model',
+    });
   });
 
   it('hides synthetic default/custom rows from the catalog list', () => {

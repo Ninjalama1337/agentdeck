@@ -1,8 +1,21 @@
 import type { ModelPreset } from '@agentdeck/shared';
 
 /** `undefined` and the legacy `inherit` both mean "use the agent default". */
-export function isDefaultModelSelection(model: string | undefined): boolean {
+export function isDefaultModelSelection(model: string | undefined): model is undefined | 'inherit' {
   return model === undefined || model === 'inherit';
+}
+
+/**
+ * The model a new chat will start with. `undefined` means the agent's own
+ * default. An id outside the fetched catalog (custom id) is still returned so
+ * the UI can show it instead of silently falling back.
+ */
+export function savedDefaultModel(
+  model: string | undefined,
+  models: ModelPreset[],
+): ModelPreset | undefined {
+  if (!model || isDefaultModelSelection(model)) return undefined;
+  return models.find((m) => m.id === model) ?? { id: model, label: model };
 }
 
 /** Drop the two synthetic entries; the sheet renders its own default row and free-form field. */
