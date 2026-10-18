@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { AgentUsage } from '@agentdeck/shared';
 import { alertText, limitCrossings, UsageWatcher, type LimitAlert } from '../src/usage/watcher.js';
 
@@ -63,5 +66,34 @@ describe('UsageWatcher', () => {
     await w.tick();
     expect(recorded).toEqual([1, 1]);
     expect(alerts).toHaveLength(1);
+  });
+
+  it('keeps what it announced across a restart (state file)', async () => {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agentdeck-usage-alerts-'));
+    const stateFile = path.join(dir, 'usage-alerts.json');
+    try {
+      const first: LimitAlert[] = [];
+      const w1 = new UsageWatcher({
+        collect: async () => [claude(90)],
+        active: () => true,
+        notify: (a) => first.push(a),
+        stateFile,
+      });
+      await w1.tick();
+      expect(first).toHaveLength(1);
+
+      // A fresh process (update, crash) over the same file must stay quiet.
+      const second: LimitAlert[] = [];
+      const w2 = new UsageWatcher({
+        collect: async () => [claude(90)],
+        active: () => true,
+        notify: (a) => second.push(a),
+        stateFile,
+      });
+      await w2.tick();
+      expect(second).toHaveLength(0);
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true });
+    }
   });
 });

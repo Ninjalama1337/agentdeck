@@ -5,8 +5,10 @@
  *
  * Each window warns once per level and reset period. Only a new `resetsAt` (the
  * window rolled over) re-arms it: a dip below a level inside the same window —
- * a reading that flickers around a threshold — must not nag twice.
+ * a reading that flickers around a threshold — must not nag twice. The memory
+ * is kept in `stateFile`, so a restart does not announce an open window again.
  */
+import fs from 'node:fs';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import { AGENT_LABELS } from '@agentdeck/shared';
 
@@ -16,9 +18,7 @@ export const USAGE_WATCH_INTERVAL_MS = 15 * 60 * 1000;
 interface Seen {
   level: number;
   resetsAt?: string;
-}
-
-export interface LimitAlert {
+}export interface LimitAlert {
   agentId: AgentId;
   window: string;
   pct: number;
@@ -88,6 +88,11 @@ export interface UsageWatcherOptions {
   active(): boolean;
   notify(alert: LimitAlert): void;
   intervalMs?: number;
+  /**
+   * File the crossing memory is kept in. Without it a server restart forgets
+   * which levels were already announced and re-sends them for open windows.
+   */
+  stateFile?: string;
   onError?(err: unknown): void;
 }
 
@@ -96,7 +101,22 @@ export class UsageWatcher {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
 
-  constructor(private readonly opts: UsageWatcherOptions) {}
+  constructor(private readonly opts: UsageWatcherOptions) {
+    // Restore what was already announced — else a restart re-sends the alert
+    // for a window that is still open.
+    if (opts.stateFile) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(opts.stateFile, 'utf8')) as Record<string, Seen>;
+        for (const [id, seen] of Object.entries(raw)) {
+          if (seen && typeof seen.level === 'number') {
+            this.seen.set(id, { level: seen.level, ...(seen.resetsAt ? { resetsAt: seen.resetsAt } : {}) });
+          }
+        }
+      } catch {
+        /* first run, or an unreadable file — start empty */
+      }
+    }
+  }
 
   start(): void {
     if (this.timer) return;
@@ -126,5 +146,15 @@ export class UsageWatcher {
   observe(usages: AgentUsage[]): void {
     this.opts.record?.(usages);
     for (const alert of limitCrossings(this.seen, usages)) this.opts.notify(alert);
+    this.saveState();
+  }
+
+  private saveState(): void {
+    if (!this.opts.stateFile) return;
+    try {
+      fs.writeFileSync(this.opts.stateFile, JSON.stringify(Object.fromEntries(this.seen)));
+    } catch {
+      /* best effort — a lost write only costs a repeated alert */
+    }
   }
 }
