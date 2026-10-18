@@ -107,7 +107,7 @@ describe('recipeFor', () => {
     expect(recipeFor('opencode', 'update')).toMatchObject({ command: 'npm', args: ['install', '-g', '@opencode/cli@latest'] });
     expect(recipeFor('opencode', 'install')).toMatchObject({ command: 'npm', args: ['install', '-g', '@opencode/cli'] });
     const login = recipeFor('opencode', 'login');
-    expect(login).toMatchObject({ command: 'opencode', args: ['auth', 'login'], interactive: true });
+    expect(login).toMatchObject({ command: 'opencode', args: ['auth', 'login', 'opencode'], interactive: true });
   });
 
   it('labels name the command that runs', () => {

@@ -104,7 +104,7 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
       return [
         { kind: 'update', label: 'npm install -g @opencode/cli@latest' },
         { kind: 'install', label: 'npm install -g @opencode/cli' },
-        { kind: 'login', label: 'opencode auth login (provider and authentication method)' },
+        { kind: 'login', label: 'opencode auth login opencode' },
       ];
   }
 }
@@ -236,7 +236,7 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
           kind,
           label: capability.label,
           command: 'opencode',
-          args: ['auth', 'login'],
+          args: ['auth', 'login', 'opencode'],
           cwd: home(),
           interactive: true,
         };
