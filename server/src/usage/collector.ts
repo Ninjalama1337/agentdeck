@@ -812,14 +812,16 @@ export class UsageCollector {
     return {
       agentId: 'opencode',
       available: true,
-      // A Go subscription is the plan users care about; local stats stay the fallback.
+      // A Go subscription is the plan users care about; its windows are the card.
       ...(go.plan ? { plan: go.plan } : local?.plan ? { plan: local.plan } : {}),
       ...(go.session ?? local?.session ? { session: (go.session ?? local!.session) } : {}),
       ...(go.week ? { week: go.week } : {}),
       ...(go.monthly ? { rateLimits: [{ name: 'Monthly limit', window: go.monthly }] } : {}),
-      ...(local?.cost ? { cost: local.cost } : {}),
-      ...(local?.tokens ? { tokens: local.tokens } : {}),
-      ...(today?.session ?? local?.session ? { last24h: (today!.session ?? local!.session) } : {}),
+      // With a Go plan the card is the subscription: the local pay-as-you-go
+      // cost/tokens describe a different billing model and stay out of the way.
+      ...(!go.available && local?.cost ? { cost: local.cost } : {}),
+      ...(!go.available && local?.tokens ? { tokens: local.tokens } : {}),
+      ...(!go.available && (today?.session ?? local?.session) ? { last24h: (today!.session ?? local!.session) } : {}),
       ...(raw ? { raw } : {}),
       fetchedAt,
     };

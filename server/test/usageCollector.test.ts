@@ -288,7 +288,7 @@ describe('UsageCollector', () => {
     expect(zcode?.plans).toHaveLength(2);
   });
 
-  it('overlays the OpenCode Go subscription on local stats', async () => {
+  it('shows the OpenCode Go subscription as the card, without pay-as-you-go stats', async () => {
     const c = new UsageCollector({
       agents,
       isAvailable: (id) => id === 'opencode',
@@ -307,9 +307,10 @@ describe('UsageCollector', () => {
     expect(opencode?.session?.pct).toBe(1);
     expect(opencode?.week?.pct).toBe(8);
     expect(opencode?.rateLimits?.[0]).toEqual({ name: 'Monthly limit', window: { pct: 6 } });
-    // Local stats stay visible alongside the subscription quota.
-    expect(opencode?.cost).toBe('$30.54');
-    expect(opencode?.last24h?.requests).toBe(8282);
+    // The pay-as-you-go numbers belong to a different billing model and stay out.
+    expect(opencode?.cost).toBeUndefined();
+    expect(opencode?.tokens).toBeUndefined();
+    expect(opencode?.last24h).toBeUndefined();
   });
 
   it('reads OpenCode v2 JSON: totals, tokens, cost and today for the 24h line', async () => {
