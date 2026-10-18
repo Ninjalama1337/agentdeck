@@ -451,6 +451,22 @@ textarea.field {
   font-size: 0.86em;
 }
 
+/* Mermaid diagram (```mermaid fence): center it and keep it inside the bubble. */
+.md-mermaid {
+  margin: 0.65em 0;
+  padding: 10px;
+  background: var(--ad-code-bg);
+  border: 1px solid var(--ad-line);
+  border-radius: 14px;
+  overflow-x: auto;
+}
+.md-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
 .code-copy {
   position: absolute;
   top: 8px;

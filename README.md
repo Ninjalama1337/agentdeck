@@ -102,6 +102,10 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   Fortschritt statt als Tool-Aufruf: erledigte Schritte abgehakt, der laufende
   mit Spinner. Über dem Eingabefeld bleibt eine kompakte Zeile mit dem aktuellen
   Schritt sichtbar (aufklappbar zur ganzen Liste).
+- **Diagramme** — ein ` ```mermaid `-Block in einer Antwort wird zum Diagramm
+  gerendert (im Chat-Theme). Die Bibliothek lädt erst, wenn wirklich ein
+  Diagramm auftaucht; ein Block, der noch strömt oder nicht parst, bleibt als
+  Code sichtbar.
 - **Aktivität & Kosten** — der Server hält jeden Agent-Lauf in einer
   SQLite-Datenbank fest (Chat, Routinen, Team-Runs, Terminal-Turns): Agent,
   Modell, Projekt, Dauer, Tokens, Tool-Aufrufe und Kosten. Die App zeigt daraus

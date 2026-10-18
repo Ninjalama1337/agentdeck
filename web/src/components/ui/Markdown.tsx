@@ -1,8 +1,9 @@
-import { memo, useRef, useState, type ReactNode } from 'react';
+import { isValidElement, memo, useRef, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { Check, Copy } from 'lucide-react';
+import { MermaidDiagram } from './Mermaid';
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement | null>(null);
@@ -29,8 +30,27 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+/** The source of a ```mermaid fence, when `pre` wraps such a code block. */
+export function mermaidSource(children: ReactNode): string | undefined {
+  const list = Array.isArray(children) ? children : [children];
+  for (const child of list) {
+    if (!isValidElement(child)) continue;
+    const props = child.props as { className?: string; children?: ReactNode };
+    if (typeof props.className === 'string' && props.className.includes('language-mermaid')) {
+      const inner = props.children;
+      const text = Array.isArray(inner) ? inner.join('') : inner;
+      if (typeof text === 'string') return text;
+    }
+  }
+  return undefined;
+}
+
 const components: Components = {
-  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  pre: ({ children }) => {
+    const chart = mermaidSource(children);
+    if (chart !== undefined) return <MermaidDiagram chart={chart} />;
+    return <CodeBlock>{children}</CodeBlock>;
+  },
   a: ({ children, href }) => (
     <a href={href} target="_blank" rel="noreferrer noopener">
       {children}

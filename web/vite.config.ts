@@ -32,6 +32,10 @@ export default defineConfig({
       filename: 'sw.ts',
       injectManifest: {
         injectionPoint: 'self.__WB_MANIFEST',
+        // Mermaid (~3 MB, plus its KaTeX math renderer) loads on demand — keep
+        // both out of the precache so the app shell stays small; without this
+        // the SW would download them on install.
+        globIgnores: ['**/mermaid-*.js', '**/katex-*.js'],
       },
       includeAssets: ['icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'share/index.html'],
       // The manifest is shipped as a static file: public/manifest.webmanifest
@@ -54,5 +58,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     target: 'es2022',
+    rollupOptions: {
+      output: {
+        // A predictable chunk name for mermaid so the service worker can skip
+        // it (globIgnores above) and it stays a lazy import.
+        manualChunks: (id) =>
+          id.includes('node_modules/mermaid') || id.includes('node_modules/@mermaid-js')
+            ? 'mermaid'
+            : undefined,
+      },
+    },
   },
 });
