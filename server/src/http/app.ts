@@ -2,8 +2,8 @@
  * Fastify app factory: CORS, multipart, static SPA serving, auth hook,
  * socket.io gateway, store→WS broadcast wiring, error shaping.
  */
-import { promisify } from 'node:util';
 import zlib from 'node:zlib';
+import path from 'node:path';
 import fastify, {
   type FastifyBaseLogger,
   type FastifyError,
@@ -52,7 +52,6 @@ import { newId } from '../util/ids.js';
 import { UpdateManager } from '../update/manager.js';
 import { findWebDist } from './webDist.js';
 
-const gzip = promisify(zlib.gzip);
 /** Smaller answers are not worth compressing. */
 const GZIP_MIN_CHARS = 1024;
 
@@ -331,6 +330,8 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
     record: (usages) => stats.recordPlans(usages),
     // Reading limits spawns the agent CLIs — only worth it while agents are in use.
     active: () => terminals.list().length > 0 || (stats.runs({ limit: 1 }).runs[0]?.endedAt ?? 0) > Date.now() - 3 * 3600_000,
+    // Kept on disk: a restart (update, crash) must not re-announce an open window.
+    stateFile: path.join(config.dataDir, 'usage-alerts.json'),
     notify: (alert) => {
       const { title, body } = alertText(alert);
       notifications.notify({ kind: 'usage-limit', state: 'limit', title, body });
@@ -398,17 +399,27 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
 
   // API answers go out gzipped: a chat history or a diff shrinks to a fraction,
   // which is what a phone on mobile data waits for. Only serialized JSON/text —
-  // file streams and downloads pass through untouched.
-  app.addHook('onSend', async (req, reply, payload) => {
-    if (typeof payload !== 'string' || payload.length < GZIP_MIN_CHARS) return payload;
-    if (req.method === 'HEAD' || reply.hasHeader('content-encoding')) return payload;
-    if (!/\bgzip\b/i.test(String(req.headers['accept-encoding'] ?? ''))) return payload;
-    if (!/json|^text\//i.test(String(reply.getHeader('content-type') ?? ''))) return payload;
-    const zipped = await gzip(payload);
+  // file streams and downloads pass through untouched. Compressed synchronously
+  // and handed on via `next`: an async hook lets an async handler that calls
+  // reply.send() without returning race it into a second writeHead ("Cannot
+  // write headers after they are sent") on every answer above GZIP_MIN_CHARS.
+  app.addHook('onSend', (req, reply, payload, next) => {
+    const skip =
+      typeof payload !== 'string' ||
+      payload.length < GZIP_MIN_CHARS ||
+      req.method === 'HEAD' ||
+      reply.hasHeader('content-encoding') ||
+      !/\bgzip\b/i.test(String(req.headers['accept-encoding'] ?? '')) ||
+      !/json|^text\//i.test(String(reply.getHeader('content-type') ?? ''));
+    if (skip) {
+      next(null, payload);
+      return;
+    }
+    const zipped = zlib.gzipSync(payload);
     reply.header('content-encoding', 'gzip');
     reply.header('vary', 'Accept-Encoding');
     reply.removeHeader('content-length');
-    return zipped;
+    next(null, zipped);
   });
 
   // Error shaping: every error is {"error":{"message","code"}}. Declared
