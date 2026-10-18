@@ -26,15 +26,26 @@ describe('limitCrossings', () => {
     expect(limitCrossings(seen, [claude(100, 92)])).toEqual([]);
   });
 
-  it('re-arms only when the window rolls over, never on a dip below a level', () => {
+  it('re-arms only when the window clears, never on a drifting reset estimate', () => {
     const seen = new Map();
     limitCrossings(seen, [claude(85)]);
-    expect(limitCrossings(seen, [claude(85, undefined, '2026-10-15T19:00:00Z')]).map((a) => a.level)).toEqual([80]);
-    // Same window: falling back below the line and climbing again does not warn twice.
-    limitCrossings(seen, [claude(70, undefined, '2026-10-15T19:00:00Z')]);
-    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T19:00:00Z')])).toEqual([]);
-    // The next rollover re-arms it again.
-    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T23:00:00Z')]).map((a) => a.level)).toEqual([80]);
+    // A drifting reset estimate must not re-arm a window that never reset.
+    expect(limitCrossings(seen, [claude(85, undefined, '2026-10-15T19:00:00Z')])).toEqual([]);
+    expect(limitCrossings(seen, [claude(85, undefined, '2026-10-15T21:00:00Z')])).toEqual([]);
+    // A dip below the first warning line is the real reset: the next climb warns.
+    limitCrossings(seen, [claude(79, undefined, '2026-10-15T21:00:00Z')]);
+    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T22:00:00Z')]).map((a) => a.level)).toEqual([80]);
+  });
+
+  it('announces a full weekly window exactly once however the reset time drifts', () => {
+    const seen = new Map();
+    const alerts = [
+      limitCrossings(seen, [claude(0, 95, '2026-10-19T18:59:00Z')]),
+      limitCrossings(seen, [claude(0, 100, '2026-10-19T18:59:00Z')]),
+      limitCrossings(seen, [claude(0, 100, '2026-10-19T20:02:00Z')]),
+      limitCrossings(seen, [claude(0, 100, '2026-10-19T20:59:00Z')]),
+    ].flat();
+    expect(alerts.map((a) => `${a.window}:${a.level}`)).toEqual(['weekly limit:95']);
   });
 });
 

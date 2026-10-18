@@ -3,10 +3,11 @@
  * are in use and pushes a `usage-limit` notification when a window crosses
  * 80, 90 or 95 % — before an agent stalls on it (after Orca's limit warning).
  *
- * Each window warns once per level and reset period. Only a new `resetsAt` (the
- * window rolled over) re-arms it: a dip below a level inside the same window —
- * a reading that flickers around a threshold — must not nag twice. The memory
- * is kept in `stateFile`, so a restart does not announce an open window again.
+ * Each window warns once per level and reset period. A window re-arms only when
+ * it clears — usage back below the first warning line, which is the reset; a
+ * changed `resetsAt` on its own does not (the CLIs report a drifting reset
+ * estimate, and a flicker around a threshold must not nag twice). The memory is
+ * kept in `stateFile`, so a restart does not announce an open window again.
  */
 import fs from 'node:fs';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
@@ -43,17 +44,17 @@ export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): L
       const id = `${u.agentId}:${key}`;
       const level = [...USAGE_LEVELS].reverse().find((l) => win.pct! >= l) ?? 0;
       const prev = seen.get(id);
-      // A new reset period re-arms every level; a dip below a level does not.
-      const rolled =
-        prev !== undefined &&
-        prev.resetsAt !== undefined &&
-        win.resetsAt !== undefined &&
-        prev.resetsAt !== win.resetsAt;
-      const before = prev && !rolled ? prev.level : 0;
+      // A window is re-armed when it clears — usage back below the first warning
+      // line, which is the reset. A changed `resetsAt` must NOT re-arm on its
+      // own: the CLIs report a drifting reset estimate (Claude's weekly reset
+      // moves by the hour), and treating every drift as a new period spammed
+      // "limit used up" for a window that never actually reset.
+      const cleared = level === 0;
+      const before = prev && !cleared ? prev.level : 0;
       if (level > before) {
         alerts.push({ agentId: u.agentId, window: name, pct: Math.round(win.pct), level, ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
       }
-      // Remember the highest level reached in this window, so a flicker back
+      // Remember the highest level of the current period, so a flicker back
       // below a threshold cannot re-arm the same warning.
       seen.set(id, { level: Math.max(level, before), ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
     }
