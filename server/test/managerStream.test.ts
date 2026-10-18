@@ -169,4 +169,31 @@ describe('AgentManager live stream', () => {
     await start(manager, session);
     expect(new Set(sent.filter((s) => s.run).map((s) => s.run)).size).toBe(2);
   });
+
+  it('queues a turn posted while a run is active and runs it afterwards', async () => {
+    const gate = path.join(tmp, 'gate-queue');
+    await fsp.rm(gate, { force: true });
+    const { manager, session } = await setup([
+      { type: 'text-delta', text: 'first' },
+      { hold: gate },
+      { type: 'text-delta', text: ' answer' },
+    ]);
+
+    expect(manager.submitTurn({ session, project, text: 'one', attachments: [], source: 'app' })).toEqual({ queued: false });
+    await expect.poll(() => manager.isActive(session.id), { timeout: 5000 }).toBe(true);
+
+    const second = manager.submitTurn({ session, project, text: 'two', attachments: [], source: 'app' });
+    expect(second).toEqual({ queued: true });
+    expect(manager.queuedCount(session.id)).toBe(1);
+    expect(session.queuedCount).toBe(1);
+
+    await fsp.writeFile(gate, '');
+    await expect
+      .poll(() => manager.queuedCount(session.id) === 0 && !manager.isActive(session.id), { timeout: 5000 })
+      .toBe(true);
+
+    const messages = await store.getMessages(session.id);
+    const answers = messages.filter((m) => m.role === 'assistant');
+    expect(answers.map((m) => m.text)).toEqual(['first answer', 'first answer']);
+  });
 });

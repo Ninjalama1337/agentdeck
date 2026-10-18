@@ -391,7 +391,8 @@ export interface AppStore {
   /** Answers a question the session's run waits on (allow / deny a tool call, or pick from its options). */
   answerPermission(sessionId: string, requestId: string, answer: AnswerPermissionRequest): Promise<void>;
   openInIde(sessionId: string): Promise<void>;
-  setSessionModel(sessionId: string, model: string | undefined): void;
+  /** Optimistic; persisted for the session so the header keeps it, reverted with a toast on failure. */
+  setSessionModel(sessionId: string, model: string | undefined): Promise<void>;
   /** Optimistic; reverted with a toast when the server rejects it. Applies from the next turn. */
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>;
   setSessionEffort(sessionId: string, effort: string | undefined): void;
@@ -1380,7 +1381,13 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         ts: Date.now(),
       };
       appendMessage(sessionId, optimistic);
-      applyStatus(sessionId, 'queued');
+      // While a run is active the message waits behind it — don't downgrade the
+      // live "running" status to "queued" for that.
+      const wasActive = (() => {
+        const status = selectSession(get(), sessionId)?.status;
+        return status === 'running' || status === 'queued';
+      })();
+      if (!wasActive) applyStatus(sessionId, 'queued');
       try {
         const res = await api.sendTurn(sessionId, {
           text,
@@ -1388,6 +1395,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
           model,
           thinkingEffort,
         });
+        if (res.queued) get().toast('info', 'Queued — runs after the current answer');
         set((st) => {
           const list = st.messagesBySession[sessionId] ?? [];
           const realArrived = list.some((m) => m.id === res.userMessage.id);
@@ -1401,9 +1409,10 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
           const list = (st.messagesBySession[sessionId] ?? []).filter((m) => m.id !== tmpId);
           return { messagesBySession: { ...st.messagesBySession, [sessionId]: list } };
         });
-        applyStatus(sessionId, 'idle');
-        const status = err instanceof Error && 'status' in err ? (err as { status?: number }).status : undefined;
-        get().toast('error', status === 409 ? 'A run is already active — stop it first' : errorMessage(err));
+        // The run that was already going keeps its status; only a send that
+        // never started a turn drops back to idle.
+        if (!wasActive) applyStatus(sessionId, 'idle');
+        get().toast('error', errorMessage(err));
         throw err;
       }
     },
@@ -1444,16 +1453,22 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       get().toast('info', 'Opening project in the agent IDE…');
     },
 
-    setSessionModel(sessionId, model) {
-      set((st) => {
-        const session = selectSession(st, sessionId);
-        if (!session) return {};
-        return {
-          sessionsByProject: upsertSessionMap(st.sessionsByProject, { ...session, model }),
-        };
-      });
-      const session = selectSession(get(), sessionId);
-      if (session) get().setModelPref(session.agentId, model);
+    async setSessionModel(sessionId, model) {
+      const before = selectSession(get(), sessionId);
+      if (!before || before.model === model) return;
+      const put = (session: Session) =>
+        set((st) => ({ sessionsByProject: upsertSessionMap(st.sessionsByProject, session) }));
+      put({ ...before, model });
+      try {
+        // Persist it: the server's session is what session:update broadcasts,
+        // so without this the bar fell back to "default" on the next refresh.
+        await api.updateSession(sessionId, { model: model ?? null });
+        get().setModelPref(before.agentId, model);
+      } catch (err) {
+        const current = selectSession(get(), sessionId);
+        if (current) put({ ...current, model: before.model });
+        get().toast('error', errorMessage(err));
+      }
     },
 
     async setSessionPermissionMode(sessionId, mode) {

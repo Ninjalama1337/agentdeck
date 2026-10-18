@@ -106,8 +106,9 @@ export function ModelSheet({
     if (agent) toggleModelFavorite(agent.id, id);
   };
 
+  // Allowed while a run is active: the model is per turn, so the pick applies
+  // from the next message (including one that is already queued).
   const pick = (model: string | undefined) => {
-    if (locked) return;
     setSessionModel(session.id, model);
     onClose();
   };
@@ -301,11 +302,10 @@ export function ModelSheet({
           placeholder="Custom model id…"
           autoComplete="off"
           spellCheck={false}
-          disabled={locked}
         />
         <button
           type="button"
-          disabled={!custom.trim() || locked}
+          disabled={!custom.trim()}
           onClick={() => pick(custom.trim())}
           className="press tap shrink-0 rounded-[14px] bg-accent/20 px-4 text-[13px] font-semibold text-accent disabled:opacity-40"
         >
@@ -352,7 +352,7 @@ export function ModelSheet({
       <p className="mt-3 flex items-start gap-1.5 px-1 text-[12px] leading-relaxed text-dim">
         <Wand2 size={13} className="mt-0.5 shrink-0" />
         {locked
-          ? 'A run is active — model and effort are locked until it finishes.'
+          ? 'A run is active — your model pick applies from the next message; effort stays locked until it finishes.'
           : 'Changes take effect on your next message. The ◉ button sets a model as the default for new chats.'}
       </p>
     </>

@@ -70,6 +70,11 @@ export function ModelBar({
         <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
           {modelLabel}
         </span>
+        {session.queuedCount ? (
+          <span className="shrink-0 rounded-full border border-warn/40 bg-warn/10 px-2 py-[3px] text-[11px] font-semibold text-warn">
+            {session.queuedCount} queued
+          </span>
+        ) : null}
         {showEffort && (
           <span
             className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-[3px] text-[11px] font-semibold"

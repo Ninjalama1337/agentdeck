@@ -36,6 +36,13 @@ export function effortOr400(value: string | undefined): ThinkingEffort | undefin
   return parsed.effort;
 }
 
+/** `''`, `null` and `inherit` all mean "no explicit model" — the agent default. */
+function clearableModel(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const model = value.trim();
+  return model && model !== 'inherit' ? model : undefined;
+}
+
 const CreateSessionSchema = z.object({
   projectId: z.string().min(1),
   agentId: AgentIdSchema,
@@ -49,6 +56,8 @@ const CreateSessionSchema = z.object({
 
 const UpdateSessionSchema = z.object({
   permissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypass']).optional(),
+  /** `null`/`''`/`inherit` returns to the agent's own default. */
+  model: z.string().nullable().optional(),
 });
 
 const SendTurnSchema = z.object({
@@ -137,6 +146,7 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const session = getSessionOr404(deps, (req.params as { id: string }).id);
     const body = UpdateSessionSchema.parse(req.body);
     if (body.permissionMode !== undefined) session.permissionMode = body.permissionMode;
+    if (body.model !== undefined) session.model = clearableModel(body.model);
     return deps.store.saveSession(session);
   });
 
@@ -145,6 +155,7 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     if (deps.manager.isActive(session.id)) {
       deps.manager.interrupt(session.id, 'Session deleted');
     }
+    deps.manager.clearQueue(session.id);
     await deps.store.deleteSession(session.id);
     deps.broadcast('notify', { level: 'info', text: `Session "${session.title}" deleted.` });
     reply.code(204).send();
@@ -155,8 +166,10 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const project = getProjectOr404(deps, session.projectId);
     const body = SendTurnSchema.parse(req.body);
 
+    // A busy session is no longer an error: the turn waits in the manager's
+    // queue and starts when the active run finishes.
     const gate = deps.manager.canStart(session);
-    if (!gate.ok) throw httpError(409, gate.code, gate.message);
+    if (!gate.ok && gate.code !== 'RUN_ACTIVE') throw httpError(409, gate.code, gate.message);
 
     // Resolve attachments (uploaded earlier via the upload endpoint).
     const runs: RunAttachment[] = [];
@@ -179,6 +192,10 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     // default (persisted below → session:update broadcast).
     const thinkingEffort = effortOr400(body.thinkingEffort);
     if (thinkingEffort !== undefined) session.thinkingEffort = thinkingEffort;
+    // Same for the model: a turn-level pick becomes the session's model, so
+    // the header and the next turns stay on it.
+    const model = body.model !== undefined ? clearableModel(body.model) : undefined;
+    if (body.model !== undefined) session.model = model;
 
     const userMessage: ChatMessage = {
       id: newMessageId(),
@@ -193,20 +210,20 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     await deps.store.appendMessage(userMessage);
     await deps.store.saveSession(session);
 
-    // Fire and forget: completion flows through session:update / session:event.
-    void deps.manager
-      .startTurn({
-        session,
-        project,
-        text: body.text,
-        attachments: runs,
-        ...(body.model !== undefined ? { model: body.model } : {}),
-        ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
-        source: 'app',
-      })
-      .catch((err) => deps.log.error({ err, session: session.id }, 'startTurn crashed'));
+    // Starts at once or waits behind the active run; either way completion
+    // flows through session:update / session:event.
+    const submitted = deps.manager.submitTurn({
+      session,
+      project,
+      text: body.text,
+      attachments: runs,
+      ...(model ? { model } : {}),
+      ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
+      source: 'app',
+    });
+    if (submitted.error) throw httpError(409, 'QUEUE_FULL', submitted.error);
 
-    reply.send({ userMessage });
+    reply.send({ userMessage, ...(submitted.queued ? { queued: true } : {}) });
   });
 
   fastify.post('/sessions/:id/permissions/:requestId', async (req, reply) => {

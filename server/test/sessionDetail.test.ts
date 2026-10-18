@@ -53,6 +53,28 @@ afterAll(async () => {
   await fsp.rm(tmp, { recursive: true, force: true });
 });
 
+describe('PATCH /api/sessions/:id', () => {
+  it('persists the picked model and clears it back to the agent default', async () => {
+    const set = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${sessionId}`,
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { model: 'opencode-go/glm-5.3' },
+    });
+    expect(set.statusCode).toBe(200);
+    expect((set.json() as { model?: string }).model).toBe('opencode-go/glm-5.3');
+
+    const cleared = await app.inject({
+      method: 'PATCH',
+      url: `/api/sessions/${sessionId}`,
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { model: null },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect((cleared.json() as { model?: string }).model).toBeUndefined();
+  });
+});
+
 describe('GET /api/sessions/:id', () => {
   it('returns the whole history and no draft while nothing runs', async () => {
     const body = (await detail()).json() as SessionDetailResponse;

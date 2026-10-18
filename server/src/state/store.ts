@@ -105,6 +105,8 @@ export class Store {
   private async recoverInterrupted(session: Session): Promise<void> {
     if (session.status !== 'running' && session.status !== 'queued') return;
     session.status = 'idle';
+    // The in-memory queue did not survive the restart either.
+    session.queuedCount = undefined;
     await this.appendMessage({
       id: newMessageId(),
       sessionId: session.id,

@@ -158,7 +158,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
   };
 
   const send = async () => {
-    if (!canSend || running) return;
+    if (!canSend) return;
     if (dictation.state !== 'idle') dictation.stop();
     haptic('light');
     const payloadText = text;
@@ -255,7 +255,11 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
             }
           }}
           rows={1}
-          placeholder={running ? 'Agent is working…' : `Message ${agent?.label ?? 'agent'} in ${projectName}…`}
+          placeholder={
+            running
+              ? 'Agent is working — send to queue…'
+              : `Message ${agent?.label ?? 'agent'} in ${projectName}…`
+          }
           aria-label="Message"
           enterKeyHint={enterToSend ? 'send' : 'enter'}
           className="max-h-[132px] min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15.5px] leading-snug outline-none placeholder:truncate placeholder:text-dim/70"
@@ -275,7 +279,7 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
           </button>
         )}
         <MicButton dictation={dictation} />
-        {running ? (
+        {running && (
           <button
             type="button"
             aria-label="Stop run"
@@ -287,21 +291,26 @@ export function Composer({ session, agent }: { session: Session; agent: AgentInf
           >
             <Square size={16} fill="currentColor" />
           </button>
-        ) : (
-          <button
-            type="button"
-            aria-label="Send message"
-            disabled={!canSend}
-            onClick={() => void send()}
-            className={clsx(
-              'press btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition-opacity',
-              canSend ? '' : 'opacity-35',
-            )}
-          >
-            <ArrowUp size={20} strokeWidth={2.4} />
-          </button>
         )}
+        <button
+          type="button"
+          aria-label={running ? 'Queue message' : 'Send message'}
+          disabled={!canSend}
+          onClick={() => void send()}
+          className={clsx(
+            'press btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition-opacity',
+            canSend ? '' : 'opacity-35',
+          )}
+        >
+          <ArrowUp size={20} strokeWidth={2.4} />
+        </button>
       </div>
+
+      {session.queuedCount ? (
+        <p className="mt-1.5 px-2 text-[11.5px] text-dim">
+          {session.queuedCount} message{session.queuedCount === 1 ? '' : 's'} queued — starts after the current answer
+        </p>
+      ) : null}
 
       <AttachSheet
         open={sheetOpen}

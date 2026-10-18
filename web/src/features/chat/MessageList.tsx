@@ -206,7 +206,9 @@ const MessageBubble = memo(function MessageBubble({
           <span className="font-medium" style={{ color: accent }}>
             {agent?.label ?? msg.agentId ?? 'agent'}
           </span>
-          {msg.model && <span className="font-mono text-[10.5px] text-dim/75">{msg.model}</span>}
+          <span className="font-mono text-[10.5px] text-dim/75">
+            {msg.model ?? agent?.defaultModel?.id ?? 'Default'}
+          </span>
           <span className="ml-auto">{clock(msg.ts)}</span>
           {answer && <CopyButton text={answer} />}
         </div>

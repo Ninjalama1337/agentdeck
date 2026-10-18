@@ -92,6 +92,8 @@ export interface Session {
   externalSessionId?: string;
   /** Agent account profile whose env overrides the adapter defaults. */
   accountId?: string;
+  /** Turns posted while a run was active and still waiting to start. */
+  queuedCount?: number;
   lastError?: string;
 }
 
@@ -262,6 +264,8 @@ export interface SendTurnRequest {
 
 export interface SendTurnResponse {
   userMessage: ChatMessage;
+  /** The session was busy, so the turn waits behind the active run. */
+  queued?: boolean;
 }
 
 export interface CreateProjectRequest {
@@ -317,6 +321,8 @@ export interface CreateSessionRequest {
 export interface UpdateSessionRequest {
   /** Applies from the session's next turn (each turn starts the CLI with `--permission-mode`). */
   permissionMode?: PermissionMode;
+  /** Model for the next turns; `null`/`''` returns to the agent's own default. */
+  model?: string | null;
 }
 
 export interface TeamRunRequest {

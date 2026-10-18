@@ -57,6 +57,9 @@ export type SessionEventEmitter = (
 /** Streamed text goes out in bundles this far apart instead of one event per token. */
 const DELTA_FLUSH_MS = 40;
 
+/** Turns posted while a run is active wait behind it; a cap keeps one chat from piling up forever. */
+const MAX_QUEUED_TURNS = 10;
+
 /**
  * A note the manager wants the chat to show above the live answer rides on a
  * `raw` event with this prefix (an empty one clears the note) — the same channel
@@ -132,6 +135,8 @@ interface ActiveRun {
 
 export class AgentManager {
   private readonly active = new Map<string, ActiveRun>();
+  /** Turns posted during an active run, oldest first, per session. */
+  private readonly queues = new Map<string, StartTurnOptions[]>();
 
   constructor(
     private readonly config: Config,
@@ -149,6 +154,73 @@ export class AgentManager {
 
   activeSessionIds(): string[] {
     return [...this.active.keys()];
+  }
+
+  /** Turns posted during the active run that still wait for their turn. */
+  queuedCount(sessionId: string): number {
+    return this.queues.get(sessionId)?.length ?? 0;
+  }
+
+  /** Drops queued turns (session deleted, agent gone) without touching the active run. */
+  clearQueue(sessionId: string): void {
+    this.queues.delete(sessionId);
+  }
+
+  /**
+   * Starts a turn now, or parks it behind the active run. The REST layer uses
+   * this instead of `startTurn` so posting while the agent works is allowed.
+   */
+  submitTurn(opts: StartTurnOptions): { queued: boolean; error?: string } {
+    if (!this.active.has(opts.session.id)) {
+      this.runTurn(opts);
+      return { queued: false };
+    }
+    const queue = this.queues.get(opts.session.id) ?? [];
+    if (queue.length >= MAX_QUEUED_TURNS) {
+      return { queued: false, error: `Too many queued messages (max ${MAX_QUEUED_TURNS}).` };
+    }
+    queue.push(opts);
+    this.queues.set(opts.session.id, queue);
+    opts.session.queuedCount = queue.length;
+    void this.store.saveSession(opts.session).catch((err) => {
+      this.logger.warn({ err, session: opts.session.id }, 'failed to persist queue state');
+    });
+    return { queued: true };
+  }
+
+  /** Runs one turn and, when it ends, hands the next queued turn its start. */
+  private runTurn(opts: StartTurnOptions): void {
+    void this.startTurn(opts)
+      .catch((err) => {
+        this.logger.error({ err, session: opts.session.id }, 'startTurn crashed');
+      })
+      .finally(() => this.drainQueue(opts.session.id, opts.session));
+  }
+
+  /** Pops the next queued turn and updates the session's queue badge. */
+  private drainQueue(sessionId: string, session: Session): void {
+    const queue = this.queues.get(sessionId);
+    const next = queue?.shift();
+    if (!next) {
+      this.queues.delete(sessionId);
+      if (session.queuedCount !== undefined) {
+        session.queuedCount = undefined;
+        void this.store.saveSession(session).catch(() => undefined);
+      }
+      return;
+    }
+    // Re-read the session: the run that just ended may have learned its resume
+    // id, and a model pick made while this turn waited must reach it too.
+    const fresh = this.store.getSession(sessionId);
+    if (fresh) {
+      next.session = fresh;
+      next.model = fresh.model;
+    }
+    // The badge belongs on the store's object, so the new run does not save a
+    // stale count back over it.
+    next.session.queuedCount = queue && queue.length > 0 ? queue.length : undefined;
+    void this.store.saveSession(next.session).catch(() => undefined);
+    this.runTurn(next);
   }
 
   /** The answer of the active run so far; undefined when nothing is running. */
@@ -333,6 +405,9 @@ export class AgentManager {
       stdoutBuf: '',
     };
     this.active.set(session.id, run);
+    // The CLI's own default (OpenCode reports it) is what a turn with no pick
+    // actually runs, so the message and the activity record can name it.
+    run.modelUsed = model ?? info.defaultModel?.id;
 
     this.armTimer(run);
     this.armWatchdog(run);
