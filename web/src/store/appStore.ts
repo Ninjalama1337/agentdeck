@@ -759,8 +759,6 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         appendMessage(sessionId, event.message);
         if (event.message.role !== 'user') finalizeDraft(sessionId, event.message);
         break;
-      case 'raw':
-        break;
       default:
         set((st) => {
           const before = st.drafts[sessionId];

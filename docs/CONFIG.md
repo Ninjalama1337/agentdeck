@@ -44,6 +44,14 @@ Server neu starten — es gibt kein Hot-Reload.
   // Hard-Kill für Agent-Läufe in ms (Standard 30 min).
   "maxRunMs": 1800000,
 
+  // Ein Run, der so lange nichts ausgibt, bekommt im Chat einen sichtbaren
+  // Hinweis ("No output for …"). Standard 90 s.
+  "stallWarnMs": 90000,
+
+  // Ein Run, der so lange stumm bleibt, wird gestoppt — besser als ein Chat,
+  // der ewig am eingefrorenen Cursor hängt. Standard 15 min.
+  "stallAbortMs": 900000,
+
   // Max. Upload-Größe pro Anhang in Bytes (20 MB).
   "maxUploadBytes": 20971520,
 
@@ -93,6 +101,8 @@ Server neu starten — es gibt kein Hot-Reload.
 | `browseRoot` | string | `~` (Home) | Wurzel des Ordner-Explorers (bestehendes Repo als Projekt öffnen) |
 | `logLevel` | string | `"info"` | `debug`/`info`/`warn`/`error` |
 | `maxRunMs` | number | `1800000` | Hard-Kill eines Agent-Runs (ms) |
+| `stallWarnMs` | number | `90000` | Stiller Run → Hinweis im Chat (ms) |
+| `stallAbortMs` | number | `900000` | Stiller Run → wird gestoppt (ms) |
 | `maxUploadBytes` | number | `20971520` | Upload-Limit pro Anhang (Bytes) |
 | `corsOrigins` | string[] | siehe oben | erlaubte CORS-Origins |
 | `tunnel.provider` | string | `"off"` | `off` \| `cloudflared` |

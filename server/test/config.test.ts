@@ -22,6 +22,8 @@ describe('loadConfig', () => {
     expect(config.port).toBe(8787);
     expect(config.maxRunMs).toBe(1_800_000);
     expect(config.maxUploadBytes).toBe(20 * 1024 * 1024);
+    expect(config.stallWarnMs).toBe(90_000);
+    expect(config.stallAbortMs).toBe(900_000);
     expect(config.corsOrigins).toContain('capacitor://localhost');
     expect(config.agents.claude).toMatchObject({ mode: 'headless', command: 'claude' });
     expect(config.agents.zcode).toMatchObject({ mode: 'auto', command: 'zcode' });
@@ -42,10 +44,14 @@ describe('loadConfig', () => {
         AGENTDECK_AGENT_ZCODE_MODE: 'headless',
         AGENTDECK_AGENT_ZCODE_COMMAND: 'zcode-cli',
         AGENTDECK_CORS_ORIGINS: 'http://a.example,http://b.example',
+        AGENTDECK_STALL_WARN_MS: '5000',
+        AGENTDECK_STALL_ABORT_MS: '60000',
       },
       configDir: path.join(tmp, 'none'),
     });
     expect(config.port).toBe(9001);
+    expect(config.stallWarnMs).toBe(5000);
+    expect(config.stallAbortMs).toBe(60_000);
     expect(path.basename(config.dataDir)).toBe('custom-data');
     expect(config.projectsRoot).toBe('/explicit/projects');
     expect(config.agents.zcode).toMatchObject({ mode: 'headless', command: 'zcode-cli' });

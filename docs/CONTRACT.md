@@ -103,6 +103,8 @@ Env prefix `AGENTDECK_`, optional JSON config at `~/.config/agentdeck/config.jso
   "projectsRoot": "<dataDir>/projects",      // sandbox root for ALL file access
   "logLevel": "info",
   "maxRunMs": 1800000,                        // hard kill for agent runs
+  "stallWarnMs": 90000,                       // silent run → visible note in the chat
+  "stallAbortMs": 900000,                     // silent run → stopped (no eternal hang)
   "maxUploadBytes": 20971520,                 // 20 MB per attachment
   "corsOrigins": ["http://localhost:5173", "capacitor://localhost", "http://localhost"],
   "agents": {
@@ -169,7 +171,11 @@ Storage layout under `dataDir`:
    `projectsRoot` — no traversal, no symlink escape. Uploads: images and
    regular files ≤ `maxUploadBytes`, sanitized filenames.
 6. Agent processes run with cwd = project path, inherited env, are killed
-   (SIGINT → 3 s grace → SIGKILL) on interrupt or `maxRunMs`.
+   (SIGINT → 3 s grace → SIGKILL) on interrupt or `maxRunMs`. A run that produces
+   no output for `stallWarnMs` gets a note in the chat, and one silent for
+   `stallAbortMs` is stopped — so a turn can never hang invisibly forever. An
+   unanswered permission the CLI can no longer take is retired (a
+   `permission-resolved: deny`), and open ones are cleared when the run ends.
 7. `POST /api/bridge/run` is restricted to localhost callers holding the
    bridge token from `dataDir/bridge-token` (printed at startup).
 

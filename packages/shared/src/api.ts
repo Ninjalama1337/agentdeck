@@ -233,6 +233,8 @@ export interface SessionDraft {
   thinking?: string;
   tools: { tool: string; state: 'running' | 'done' | 'error'; summary?: string }[];
   usage?: MessageUsage;
+  /** A note above the live answer (e.g. the run has gone quiet); missing on older servers. */
+  notice?: string;
   /** Questions of this run still waiting for the user. Missing on older servers. */
   permissions?: PermissionRequest[];
 }

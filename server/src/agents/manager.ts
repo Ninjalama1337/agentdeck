@@ -8,6 +8,10 @@
  *   text deltas into one assistant ChatMessage flushed at the end
  * - hands out the answer so far (draftOf) to clients that join mid-run
  * - passes an agent's permission questions to the chat and the answers back
+ * - retires a question the CLI can no longer take, and clears open ones when a
+ *   run ends, so the chat never keeps waiting on a dead run
+ * - stops a run that says nothing for too long (stallWarnMs → note, stallAbortMs
+ *   → stop) instead of letting the chat hang on a frozen caret
  * - kills runs on interrupt / maxRunMs (SIGINT → 3s → SIGKILL, process group)
  */
 import fsp from 'node:fs/promises';
@@ -53,6 +57,14 @@ export type SessionEventEmitter = (
 /** Streamed text goes out in bundles this far apart instead of one event per token. */
 const DELTA_FLUSH_MS = 40;
 
+/**
+ * A note the manager wants the chat to show above the live answer rides on a
+ * `raw` event with this prefix (an empty one clears the note) — the same channel
+ * adapters use for caveats. The web store lifts it into the draft.
+ */
+export const NOTICE_PREFIX = '[agentdeck] ';
+export const NOTICE_CLEAR = '[agentdeck]';
+
 export interface StartTurnOptions {
   session: Session;
   project: Project;
@@ -85,6 +97,16 @@ interface ActiveRun {
   plan: RunPlan;
   child: Child;
   timer: NodeJS.Timeout;
+  /** Repeating check: no output for too long while the run is supposed to work. */
+  watchdog: NodeJS.Timeout;
+  /** Last stdout/stderr activity — the stall check measures silence against it. */
+  lastActivityAt: number;
+  /** The "no output" note went out already and has not been cleared by fresh output. */
+  stallWarned: boolean;
+  /** The watchdog stopped this run — it reads as a failure, not as a user stop. */
+  stalled: boolean;
+  /** Visible note shown in the chat while the run looks stalled. */
+  notice?: string;
   maxRunMs: number;
   /** Questions the agent waits on, by request id. */
   permissions: Map<string, Extract<PermissionSignal, { kind: 'ask' }>>;
@@ -146,6 +168,7 @@ export class AgentManager {
         ...(t.summary ? { summary: t.summary } : {}),
       })),
       ...(run.usage ? { usage: run.usage } : {}),
+      ...(run.notice ? { notice: run.notice } : {}),
       ...(run.permissions.size ? { permissions: [...run.permissions.values()].map((p) => p.request) } : {}),
     };
   }
@@ -163,8 +186,17 @@ export class AgentManager {
   async answerPermission(sessionId: string, requestId: string, answer: PermissionAnswer): Promise<boolean> {
     const run = this.active.get(sessionId);
     const asked = run?.permissions.get(requestId);
-    if (!run || !asked || run.exited || !run.child.stdin?.writable) return false;
+    if (!run || !asked || run.exited) return false;
+    // The CLI is gone or closed its stdin: retire the question instead of
+    // leaving the chat waiting on an answer nobody can take anymore.
+    if (!run.child.stdin?.writable) {
+      run.permissions.delete(requestId);
+      this.send(run, { type: 'permission-resolved', id: requestId, decision: 'deny' });
+      return false;
+    }
     run.permissions.delete(requestId);
+    // The answer is fresh activity — the agent is about to work again.
+    this.markActivity(run);
     const { line, permissionMode } = asked.answer(answer);
     run.child.stdin.write(line + '\n');
     this.send(run, { type: 'permission-resolved', id: requestId, decision: answer.decision });
@@ -282,6 +314,10 @@ export class AgentManager {
       plan,
       child,
       timer: setTimeout(() => undefined, 0), // armed below
+      watchdog: setTimeout(() => undefined, 0), // armed below
+      lastActivityAt: Date.now(),
+      stallWarned: false,
+      stalled: false,
       maxRunMs: opts.maxRunMs ?? this.config.maxRunMs,
       permissions: new Map(),
       exited: false,
@@ -298,9 +334,10 @@ export class AgentManager {
     this.active.set(session.id, run);
 
     this.armTimer(run);
+    this.armWatchdog(run);
 
     if (plan.notice) {
-      this.send(run, { type: 'raw', line: `[agentdeck] ${plan.notice}` });
+      this.send(run, { type: 'raw', line: `${NOTICE_PREFIX}${plan.notice}` });
     }
 
     if (child.stdin && plan.stdinPayloads) {
@@ -317,6 +354,7 @@ export class AgentManager {
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk: string) => {
       run.stderrTail = (run.stderrTail + chunk).slice(-4000);
+      this.markActivity(run);
     });
 
     session.status = 'running';
@@ -339,6 +377,14 @@ export class AgentManager {
     run.stdoutBuf = '';
     run.exited = true;
     clearTimeout(run.timer);
+    clearInterval(run.watchdog);
+    // Whatever the agent still waited on can no longer be answered — retire the
+    // cards so no chat keeps showing "waiting for you" after the run is over.
+    const abandoned = run.permissions.size > 0;
+    for (const id of [...run.permissions.keys()]) {
+      run.permissions.delete(id);
+      this.send(run, { type: 'permission-resolved', id, decision: 'deny' });
+    }
     this.active.delete(session.id);
 
     // flush() hands these to the message and clears them.
@@ -348,9 +394,15 @@ export class AgentManager {
 
     let status: SessionStatus;
     let error: string | undefined;
-    if (run.interrupted) {
+    if (run.stalled) {
+      status = 'error';
+      error = run.errorDetail ?? 'The run was stopped after going quiet.';
+    } else if (run.interrupted) {
       status = 'stopped';
       error = run.errorDetail ?? 'Run interrupted';
+    } else if (abandoned) {
+      status = 'error';
+      error = run.errorDetail ?? `${info.label} ended while waiting for your answer.`;
     } else if (failed || exitCode !== 0 || run.errorDetail) {
       status = 'error';
       const tail = run.stderrTail.trim();
@@ -425,6 +477,7 @@ export class AgentManager {
 
   private onStdoutChunk(run: ActiveRun, chunk: string): void {
     if (run.exited) return;
+    this.markActivity(run);
     run.stdoutBuf += chunk;
     for (;;) {
       const idx = run.stdoutBuf.indexOf('\n');
@@ -442,6 +495,61 @@ export class AgentManager {
       this.interrupt(run.sessionId, `Run exceeded the ${Math.round(run.maxRunMs / 1000)}s limit`);
     }, run.maxRunMs);
     run.timer.unref?.();
+  }
+
+  /** Starts the repeating stall check; its cadence follows the warn threshold. */
+  private armWatchdog(run: ActiveRun): void {
+    const tick = Math.max(25, Math.min(15_000, Math.floor(this.config.stallWarnMs / 2)));
+    clearInterval(run.watchdog);
+    run.watchdog = setInterval(() => this.checkStall(run), tick);
+    run.watchdog.unref?.();
+  }
+
+  /** Notes fresh output; a visible stall note goes away with it. */
+  private markActivity(run: ActiveRun): void {
+    // Once the watchdog gave up on the run, the note stays with the failure.
+    if (run.stalled) return;
+    run.lastActivityAt = Date.now();
+    if (run.stallWarned) {
+      run.stallWarned = false;
+      if (run.notice) {
+        run.notice = undefined;
+        this.send(run, { type: 'raw', line: NOTICE_CLEAR });
+      }
+    }
+  }
+
+  /**
+   * A run that says nothing for long is either thinking or stuck. Warn once on
+   * the way (so the chat is not just a frozen caret), and stop it after the
+   * abort threshold — a hung run must not hold the session forever.
+   */
+  private checkStall(run: ActiveRun): void {
+    if (run.exited || run.interrupted || this.active.get(run.sessionId) !== run) return;
+    // Waiting on the user's answer is not a stall.
+    if (run.permissions.size > 0) {
+      run.lastActivityAt = Date.now();
+      return;
+    }
+    const silent = Date.now() - run.lastActivityAt;
+    if (silent >= this.config.stallAbortMs) {
+      const reason = `No output for ${formatDuration(silent)} — the agent looked stuck, so the run was stopped.`;
+      run.stalled = true;
+      this.setNotice(run, reason);
+      this.interrupt(run.sessionId, reason);
+      return;
+    }
+    if (silent >= this.config.stallWarnMs && !run.stallWarned) {
+      this.setNotice(run, `No output for ${formatDuration(silent)} — the agent may be thinking or waiting.`);
+    }
+  }
+
+  /** Shows a note above the live answer (it also rides in the draft snapshot). */
+  private setNotice(run: ActiveRun, text: string): void {
+    if (run.notice === text) return;
+    run.notice = text;
+    run.stallWarned = true;
+    this.send(run, { type: 'raw', line: `${NOTICE_PREFIX}${text}` });
   }
 
   /** True when the line was a permission exchange and is not agent output. */
@@ -679,4 +787,14 @@ function killTree(pid: number | undefined, signal: NodeJS.Signals): void {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/** "12s", "2m", "1h 05m" for a stretch of silence. */
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }

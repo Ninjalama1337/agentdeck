@@ -1,15 +1,16 @@
 /**
  * Usage watcher: reads the subscription limits in the background while agents
  * are in use and pushes a `usage-limit` notification when a window crosses
- * 80, 95 or 100 % — before an agent stalls on it (after Orca's limit warning).
+ * 80, 90 or 95 % — before an agent stalls on it (after Orca's limit warning).
  *
- * Each window warns once per level and reset period: a new `resetsAt` (the
- * window rolled over) or a drop below the level re-arms it.
+ * Each window warns once per level and reset period. Only a new `resetsAt` (the
+ * window rolled over) re-arms it: a dip below a level inside the same window —
+ * a reading that flickers around a threshold — must not nag twice.
  */
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
 import { AGENT_LABELS } from '@agentdeck/shared';
 
-export const USAGE_LEVELS = [80, 95, 100] as const;
+export const USAGE_LEVELS = [80, 90, 95] as const;
 export const USAGE_WATCH_INTERVAL_MS = 15 * 60 * 1000;
 
 interface Seen {
@@ -42,13 +43,19 @@ export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): L
       const id = `${u.agentId}:${key}`;
       const level = [...USAGE_LEVELS].reverse().find((l) => win.pct! >= l) ?? 0;
       const prev = seen.get(id);
-      const rolled = prev !== undefined && prev.resetsAt !== win.resetsAt;
+      // A new reset period re-arms every level; a dip below a level does not.
+      const rolled =
+        prev !== undefined &&
+        prev.resetsAt !== undefined &&
+        win.resetsAt !== undefined &&
+        prev.resetsAt !== win.resetsAt;
       const before = prev && !rolled ? prev.level : 0;
       if (level > before) {
         alerts.push({ agentId: u.agentId, window: name, pct: Math.round(win.pct), level, ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
       }
-      // Remember the level actually reached — dropping below re-arms the warning.
-      seen.set(id, { level, ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
+      // Remember the highest level reached in this window, so a flicker back
+      // below a threshold cannot re-arm the same warning.
+      seen.set(id, { level: Math.max(level, before), ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
     }
   }
   return alerts;
@@ -57,9 +64,10 @@ export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): L
 /** "Claude: weekly limit at 96 %" + "Resets in 2 h 13 min." */
 export function alertText(a: LimitAlert, now = Date.now()): { title: string; body: string } {
   const who = AGENT_LABELS[a.agentId] ?? a.agentId;
-  const title = a.level >= 100 ? `${who}: ${a.window} used up` : `${who}: ${a.window} at ${a.pct}%`;
+  const usedUp = a.pct >= 100;
+  const title = usedUp ? `${who}: ${a.window} used up` : `${who}: ${a.window} at ${a.pct}%`;
   let body =
-    a.level >= 100
+    usedUp
       ? 'Agents on this plan stop until it resets — hand the task over from the terminal, or switch the account.'
       : 'Consider pacing or switching agents.';
   const at = a.resetsAt && /^\d{4}-\d{2}-\d{2}T/.test(a.resetsAt) ? Date.parse(a.resetsAt) : NaN;

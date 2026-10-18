@@ -55,6 +55,17 @@ describe('reduceDraft', () => {
     expect(reduceDraft(undefined, { type: 'usage', inputTokens: 1 })).toBeUndefined();
     expect(reduceDraft(undefined, { type: 'raw', line: 'x' })).toBeUndefined();
   });
+
+  it('lifts a manager note out of a raw line and clears it when the run speaks again', () => {
+    const started = play([{ type: 'text-delta', text: 'Hi' }, { type: 'raw', line: '[agentdeck] No output for 2m — the agent may be thinking.' }]);
+    expect(started?.notice).toBe('No output for 2m — the agent may be thinking.');
+    // Plain agent output on a raw line changes nothing.
+    expect(reduceDraft(started, { type: 'raw', line: 'not json' })).toBe(started);
+    // Fresh output clears the note.
+    expect(reduceDraft(started, { type: 'raw', line: '[agentdeck]' })?.notice).toBeUndefined();
+    // A snapshot carries the note to a client joining mid-run.
+    expect(draftFromSnapshot({ run: 'r', seq: 1, text: '', tools: [], notice: 'quiet' }).notice).toBe('quiet');
+  });
 });
 
 describe('joining a run that is under way', () => {

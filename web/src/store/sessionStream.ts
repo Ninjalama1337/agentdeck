@@ -18,9 +18,18 @@ export interface StreamDraft {
   thinking?: string;
   tools: ToolCard[];
   usage?: MessageUsage;
+  /** A note above the live answer (e.g. the run has gone quiet). */
+  notice?: string;
   /** Questions the run waits on — the user answers them in the chat. */
   permissions?: PermissionRequest[];
 }
+
+/**
+ * The server sends a chat note on a `raw` event: with this prefix it carries
+ * text, on its own it clears the note again (the run is speaking once more).
+ */
+const NOTICE_PREFIX = '[agentdeck] ';
+const NOTICE_CLEAR = '[agentdeck]';
 
 /** Which events of a run a draft already contains (from the server snapshot). */
 export interface StreamMark {
@@ -86,6 +95,17 @@ export function reduceDraft(draft: StreamDraft | undefined, event: AgentEvent): 
       if (!draft?.permissions?.some((p) => p.id === event.id)) return draft;
       return { ...draft, permissions: draft.permissions.filter((p) => p.id !== event.id) };
     }
+    case 'raw': {
+      // Notes from the manager ride on raw lines; a note with no live answer
+      // has nothing to attach to, so an empty draft is left alone.
+      if (!draft) return draft;
+      if (event.line === NOTICE_CLEAR) return draft.notice ? { ...draft, notice: undefined } : draft;
+      if (event.line.startsWith(NOTICE_PREFIX)) {
+        const notice = event.line.slice(NOTICE_PREFIX.length).trim();
+        return { ...draft, notice: notice || undefined };
+      }
+      return draft;
+    }
     default:
       return draft;
   }
@@ -98,6 +118,7 @@ export function draftFromSnapshot(snap: SessionDraft): StreamDraft {
     ...(snap.thinking ? { thinking: snap.thinking } : {}),
     tools: snap.tools.map((t) => ({ id: ++toolSeq, ...t })),
     ...(snap.usage ? { usage: snap.usage } : {}),
+    ...(snap.notice ? { notice: snap.notice } : {}),
     ...(snap.permissions?.length ? { permissions: snap.permissions } : {}),
   };
 }

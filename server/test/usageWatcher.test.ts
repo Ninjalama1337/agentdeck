@@ -16,16 +16,22 @@ describe('limitCrossings', () => {
     expect(limitCrossings(seen, [claude(50, 10)])).toEqual([]);
     expect(limitCrossings(seen, [claude(82, 10)]).map((a) => a.level)).toEqual([80]);
     expect(limitCrossings(seen, [claude(88, 10)])).toEqual([]);
-    expect(limitCrossings(seen, [claude(96, 81)]).map((a) => `${a.window}:${a.level}`)).toEqual(['5-hour limit:95', 'weekly limit:80']);
-    expect(limitCrossings(seen, [claude(100, 81)]).map((a) => a.level)).toEqual([100]);
+    expect(limitCrossings(seen, [claude(96, 85)]).map((a) => `${a.window}:${a.level}`)).toEqual(['5-hour limit:95', 'weekly limit:80']);
+    expect(limitCrossings(seen, [claude(96, 92)]).map((a) => `${a.window}:${a.level}`)).toEqual(['weekly limit:90']);
+    expect(limitCrossings(seen, [claude(96, 92)])).toEqual([]);
+    // 100 % is not a level of its own any more — the window already warned at 95.
+    expect(limitCrossings(seen, [claude(100, 92)])).toEqual([]);
   });
 
-  it('re-arms when the window rolls over or usage drops below the level', () => {
+  it('re-arms only when the window rolls over, never on a dip below a level', () => {
     const seen = new Map();
     limitCrossings(seen, [claude(85)]);
     expect(limitCrossings(seen, [claude(85, undefined, '2026-10-15T19:00:00Z')]).map((a) => a.level)).toEqual([80]);
+    // Same window: falling back below the line and climbing again does not warn twice.
     limitCrossings(seen, [claude(70, undefined, '2026-10-15T19:00:00Z')]);
-    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T19:00:00Z')]).map((a) => a.level)).toEqual([80]);
+    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T19:00:00Z')])).toEqual([]);
+    // The next rollover re-arms it again.
+    expect(limitCrossings(seen, [claude(81, undefined, '2026-10-15T23:00:00Z')]).map((a) => a.level)).toEqual([80]);
   });
 });
 

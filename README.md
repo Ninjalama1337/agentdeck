@@ -64,7 +64,8 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   einem eigenen Git-Worktree auf eigenem Branch; im Git-Tab die Ergebnisse
   vergleichen, das beste mergen, den Rest verwerfen.
 - **Usage im Blick** — 5-Stunden- und Wochenlimit als Balken mit Countdown bis
-  zum Reset, Agents nach dem knappsten Limit sortiert, Push bei 80/95/100 %.
+  zum Reset, Agents nach dem knappsten Limit sortiert, Push bei 80/90/95 % —
+  je Schwelle einmal pro Fenster, auch wenn der Wert um die Marke pendelt.
 - **Dev-Server-Vorschau** — startet ein Agent oder Terminal einen Server
   (`localhost:5173` …), erscheint der Port als Chip im Code-Tab; ein Tipp öffnet
   ihn über den Vorschau-Proxy (AgentDeck-Port + 1, signierter Link) auch am
@@ -79,13 +80,17 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   (Text, Tool-Nutzung, Token-/Kosten-Verbrauch), Unterbrechen per Tap. Wer
   die App mitten in einer Antwort wieder öffnet, sieht den bisherigen Stand
   und liest live weiter; ungesendeter Text und Anhänge bleiben pro Session
-  erhalten.
+  erhalten. Ein Turn, der lange nichts ausgibt, meldet sich sichtbar im Chat
+  („No output for …") und wird nach `stallAbortMs` gestoppt, statt ewig zu
+  hängen.
 - **Rechte-Abfragen im Chat** — will Claude Code einen Befehl ausführen oder
   eine Datei ändern, der es nicht ohne Zustimmung darf, erscheint die Anfrage
   im Chat: *Allow*, *Deny* oder *Always allow*, mit dem vollständigen Befehl
   bzw. der Änderung zum Aufklappen. Rückfragen des Agents mit Auswahloptionen
   beantwortest du genauso. Dazu kommt eine Benachrichtigung; in der APK
-  mit Allow/Deny direkt auf der Benachrichtigung.
+  mit Allow/Deny direkt auf der Benachrichtigung. Eine Frage, die der Agent
+  nicht mehr annehmen kann, wird aufgelöst (und offene Fragen beim Ende eines
+  Runs) — kein Chat wartet auf eine Antwort, die nichts mehr erreicht.
 - **Aktivität & Kosten** — der Server hält jeden Agent-Lauf in einer
   SQLite-Datenbank fest (Chat, Routinen, Team-Runs, Terminal-Turns): Agent,
   Modell, Projekt, Dauer, Tokens, Tool-Aufrufe und Kosten. Die App zeigt daraus

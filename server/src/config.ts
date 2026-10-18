@@ -61,6 +61,10 @@ export const ConfigSchema = z.object({
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   maxRunMs: z.number().int().min(1000).default(1_800_000),
   maxUploadBytes: z.number().int().min(1024).default(20 * 1024 * 1024),
+  /** A run that produced no stdout for this long gets a visible "still waiting" note. */
+  stallWarnMs: z.number().int().min(100).default(90_000),
+  /** A run silent for this long is stopped — better than a chat that hangs forever. */
+  stallAbortMs: z.number().int().min(100).default(900_000),
   tunnel: TunnelConfigSchema.default({}),
   voice: VoiceConfigSchema.default({}),
   corsOrigins: z
@@ -142,6 +146,10 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
   if (maxRunMs !== undefined) o.maxRunMs = maxRunMs;
   const maxUploadBytes = num('AGENTDECK_MAX_UPLOAD_BYTES');
   if (maxUploadBytes !== undefined) o.maxUploadBytes = maxUploadBytes;
+  const stallWarnMs = num('AGENTDECK_STALL_WARN_MS');
+  if (stallWarnMs !== undefined) o.stallWarnMs = stallWarnMs;
+  const stallAbortMs = num('AGENTDECK_STALL_ABORT_MS');
+  if (stallAbortMs !== undefined) o.stallAbortMs = stallAbortMs;
   const tunnel: Record<string, unknown> = {};
   const tunnelProvider = str('AGENTDECK_TUNNEL');
   if (tunnelProvider !== undefined) tunnel.provider = tunnelProvider;

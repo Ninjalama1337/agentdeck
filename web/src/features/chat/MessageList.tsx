@@ -21,7 +21,11 @@ const EMPTY_DRAFT: StreamDraft = { text: '', tools: [] };
 function draftHasContent(draft: StreamDraft | undefined): boolean {
   return (
     draft !== undefined &&
-    (draft.text.length > 0 || draft.tools.length > 0 || (draft.thinking ?? '').trim() !== '' || (draft.permissions?.length ?? 0) > 0)
+    (draft.text.length > 0 ||
+      draft.tools.length > 0 ||
+      (draft.thinking ?? '').trim() !== '' ||
+      (draft.notice ?? '').trim() !== '' ||
+      (draft.permissions?.length ?? 0) > 0)
   );
 }
 
@@ -286,6 +290,13 @@ function StreamingBubble({
             {phase}
           </span>
         </div>
+
+        {draft.notice && (
+          <p className="mb-2 flex items-start gap-1.5 rounded-lg border border-warn/40 bg-warn/[0.07] px-2.5 py-1.5 text-[11.5px] leading-snug text-warn">
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
+            <span>{draft.notice}</span>
+          </p>
+        )}
 
         {draft.tools.length > 0 && (
           <div className="mb-2 flex flex-col gap-1">
