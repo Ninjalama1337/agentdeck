@@ -202,7 +202,7 @@ Storage layout under `dataDir`:
 | zcode | `scripts/update-zcode.sh` (builds from zai-org/ZCode → `~/.zcode/runtime`) | same script (clone-if-missing) | `zcode login zai` (browser on the machine; the app shows the fallback URL as a button) |
 | antigravity | `flatpak update -y com.google.Antigravity` | `flatpak install -y flathub com.google.Antigravity` | opens the IDE window for Google sign-in (job finishes immediately) |
 | codex | `codex update` | `npm install -g @openai/codex@latest` | `codex login --device-auth` (the app shows the sign-in page as a button and the one-time code to enter there) |
-| opencode | `opencode upgrade` | `npm install -g opencode-ai` | `opencode providers login` in a pseudo-terminal (interactive: provider and method are picked with typed text and the `up`/`down`/`enter` keys, then an API key or a browser sign-in) |
+| opencode | `npm install -g @opencode/cli@latest` | `npm install -g @opencode/cli` | `opencode auth login` in a pseudo-terminal (interactive: choose a provider and its authentication method, such as API key or OAuth) |
 
 Jobs run one-at-a-time globally (409 otherwise), each with a 30 min cap and a
 500-line output ring buffer; the active job can be cancelled from the app

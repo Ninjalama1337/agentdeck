@@ -103,11 +103,11 @@ describe('recipeFor', () => {
     expect(login.interactive).toBeUndefined();
   });
 
-  it('opencode installs the npm package that exists and signs in in a terminal', () => {
-    expect(recipeFor('opencode', 'update')).toMatchObject({ command: 'opencode', args: ['upgrade'] });
-    expect(recipeFor('opencode', 'install').args).toEqual(['install', '-g', 'opencode-ai']);
+  it('opencode installs v2 and signs in with its provider authentication flow', () => {
+    expect(recipeFor('opencode', 'update')).toMatchObject({ command: 'npm', args: ['install', '-g', '@opencode/cli@latest'] });
+    expect(recipeFor('opencode', 'install')).toMatchObject({ command: 'npm', args: ['install', '-g', '@opencode/cli'] });
     const login = recipeFor('opencode', 'login');
-    expect(login).toMatchObject({ command: 'opencode', args: ['providers', 'login'], interactive: true });
+    expect(login).toMatchObject({ command: 'opencode', args: ['auth', 'login'], interactive: true });
   });
 
   it('labels name the command that runs', () => {

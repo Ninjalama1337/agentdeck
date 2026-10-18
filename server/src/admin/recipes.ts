@@ -102,9 +102,9 @@ export function adminCapabilities(agentId: AgentId): AdminCapability[] {
       ];
     case 'opencode':
       return [
-        { kind: 'update', label: 'opencode upgrade' },
-        { kind: 'install', label: 'npm install -g opencode-ai' },
-        { kind: 'login', label: 'opencode providers login (pick provider and method)' },
+        { kind: 'update', label: 'npm install -g @opencode/cli@latest' },
+        { kind: 'install', label: 'npm install -g @opencode/cli' },
+        { kind: 'login', label: 'opencode auth login (provider and authentication method)' },
       ];
   }
 }
@@ -221,17 +221,22 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
       };
     case 'opencode':
       if (kind === 'update') {
-        return { kind, label: capability.label, command: 'opencode', args: ['upgrade'], cwd: home() };
+        return {
+          kind,
+          label: capability.label,
+          command: 'npm',
+          args: ['install', '-g', '@opencode/cli@latest'],
+          cwd: home(),
+        };
       }
       if (kind === 'login') {
-        // Asks for the provider and the login method in lists, then for an
-        // API key or a browser sign-in — it needs a terminal, typed text and
-        // arrow keys from the app.
+        // OpenCode v2 uses `auth login`: the provider-specific authentication
+        // method can be an API key, OAuth, or a provider command.
         return {
           kind,
           label: capability.label,
           command: 'opencode',
-          args: ['providers', 'login'],
+          args: ['auth', 'login'],
           cwd: home(),
           interactive: true,
         };
@@ -240,8 +245,7 @@ export function recipeFor(agentId: AgentId, kind: AdminJobKind): AdminRecipe {
         kind,
         label: capability.label,
         command: 'npm',
-        // The npm package is `opencode-ai`; `opencode` does not exist there.
-        args: ['install', '-g', 'opencode-ai'],
+        args: ['install', '-g', '@opencode/cli'],
         cwd: home(),
       };
   }
