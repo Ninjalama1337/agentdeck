@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   parseOpenCodeGoUsage,
+  readOpenCodeCredentialToken,
   readOpenCodeGoApiKey,
 } from '../src/agents/opencodeGo.js';
 
@@ -67,5 +69,41 @@ describe('readOpenCodeGoApiKey', () => {
 
   it('returns undefined without an auth store', () => {
     expect(readOpenCodeGoApiKey(path.join(os.tmpdir(), 'agentdeck-missing-auth.json'))).toBeUndefined();
+  });
+});
+
+describe('readOpenCodeCredentialToken', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function dbFile(rows: { id: string; value: unknown }[]): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-opencode-db-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'opencode.db');
+    const db = new DatabaseSync(file);
+    db.exec('create table credential (integration_id text, label text, value text, active integer)');
+    const insert = db.prepare('insert into credential (integration_id, label, value, active) values (?, ?, ?, 1)');
+    for (const row of rows) insert.run(row.id, row.id, JSON.stringify(row.value));
+    db.close();
+    return file;
+  }
+
+  it('reads the fresh OAuth access token the CLI keeps in the database', () => {
+    const file = dbFile([{ id: 'opencode', value: { type: 'oauth', access: 'st_live', expires: Date.now() + 60_000 } }]);
+    expect(readOpenCodeCredentialToken(file)).toBe('st_live');
+  });
+
+  it('skips an expired OAuth token and uses the opencode-go console key', () => {
+    const file = dbFile([
+      { id: 'opencode', value: { type: 'oauth', access: 'st_old', expires: Date.now() - 60_000 } },
+      { id: 'opencode-go', value: { type: 'key', key: 'oc_sk_x' } },
+    ]);
+    expect(readOpenCodeCredentialToken(file)).toBe('oc_sk_x');
+  });
+
+  it('returns undefined without a database', () => {
+    expect(readOpenCodeCredentialToken(path.join(os.tmpdir(), 'agentdeck-missing-opencode.db'))).toBeUndefined();
   });
 });

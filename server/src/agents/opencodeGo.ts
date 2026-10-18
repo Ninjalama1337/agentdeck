@@ -6,16 +6,21 @@
  * (local telemetry only), the official endpoint
  *
  *   GET https://opencode.ai/zen/go/v1/usage
- *   Authorization: Bearer <api key>
+ *   Authorization: Bearer <token>
  *
- * returns the account-wide used percentages. The key is the one `opencode auth`
- * stores in ~/.local/share/opencode/auth.json — the `opencode-go` entry, with
- * the plain `opencode` (Zen) entry as a fallback. A key without an active Go
- * plan is answered with 401, which we surface as "no subscription".
+ * returns the account-wide used percentages.
+ *
+ * The token comes from the credential OpenCode itself uses: newer versions keep
+ * it in `opencode.db` (`credential`) — an OAuth access token for `opencode`, or
+ * a console key for `opencode-go`. `auth.json` is the fallback, since it can
+ * still hold an old key that the console already replaced. Either way a token
+ * for an account without an active Go plan is answered with 401, which we
+ * surface as "no subscription".
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { UsageWindow } from '@agentdeck/shared';
 
 export const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
@@ -52,6 +57,63 @@ export function readOpenCodeGoApiKey(authFile = opencodeAuthFile()): string | un
     }
   } catch {
     /* no auth store on this machine */
+  }
+  return undefined;
+}
+
+/** Path of OpenCode's local database (XDG-aware). */
+export function opencodeDbFile(): string {
+  const dataHome = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local/share');
+  return path.join(dataHome, 'opencode', 'opencode.db');
+}
+
+/** The value stored in `credential.value` for the Go/Zen integrations. */
+interface StoredCredential {
+  type?: string;
+  key?: string;
+  access?: string;
+  expires?: number;
+}
+
+/**
+ * The token OpenCode itself uses for the Go/Zen account, read from its local
+ * database. `opencode` keeps a rotating OAuth access token, `opencode-go` a
+ * console key; `auth.json` lags behind after a migration, so the DB wins.
+ * Undefined when there is no database, no credential, or a locked file.
+ */
+export function readOpenCodeCredentialToken(dbFile = opencodeDbFile()): string | undefined {
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const rows = db
+      .prepare(
+        "select integration_id as id, value from credential where integration_id in ('opencode','opencode-go') and (active is null or active != 0)",
+      )
+      .all() as { id: string; value: string }[];
+    const byId = new Map<string, StoredCredential>();
+    for (const row of rows) {
+      try {
+        byId.set(row.id, JSON.parse(row.value) as StoredCredential);
+      } catch {
+        /* a value we cannot read is skipped */
+      }
+    }
+    const oauth = byId.get('opencode');
+    if (oauth?.type === 'oauth' && typeof oauth.access === 'string' && oauth.access) {
+      const expires = typeof oauth.expires === 'number' ? oauth.expires : undefined;
+      if (expires === undefined || expires > Date.now()) return oauth.access;
+    }
+    const go = byId.get('opencode-go');
+    if (typeof go?.key === 'string' && go.key) return go.key;
+    if (typeof oauth?.key === 'string' && oauth.key) return oauth.key;
+  } catch {
+    /* no database / older OpenCode / locked: fall back to auth.json */
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* already closed */
+    }
   }
   return undefined;
 }
@@ -124,9 +186,9 @@ export async function fetchOpenCodeGoUsage(
   }
 }
 
-/** Reads the key from disk and fetches the Go quota, or reports why it could not. */
+/** Reads the token from the live OpenCode DB, then the auth store, and fetches the Go quota. */
 export async function collectOpenCodeGoUsage(authFile = opencodeAuthFile()): Promise<OpenCodeGoUsage> {
-  const key = readOpenCodeGoApiKey(authFile);
+  const key = readOpenCodeCredentialToken() ?? readOpenCodeGoApiKey(authFile);
   if (!key) return { available: false, reason: 'No OpenCode API key found (run `opencode auth`)' };
   return fetchOpenCodeGoUsage(key);
 }
