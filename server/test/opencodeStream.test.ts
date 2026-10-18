@@ -75,10 +75,62 @@ describe('createOpenCodeStreamParser', () => {
 
     expect(events).toEqual([
       { type: 'tool-use', tool: 'read', summary: '/tmp/demo/hello.txt' },
-      { type: 'tool-result', tool: 'read', ok: true, summary: 'tmp/demo/hello.txt' },
+      { type: 'tool-result', tool: 'read', ok: true, summary: '/tmp/demo/hello.txt' },
       { type: 'usage', inputTokens: 9297, outputTokens: 45, cacheReadTokens: 1792, cacheWriteTokens: 0, costUsd: 1 },
       { type: 'text-delta', text: 'hello-from-file' },
       { type: 'usage', inputTokens: 9475, outputTokens: 49, cacheReadTokens: 12800, cacheWriteTokens: 0, costUsd: 3 },
+    ]);
+  });
+
+  it('keeps the command as summary and adds the shell output as result', () => {
+    const parser = createOpenCodeStreamParser();
+    const events: AgentEvent[] = [];
+    parser.parse(
+      JSON.stringify({
+        type: 'tool_use',
+        sessionID: 'ses_x',
+        part: {
+          id: 'call_shell',
+          type: 'tool',
+          tool: 'shell',
+          state: { status: 'completed', input: { command: 'ls -la' }, output: 'total 0\ndrwxr-xr-x\n', title: 'shell' },
+        },
+      }),
+      (ev) => events.push(ev),
+    );
+
+    expect(events).toEqual([
+      { type: 'tool-use', tool: 'shell', summary: 'ls -la' },
+      { type: 'tool-result', tool: 'shell', ok: true, summary: 'ls -la', result: 'total 0\ndrwxr-xr-x' },
+    ]);
+  });
+
+  it('does not let a bare title overwrite the command summary', () => {
+    const parser = createOpenCodeStreamParser();
+    const events: AgentEvent[] = [];
+    // A running event first carries the input; the completed one repeats the
+    // generic title. The result must not replace the command with "shell".
+    parser.parse(
+      JSON.stringify({
+        type: 'tool_use',
+        sessionID: 'ses_x',
+        part: { id: 'call_1', type: 'tool', tool: 'shell', state: { status: 'running', input: { command: 'git status' }, title: 'shell' } },
+      }),
+      (ev) => events.push(ev),
+    );
+    parser.parse(
+      JSON.stringify({
+        type: 'tool_use',
+        sessionID: 'ses_x',
+        part: { id: 'call_1', type: 'tool', tool: 'shell', state: { status: 'completed', title: 'shell' } },
+      }),
+      (ev) => events.push(ev),
+    );
+
+    expect(events).toEqual([
+      { type: 'tool-use', tool: 'shell', summary: 'git status' },
+      // No summary here: the manager keeps the command from the tool-use event.
+      { type: 'tool-result', tool: 'shell', ok: true },
     ]);
   });
 

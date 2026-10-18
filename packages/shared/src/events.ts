@@ -31,7 +31,7 @@ export type AgentEvent =
   | { type: 'thinking-delta'; text: string }
   | { type: 'message'; message: ChatMessage }
   | { type: 'tool-use'; tool: string; summary?: string }
-  | { type: 'tool-result'; tool: string; ok: boolean; summary?: string }
+  | { type: 'tool-result'; tool: string; ok: boolean; summary?: string; result?: string }
   | {
       type: 'usage';
       inputTokens?: number;

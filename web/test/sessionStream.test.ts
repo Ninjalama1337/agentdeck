@@ -50,6 +50,19 @@ describe('reduceDraft', () => {
     ]);
   });
 
+  it('keeps a tool result preview next to the summary', () => {
+    const draft = play([
+      { type: 'tool-use', tool: 'shell', summary: 'ls -la' },
+      { type: 'tool-result', tool: 'shell', ok: true, summary: 'ls -la', result: 'total 0' },
+    ]);
+    expect(draft?.tools[0]).toMatchObject({
+      tool: 'shell',
+      state: 'done',
+      summary: 'ls -la',
+      result: 'total 0',
+    });
+  });
+
   it('does not start a draft from events that only complete one', () => {
     expect(reduceDraft(undefined, { type: 'tool-result', tool: 'Bash', ok: true })).toBeUndefined();
     expect(reduceDraft(undefined, { type: 'usage', inputTokens: 1 })).toBeUndefined();

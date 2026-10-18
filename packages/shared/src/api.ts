@@ -34,7 +34,10 @@ export interface MessageUsage {
 export interface ToolRecord {
   tool: string;
   ok: boolean;
+  /** What the tool was called with (command, file path, …). */
   summary?: string;
+  /** A short preview of what the tool returned. */
+  result?: string;
 }
 
 export interface ChatMessage {
@@ -231,7 +234,7 @@ export interface SessionDraft {
   seq: number;
   text: string;
   thinking?: string;
-  tools: { tool: string; state: 'running' | 'done' | 'error'; summary?: string }[];
+  tools: { tool: string; state: 'running' | 'done' | 'error'; summary?: string; result?: string }[];
   usage?: MessageUsage;
   /** A note above the live answer (e.g. the run has gone quiet); missing on older servers. */
   notice?: string;

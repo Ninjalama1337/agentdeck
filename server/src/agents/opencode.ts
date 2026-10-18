@@ -28,6 +28,9 @@ interface OpenCodePart {
   state?: {
     status?: string;
     input?: unknown;
+    output?: unknown;
+    content?: unknown;
+    metadata?: { content?: unknown };
     title?: string;
     error?: string;
   };
@@ -138,6 +141,41 @@ function jsonData(stdout: string | undefined): unknown {
   }
 }
 
+/** Pulls the text out of OpenCode's `output` / `content` shapes. */
+function toolOutputText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+  const text = value
+    .map((item) =>
+      item && typeof item === 'object' && typeof (item as { text?: unknown }).text === 'string'
+        ? (item as { text: string }).text
+        : undefined,
+    )
+    .filter((part): part is string => part !== undefined)
+    .join('\n');
+  return text || undefined;
+}
+
+/**
+ * A short preview of what a tool returned. Shell output can be huge, so it is
+ * capped; the chat shows it under the command that produced it.
+ */
+export function summarizeToolOutput(state: {
+  output?: unknown;
+  content?: unknown;
+  metadata?: { content?: unknown };
+  error?: unknown;
+}): string | undefined {
+  const raw =
+    toolOutputText(state.output) ??
+    toolOutputText(state.content) ??
+    toolOutputText(state.metadata?.content) ??
+    toolOutputText(state.error);
+  const text = raw?.trim();
+  if (!text) return undefined;
+  return text.length > 800 ? `${text.slice(0, 800)}…` : text;
+}
+
 /**
  * Parses `opencode run --format json` (one JSON event per line). Text and
  * reasoning parts stream; a repeated part id carries the full text again, so
@@ -192,15 +230,26 @@ export function createOpenCodeStreamParser() {
           const callID = part.callID ?? part.id ?? '';
           const tool = part.tool ?? 'tool';
           const state = part.state ?? {};
-          const summary = summarizeInput(state.input) ?? state.title;
+          // `state.title` is usually just the tool name ("shell"); the input is
+          // what actually says what the call did, so it always wins.
+          const inputSummary = summarizeInput(state.input);
+          const summary = inputSummary ?? state.title;
           if (callID && !usedTools.has(callID)) {
             usedTools.add(callID);
             emit({ type: 'tool-use', tool, ...(summary ? { summary } : {}) });
           }
           if ((state.status === 'completed' || state.status === 'error') && callID && !doneTools.has(callID)) {
             doneTools.add(callID);
-            const resultSummary = state.title ?? summary;
-            emit({ type: 'tool-result', tool, ok: state.status !== 'error', ...(resultSummary ? { summary: resultSummary } : {}) });
+            const result = summarizeToolOutput(state);
+            emit({
+              type: 'tool-result',
+              tool,
+              ok: state.status !== 'error',
+              // Only a summary from the input; a bare title must not overwrite
+              // the command/path the tool-use event already reported.
+              ...(inputSummary ? { summary: inputSummary } : {}),
+              ...(result ? { result } : {}),
+            });
           }
           break;
         }

@@ -166,6 +166,7 @@ export class AgentManager {
         tool: t.tool,
         state: run.openTools.has(t) ? ('running' as const) : t.ok ? ('done' as const) : ('error' as const),
         ...(t.summary ? { summary: t.summary } : {}),
+        ...(t.result ? { result: t.result } : {}),
       })),
       ...(run.usage ? { usage: run.usage } : {}),
       ...(run.notice ? { notice: run.notice } : {}),
@@ -617,9 +618,15 @@ export class AgentManager {
         if (open) {
           open.ok = event.ok;
           if (event.summary) open.summary = event.summary;
+          if (event.result) open.result = event.result;
           run.openTools.delete(open);
         } else {
-          run.tools.push({ tool: event.tool, ok: event.ok, ...(event.summary ? { summary: event.summary } : {}) });
+          run.tools.push({
+            tool: event.tool,
+            ok: event.ok,
+            ...(event.summary ? { summary: event.summary } : {}),
+            ...(event.result ? { result: event.result } : {}),
+          });
         }
         break;
       }

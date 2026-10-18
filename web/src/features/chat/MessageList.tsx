@@ -514,7 +514,10 @@ function ToolGroup({ tools }: { tools: ToolRecord[] }) {
       {open && (
         <div className="mt-1 flex flex-col gap-1">
           {tools.map((t, i) => (
-            <ToolRow key={i} card={{ id: i, tool: t.tool, state: t.ok ? 'done' : 'error', summary: t.summary }} />
+            <ToolRow
+              key={i}
+              card={{ id: i, tool: t.tool, state: t.ok ? 'done' : 'error', summary: t.summary, result: t.result }}
+            />
           ))}
         </div>
       )}
@@ -577,10 +580,19 @@ function ToolRow({ card }: { card: ToolCard }) {
         {card.summary && <span className="hidden min-w-0 flex-1 truncate text-[11.5px] text-dim min-[380px]:block">{card.summary}</span>}
         <ChevronDown size={13} className={clsx('shrink-0 text-dim transition-transform', open && 'rotate-180')} />
       </button>
-      {open && card.summary && (
-        <p className="whitespace-pre-wrap break-words border-t border-line px-3 py-2 text-[12px] leading-relaxed text-dim">
-          {card.summary}
-        </p>
+      {open && (card.summary || card.result) && (
+        <div className="border-t border-line px-3 py-2">
+          {card.summary && (
+            <p className="whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-ink/80">
+              {card.summary}
+            </p>
+          )}
+          {card.result && (
+            <pre className="no-scrollbar mt-1.5 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/25 p-2 font-mono text-[11px] leading-relaxed text-dim">
+              {card.result}
+            </pre>
+          )}
+        </div>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ export interface ToolCard {
   tool: string;
   state: 'running' | 'done' | 'error';
   summary?: string;
+  result?: string;
 }
 
 export interface StreamDraft {
@@ -74,8 +75,15 @@ export function reduceDraft(draft: StreamDraft | undefined, event: AgentEvent): 
       }
       const tools =
         open >= 0
-          ? draft.tools.map((t, i) => (i === open ? { ...t, state, summary: event.summary ?? t.summary } : t))
-          : [...draft.tools, { id: ++toolSeq, tool: event.tool, state, summary: event.summary }];
+          ? draft.tools.map((t, i) =>
+              i === open
+                ? { ...t, state, summary: event.summary ?? t.summary, result: event.result ?? t.result }
+                : t,
+            )
+          : [
+              ...draft.tools,
+              { id: ++toolSeq, tool: event.tool, state, summary: event.summary, result: event.result },
+            ];
       return { ...draft, tools };
     }
     case 'usage': {
