@@ -384,6 +384,8 @@ export interface AppStore {
   deleteProject(id: string): Promise<void>;
   createSession(req: CreateSessionRequest): Promise<Session>;
   openSession(id: string): Promise<void>;
+  /** Loads the sessions of every project at once (the Agents board). */
+  fetchAllSessions(): Promise<void>;
   closeSession(): void;
   deleteSession(id: string): Promise<void>;
   sendTurn(sessionId: string, text: string, attachments: Attachment[], model?: string, thinkingEffort?: string): Promise<void>;
@@ -1282,6 +1284,17 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       set((st) => ({
         sessionsByProject: { ...st.sessionsByProject, [projectId]: sessions },
       }));
+    },
+
+    async fetchAllSessions() {
+      // The board shows every project at once; /api/sessions without a project
+      // id returns them all. Each lands in its project's list.
+      const all = await api.sessions();
+      set((st) => {
+        let sessionsByProject = st.sessionsByProject;
+        for (const session of all) sessionsByProject = upsertSessionMap(sessionsByProject, session);
+        return { sessionsByProject };
+      });
     },
 
     async createProject(req) {

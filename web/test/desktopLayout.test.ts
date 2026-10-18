@@ -50,13 +50,13 @@ const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({
 });
 
 describe('keyboard shortcuts', () => {
-  it('Ctrl/Cmd+1…5 jump to the tabs in sidebar order', () => {
-    expect(TAB_ROUTES.map((r) => r.name)).toEqual(['home', 'chat', 'code', 'git', 'files']);
+  it('Ctrl/Cmd+1…6 jump to the tabs in sidebar order', () => {
+    expect(TAB_ROUTES.map((r) => r.name)).toEqual(['home', 'chat', 'agents', 'code', 'git', 'files']);
     TAB_ROUTES.forEach((route, i) => {
       expect(matchShortcut(key(String(i + 1), { ctrlKey: true }))).toEqual({ type: 'route', route });
       expect(matchShortcut(key(String(i + 1), { metaKey: true }))).toEqual({ type: 'route', route });
     });
-    expect(matchShortcut(key('6', { ctrlKey: true }))).toBeNull();
+    expect(matchShortcut(key('7', { ctrlKey: true }))).toBeNull();
     expect(matchShortcut(key('0', { ctrlKey: true }))).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe('keyboard shortcuts', () => {
     expect(matchShortcut(key('K', { metaKey: true }))).toEqual({ type: 'project-switcher' });
     expect(matchShortcut(key('k', { ctrlKey: true }), { inTerminal: true })).toBeNull();
     // The tab shortcuts still work inside a terminal.
-    expect(matchShortcut(key('3', { ctrlKey: true }), { inTerminal: true })).toEqual({ type: 'route', route: { name: 'code' } });
+    expect(matchShortcut(key('4', { ctrlKey: true }), { inTerminal: true })).toEqual({ type: 'route', route: { name: 'code' } });
   });
 
   it('labels the shortcuts per platform', () => {

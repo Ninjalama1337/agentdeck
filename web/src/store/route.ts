@@ -6,6 +6,7 @@
 export type Route =
   | { name: 'home' }
   | { name: 'chat' }
+  | { name: 'agents' }
   | { name: 'code' }
   | { name: 'files' }
   | { name: 'git' }
@@ -15,6 +16,7 @@ export type Route =
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#\/?/, '').split('?')[0] ?? '';
   if (h === 'chat') return { name: 'chat' };
+  if (h === 'agents') return { name: 'agents' };
   if (h === 'code') return { name: 'code' };
   if (h === 'files') return { name: 'files' };
   if (h === 'git' || h === 'github') return { name: 'git' };
@@ -43,7 +45,7 @@ export function routeToHash(route: Route): string {
   }
 }
 
-const SCREEN_SLUGS = ['chat', 'code', 'files', 'git', 'github', 'settings'];
+const SCREEN_SLUGS = ['chat', 'agents', 'code', 'files', 'git', 'github', 'settings'];
 
 /** True for a hash that names a screen other than home — parseHash maps anything unknown to home, which must not pass as "remembered". */
 export function isScreenHash(hash: string | null | undefined): hash is string {

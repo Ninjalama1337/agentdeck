@@ -1,14 +1,15 @@
 /**
- * Desktop keyboard shortcuts: Ctrl/Cmd+1…5 jump to the tabs, Ctrl/Cmd+, opens
+ * Desktop keyboard shortcuts: Ctrl/Cmd+1…6 jump to the tabs, Ctrl/Cmd+, opens
  * Settings, Ctrl/Cmd+K the project switcher, Ctrl/Cmd+P quick open. Matching
  * is pure; App.tsx wires it.
  */
 import type { Route } from '../store/route';
 
-/** Tab order shared by the sidebar, the tab bar and Ctrl/Cmd+1…5. */
+/** Tab order shared by the sidebar, the tab bar and Ctrl/Cmd+1…6. */
 export const TAB_ROUTES: Route[] = [
   { name: 'home' },
   { name: 'chat' },
+  { name: 'agents' },
   { name: 'code' },
   { name: 'git' },
   { name: 'files' },

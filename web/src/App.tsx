@@ -16,6 +16,7 @@ import { PairScreen } from './features/pairing/PairScreen';
 import { PairApproval } from './features/pairing/PairApproval';
 import { HomeScreen } from './features/home/HomeScreen';
 import { ChatScreen } from './features/chat/ChatScreen';
+import { AgentsBoard } from './features/board/AgentsBoard';
 import { TeamScreen } from './features/chat/TeamScreen';
 import { getApiBase } from './api/client';
 import { installExternalLinkHandler } from './util/openExternal';
@@ -394,6 +395,8 @@ function Screen({ route }: { route: Route }) {
       return <HomeScreen />;
     case 'chat':
       return <ChatScreen />;
+    case 'agents':
+      return <AgentsBoard />;
     case 'code':
       return <CodeScreen />;
     case 'files':

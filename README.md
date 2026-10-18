@@ -91,6 +91,12 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   mit Allow/Deny direkt auf der Benachrichtigung. Eine Frage, die der Agent
   nicht mehr annehmen kann, wird aufgelöst (und offene Fragen beim Ende eines
   Runs) — kein Chat wartet auf eine Antwort, die nichts mehr erreicht.
+- **Agents-Board & Verlauf** — ein Blick auf alles, was läuft: die Chats
+  *aller* Projekte, sortiert nach **Needs you** / **Working** / **Done** /
+  **Idle** (nach Orcas Dashboard). Wartende Rechte-Abfragen stehen ganz oben und
+  erscheinen als Zähler am Agents-Tab; die Suche darüber ist zugleich der
+  durchsuchbare Verlauf (Sessions, Agents, Projekte) — ein Tipp springt in den
+  Chat.
 - **Aktivität & Kosten** — der Server hält jeden Agent-Lauf in einer
   SQLite-Datenbank fest (Chat, Routinen, Team-Runs, Terminal-Turns): Agent,
   Modell, Projekt, Dauer, Tokens, Tool-Aufrufe und Kosten. Die App zeigt daraus
