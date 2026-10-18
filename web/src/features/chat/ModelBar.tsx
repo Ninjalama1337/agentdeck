@@ -39,10 +39,11 @@ export function ModelBar({
   onOpenUsage: () => void;
 }) {
   const accent = agent?.accentColor ?? '#7C5CFF';
-  const modelLabel =
-    session.model !== undefined
-      ? (agent?.models.find((m) => m.id === session.model)?.label ?? session.model)
-      : 'Default model';
+  const isDefault = session.model === undefined || session.model === 'inherit';
+  const defaultModel = agent?.defaultModel;
+  const modelLabel = isDefault
+    ? (defaultModel?.label ?? 'Default model')
+    : (agent?.models.find((m) => m.id === session.model)?.label ?? session.model);
   const effort = session.thinkingEffort ?? 'default';
   const showEffort = (agent?.efforts?.length ?? 0) > 0;
   const effortActive = showEffort && effort !== 'default';
@@ -57,7 +58,8 @@ export function ModelBar({
       <button
         type="button"
         onClick={onOpen}
-        aria-label={`Model ${modelLabel}, thinking ${effortLabel(effort)} — change`}
+        aria-label={`Model ${modelLabel}${isDefault ? ' (default)' : ''}, thinking ${effortLabel(effort)} — change`}
+        title={isDefault && defaultModel ? `Default: ${defaultModel.id}` : undefined}
         className="press tap flex min-w-0 flex-1 items-center gap-2 px-3.5 py-[7px] text-left active:bg-white/[0.05]"
       >
         <span

@@ -2,7 +2,7 @@
  * Registry of agent adapters + AgentService: detection (parallel, 5s capped,
  * never spawns a GUI) and AgentInfo assembly.
  */
-import { AGENT_ACCENTS, AGENT_LABELS, type AgentId, type AgentInfo } from '@agentdeck/shared';
+import { AGENT_ACCENTS, AGENT_LABELS, type AgentId, type AgentInfo, type ModelCatalog } from '@agentdeck/shared';
 import type { Config, ResolvedAgentConfig } from '../config.js';
 import type { Logger } from '../logging.js';
 import { withTimeoutFallback } from '../util/async.js';
@@ -45,6 +45,7 @@ export class AgentService {
   private buildInfo(adapter: AgentAdapter, cfg: ResolvedAgentConfig, detect: DetectResult): AgentInfo {
     const caps = adapter.capabilities();
     const admin = adminCapabilities(adapter.id);
+    const defaultModel = adapter.defaultModel?.();
     if (cfg.mode === 'off') {
       return {
         id: adapter.id,
@@ -55,6 +56,7 @@ export class AgentService {
         reason: 'Disabled in config (mode: off)',
         capabilities: { ...caps, headless: false, streaming: false },
         models: MODEL_PRESETS[adapter.id],
+        ...(defaultModel ? { defaultModel } : {}),
         ...(adapter.efforts ? { efforts: [...adapter.efforts] } : {}),
         command: cfg.command,
         admin,
@@ -68,6 +70,7 @@ export class AgentService {
       available: detect.available,
       capabilities: caps,
       models: adapter.defaultModels(),
+      ...(defaultModel ? { defaultModel } : {}),
       ...(adapter.efforts ? { efforts: [...adapter.efforts] } : {}),
       command: cfg.command,
       admin,
@@ -91,6 +94,15 @@ export class AgentService {
     } catch (err) {
       this.logger.warn({ agent: adapter.id, err }, 'agent detection failed');
       detect = { available: false, reason: 'Detection failed' };
+    }
+    // A live catalog (OpenCode) also supplies the model a run would use.
+    // Discovery failure must never make the agent look unavailable.
+    if (detect.available && adapter.listModels) {
+      try {
+        await adapter.listModels();
+      } catch (err) {
+        this.logger.warn({ agent: adapter.id, err }, 'model discovery failed');
+      }
     }
     const info = this.buildInfo(adapter, cfg, detect);
     this.infos.set(adapter.id, info);
@@ -127,6 +139,28 @@ export class AgentService {
     const adapter = this.adapters.find((a) => a.id === id);
     if (!adapter) return undefined;
     return this.detectAdapter(adapter);
+  }
+
+  /**
+   * Models for the picker. Agents with a live catalog (OpenCode) are asked on
+   * demand for `cwd`; everyone else keeps the static presets.
+   */
+  async modelsFor(id: AgentId, cwd?: string): Promise<ModelCatalog> {
+    const fallback: ModelCatalog = { models: MODEL_PRESETS[id] };
+    const adapter = this.adapters.find((a) => a.id === id);
+    if (!adapter?.listModels) return fallback;
+    try {
+      const catalog = await withTimeoutFallback(
+        adapter.listModels(cwd),
+        DETECT_TIMEOUT_MS * 2,
+        null,
+        `${id} model discovery`,
+      );
+      return catalog ?? fallback;
+    } catch (err) {
+      this.logger.warn({ agent: id, err }, 'model discovery failed');
+      return fallback;
+    }
   }
 
   /** Visible agent list (mode 'off' agents are hidden per contract). */

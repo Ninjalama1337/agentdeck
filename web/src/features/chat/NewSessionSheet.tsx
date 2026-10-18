@@ -53,7 +53,8 @@ export function NewSessionSheet({
   useEffect(() => {
     if (!agent) return;
     // persisted preference wins, else first preset
-    setModel(modelPrefs[agent.id] ?? agent.models[0]?.id);
+    const pref = modelPrefs[agent.id];
+    setModel(pref && pref !== 'custom' ? pref : agent.models[0]?.id);
     setEffort('default');
     setAccountId(undefined);
   }, [agent, modelPrefs]);
@@ -116,20 +117,27 @@ export function NewSessionSheet({
             <div>
               <p className="mb-1.5 text-[12px] font-medium uppercase tracking-wider text-dim">Model</p>
               <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
-                {agent.models.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setModel(m.id)}
-                    className={clsx(
-                      'press tap shrink-0 rounded-full border px-3.5 text-[13px] font-medium',
-                      model === m.id ? 'border-accent/45 bg-accent/15 text-ink' : 'border-line bg-white/[0.04] text-dim',
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
+                {agent.models
+                  .filter((m) => m.id !== 'custom')
+                  .map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setModel(m.id)}
+                      className={clsx(
+                        'press tap shrink-0 rounded-full border px-3.5 text-[13px] font-medium',
+                        model === m.id ? 'border-accent/45 bg-accent/15 text-ink' : 'border-line bg-white/[0.04] text-dim',
+                      )}
+                    >
+                      {m.id === 'inherit' && agent.defaultModel
+                        ? `Default · ${agent.defaultModel.label}`
+                        : m.label}
+                    </button>
+                  ))}
               </div>
+              <p className="mt-1.5 px-1 text-[11.5px] text-dim">
+                More models are one tap away in the chat bar after the session starts.
+              </p>
             </div>
           )}
 

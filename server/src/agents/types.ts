@@ -8,6 +8,7 @@ import type {
   AgentEvent,
   AgentId,
   AgentKind,
+  ModelCatalog,
   ModelPreset,
   PermissionDecision,
   PermissionMode,
@@ -102,6 +103,13 @@ export interface AgentAdapter {
   detect(): Promise<DetectResult>;
   capabilities(): AgentCapabilities;
   defaultModels(): ModelPreset[];
+  /**
+   * Live model catalog from the CLI itself (OpenCode knows its providers and
+   * configured default). Omitted by adapters whose models are a fixed list.
+   */
+  listModels?(cwd?: string): Promise<ModelCatalog>;
+  /** Default model of the most recently loaded catalog (for AgentInfo). */
+  defaultModel?(): ModelPreset | undefined;
   buildRun(ctx: RunContext): RunPlan;
   /**
    * Extracts an external conversation id (for resume) from a raw stdout line,

@@ -501,8 +501,9 @@ export const api = {
     return request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/ide`);
   },
 
-  models(agentId: string): Promise<{ models: ModelPreset[] }> {
-    return request('GET', `/api/models/${encodeURIComponent(agentId)}`);
+  models(agentId: string, projectPath?: string): Promise<{ models: ModelPreset[]; defaultModel?: ModelPreset }> {
+    const query = projectPath ? `?path=${encodeURIComponent(projectPath)}` : '';
+    return request('GET', `/api/models/${encodeURIComponent(agentId)}${query}`);
   },
 
   gitStatus(projectId: string): Promise<ProjectGitInfo> {

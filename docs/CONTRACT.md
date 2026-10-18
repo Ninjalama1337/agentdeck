@@ -239,7 +239,7 @@ again. `AgentInfo.admin` lists the per-agent actions.
 | POST | `/api/sessions/:id/interrupt` | `204` |
 | POST | `/api/sessions/:id/permissions/:requestId` | body `{decision: allow\|always\|deny, message?, answers?}` → `204`; `409 PERMISSION_GONE` when the question is no longer open |
 | POST | `/api/sessions/:id/ide` | opens/focuses the project in the agent IDE → `204` |
-| GET | `/api/models/:agentId` | `{models: ModelPreset[]}` |
+| GET | `/api/models/:agentId` `?path=` | `{models: ModelPreset[], defaultModel?: ModelPreset}` — OpenCode lists its live catalog (`opencode api get /api/model`) for `path` (the session's project; non-absolute or unknown paths fall back) and reports the model a run uses without an explicit pick; other agents return their static presets |
 | GET | `/api/projects/:id/git/status` | `ProjectGitInfo` |
 | POST | `/api/projects/:id/git/commit` | `GitCommitRequest → ProjectGitInfo` |
 | POST | `/api/projects/:id/git/push` | `→ {ok, message}` |

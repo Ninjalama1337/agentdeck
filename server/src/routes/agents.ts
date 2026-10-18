@@ -1,7 +1,7 @@
+import { isAbsolute } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AGENT_IDS } from '../config.js';
-import { MODEL_PRESETS } from '../agents/models.js';
 import { switchZcodePlan } from '../agents/zcode.js';
 import { httpError, notFound } from '../http/errors.js';
 import type { AppDeps } from './deps.js';
@@ -22,7 +22,15 @@ export async function agentRoutes(fastify: FastifyInstance, deps: AppDeps): Prom
     if (deps.config.agents[agentId].mode === 'off') {
       throw notFound('Agent is disabled');
     }
-    reply.send({ models: MODEL_PRESETS[agentId] });
+    // OpenCode's catalog and default model are location-scoped. The app sends
+    // the session's project so project config is honoured; other agents ignore it.
+    const query = z.object({ path: z.string().min(1).optional() }).parse(req.query);
+    const cwd = query.path && isAbsolute(query.path) ? query.path : undefined;
+    const catalog = await deps.agents.modelsFor(agentId, cwd);
+    reply.send({
+      models: catalog.models,
+      ...(catalog.defaultModel ? { defaultModel: catalog.defaultModel } : {}),
+    });
   });
 
   fastify.post('/agents/:agentId/plan', async (req, reply) => {

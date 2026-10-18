@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Check, Sparkles, Wand2, Zap } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Search, Sparkles, Wand2, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, ModelPreset, Session } from '@agentdeck/shared';
 import { api } from '../../api/client';
+import { Spinner } from '../../components/ui/Spinner';
 import { useAppStore } from '../../store/appStore';
 import { effortLabel } from './ModelBar';
+import { filterModels, groupModels, isDefaultModelSelection, selectableModels } from './modelPicker';
+
+/** Rendering hundreds of OpenCode models at once makes the sheet sluggish; search narrows them. */
+const MAX_VISIBLE_MODELS = 150;
 
 /** Pick a model + thinking effort for the current session. Applies on next turn. */
 export function ModelSheet({
@@ -23,27 +28,57 @@ export function ModelSheet({
   const usage = useAppStore((s) => s.usage);
   const refreshUsage = useAppStore((s) => s.refreshUsage);
   const toast = useAppStore((s) => s.toast);
+  const projects = useAppStore((s) => s.projects);
   const [presets, setPresets] = useState<ModelPreset[]>(agent?.models ?? []);
+  const [defaultModel, setDefaultModel] = useState<ModelPreset | undefined>(agent?.defaultModel);
   const [custom, setCustom] = useState('');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
   const [switchingPlan, setSwitchingPlan] = useState<string | null>(null);
 
+  const projectPath = projects.find((p) => p.id === session.projectId)?.path;
+
   useEffect(() => {
+    if (!open) {
+      setQuery('');
+      return;
+    }
     setPresets(agent?.models ?? []);
-    if (!open || !agent) return;
-    // refresh from /api/models/:agentId; fall back to AgentInfo.models
+    setDefaultModel(agent?.defaultModel);
+    if (!agent) return;
+    let alive = true;
+    setLoading(true);
+    // A live catalog (OpenCode) also resolves the model a run would use.
     api
-      .models(agent.id)
-      .then((res) => setPresets(res.models))
+      .models(agent.id, projectPath)
+      .then((res) => {
+        if (!alive) return;
+        setPresets(res.models);
+        setDefaultModel(res.defaultModel ?? agent.defaultModel);
+      })
       .catch(() => {
         /* keep AgentInfo.models */
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
       });
-  }, [open, agent]);
+    return () => {
+      alive = false;
+    };
+  }, [open, agent, projectPath]);
 
   const current = session.model;
   const locked = session.status === 'running' || session.status === 'queued';
   const efforts = agent?.efforts ?? [];
   const effort = session.thinkingEffort ?? 'default';
   const zcodeUsage = agent?.id === 'zcode' ? usage?.find((u) => u.agentId === 'zcode') : undefined;
+  const isDefault = isDefaultModelSelection(current);
+  const defaultPreset = defaultModel ?? agent?.defaultModel;
+
+  const selectable = useMemo(() => selectableModels(presets), [presets]);
+  const filtered = useMemo(() => filterModels(selectable, query), [selectable, query]);
+  const shown = filtered.slice(0, MAX_VISIBLE_MODELS);
+  const groups = groupModels(shown, defaultPreset?.provider);
 
   const pick = (model: string | undefined) => {
     if (locked) return;
@@ -109,18 +144,70 @@ export function ModelSheet({
       )}
 
       <div className="flex flex-col gap-1.5">
-        <ModelRow label="Agent default" description="Adapter's built-in model" selected={current === undefined} onClick={() => pick(undefined)} />
-        {presets.map((preset) => (
-          <ModelRow
-            key={preset.id}
-            label={preset.label}
-            description={preset.description ?? preset.id}
-            mono={preset.id}
-            selected={current === preset.id}
-            onClick={() => pick(preset.id)}
+        <ModelRow
+          label={`Agent default${defaultPreset ? `: ${defaultPreset.label}` : ''}`}
+          description={defaultPreset?.id ?? "The agent's configured model"}
+          mono={defaultPreset !== undefined}
+          selected={isDefault}
+          onClick={() => pick(undefined)}
+        />
+      </div>
+
+      {selectable.length > 8 && (
+        <div className="relative mt-2">
+          <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-dim" aria-hidden />
+          <input
+            className="field w-full pl-9 text-[13.5px]"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Search ${selectable.length} models…`}
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Search models"
           />
+        </div>
+      )}
+
+      {loading && (
+        <p className="mt-2 flex items-center gap-2 px-1 text-[12px] text-dim">
+          <Spinner size={14} /> Loading models…
+        </p>
+      )}
+
+      <div className="mt-1 flex flex-col gap-1.5">
+        {groups.map((group) => (
+          <section key={group.provider || 'models'}>
+            {group.provider && (
+              <div className="mb-1 mt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-dim">
+                {group.provider}
+              </div>
+            )}
+            <div className="flex flex-col gap-1.5">
+              {group.models.map((preset) => (
+                <ModelRow
+                  key={preset.id}
+                  label={preset.label}
+                  description={preset.description ?? preset.id}
+                  mono
+                  selected={current === preset.id}
+                  onClick={() => pick(preset.id)}
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
+
+      {filtered.length === 0 && !loading && (
+        <p className="mt-3 px-1 text-[12.5px] text-dim">
+          {query.trim() ? `No model matches “${query.trim()}”.` : 'No models to choose from.'}
+        </p>
+      )}
+      {filtered.length > shown.length && (
+        <p className="mt-2 px-1 text-[11.5px] text-dim">
+          Showing {shown.length} of {filtered.length} — type above to narrow the list.
+        </p>
+      )}
 
       <div className="mt-3 flex gap-2">
         <input
@@ -197,7 +284,7 @@ function ModelRow({
 }: {
   label: string;
   description?: string;
-  mono?: string;
+  mono?: boolean;
   selected: boolean;
   onClick: () => void;
 }) {

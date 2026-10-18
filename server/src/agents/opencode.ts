@@ -1,4 +1,10 @@
-import type { AgentCapabilities, AgentEvent, AgentId, ModelPreset } from '@agentdeck/shared';
+import type {
+  AgentCapabilities,
+  AgentEvent,
+  AgentId,
+  ModelCatalog,
+  ModelPreset,
+} from '@agentdeck/shared';
 import { execa } from 'execa';
 import type { ResolvedAgentConfig } from '../config.js';
 import { splitCommand } from '../util/cmd.js';
@@ -39,6 +45,97 @@ interface OpenCodeEvent {
   sessionID?: string;
   part?: OpenCodePart;
   error?: unknown;
+}
+
+/** How long a discovered catalog stays fresh. Models change rarely. */
+const CATALOG_TTL_MS = 60_000;
+const CATALOG_TIMEOUT_MS = 4000;
+
+interface OpenCodeModelInfo {
+  id?: unknown;
+  providerID?: unknown;
+  name?: unknown;
+}
+
+interface CachedCatalog {
+  at: number;
+  catalog: ModelCatalog;
+}
+
+/**
+ * Turns the response of OpenCode's `/api/model` (+ `/api/model/default`) into
+ * the picker shape. The full model reference is `provider/model` (the same
+ * string `opencode models` prints and `opencode run -m` accepts).
+ */
+export function mapOpenCodeCatalog(
+  list: unknown,
+  defaultInfo?: unknown,
+  fallbackDefault?: unknown,
+): ModelCatalog {
+  const rows = Array.isArray(list) ? list : [];
+  const seen = new Set<string>();
+  const models: ModelPreset[] = [];
+  for (const row of rows) {
+    const preset = presetOf(row);
+    if (!preset || seen.has(preset.id)) continue;
+    seen.add(preset.id);
+    models.push(preset);
+  }
+  models.sort(
+    (a, b) =>
+      (a.provider ?? '').localeCompare(b.provider ?? '') || a.label.localeCompare(b.label),
+  );
+
+  const defaultModel = presetOf(defaultInfo) ?? presetOf(fallbackDefault);
+  if (defaultModel && !seen.has(defaultModel.id)) models.unshift(defaultModel);
+  return { models, ...(defaultModel ? { defaultModel } : {}) };
+}
+
+/** Parses the `opencode models` fallback (one `provider/model` per line). */
+export function mapOpenCodeModelLines(stdout: string, defaultInfo?: unknown): ModelCatalog {
+  const models: ModelPreset[] = [];
+  const seen = new Set<string>();
+  for (const raw of stdout.split('\n')) {
+    const id = raw.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({
+      id,
+      label: id,
+      description: id,
+      provider: id.split('/')[0],
+    });
+  }
+  models.sort(
+    (a, b) =>
+      (a.provider ?? '').localeCompare(b.provider ?? '') || a.label.localeCompare(b.label),
+  );
+  const defaultModel = presetOf(defaultInfo);
+  return { models, ...(defaultModel ? { defaultModel } : {}) };
+}
+
+function presetOf(value: unknown): ModelPreset | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const model = value as OpenCodeModelInfo;
+  if (typeof model.id !== 'string' || !model.id) return undefined;
+  if (typeof model.providerID !== 'string' || !model.providerID) return undefined;
+  return {
+    id: `${model.providerID}/${model.id}`,
+    label: typeof model.name === 'string' && model.name ? model.name : model.id,
+    description: model.id,
+    provider: model.providerID,
+  };
+}
+
+/** `opencode api` wraps responses in `{ location, data }`; tolerate bare JSON too. */
+function jsonData(stdout: string | undefined): unknown {
+  if (!stdout) return undefined;
+  try {
+    const parsed = JSON.parse(stdout) as { data?: unknown };
+    return parsed && typeof parsed === 'object' && 'data' in parsed ? parsed.data : parsed;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -139,6 +236,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   readonly kind = 'cli' as const;
   readonly accentColor = '#F59E0B';
   readonly supportsResume = true;
+  private readonly catalogs = new Map<string, CachedCatalog>();
 
   constructor(private readonly cfg: ResolvedAgentConfig) {}
 
@@ -168,6 +266,70 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   defaultModels(): ModelPreset[] {
     return MODEL_PRESETS.opencode;
+  }
+
+  defaultModel(): ModelPreset | undefined {
+    let newest: CachedCatalog | undefined;
+    for (const entry of this.catalogs.values()) {
+      if (!newest || entry.at > newest.at) newest = entry;
+    }
+    return newest?.catalog.defaultModel;
+  }
+
+  /**
+   * OpenCode knows its catalog and the model it would actually use (including
+   * auto-selection from the configured providers). Both come from its local
+   * API, so the app can show the real list instead of a static guess.
+   */
+  async listModels(cwd?: string): Promise<ModelCatalog> {
+    const key = cwd ?? process.cwd();
+    const cached = this.catalogs.get(key);
+    if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.catalog;
+
+    const { bin, prefixArgs } = splitCommand(this.cfg.command);
+    const apiGet = (endpoint: string) =>
+      withTimeoutFallback(
+        execa(bin, [...prefixArgs, 'api', 'get', endpoint], {
+          cwd: key,
+          reject: false,
+          timeout: CATALOG_TIMEOUT_MS,
+        }),
+        CATALOG_TIMEOUT_MS,
+        null,
+        `opencode api get ${endpoint}`,
+      );
+
+    const [listRes, defaultRes] = await Promise.all([
+      apiGet('/api/model'),
+      apiGet('/api/model/default'),
+    ]);
+
+    const list = jsonData(listRes?.exitCode === 0 ? listRes.stdout : undefined);
+    const defaultInfo = jsonData(defaultRes?.exitCode === 0 ? defaultRes.stdout : undefined);
+    let catalog: ModelCatalog;
+    if (Array.isArray(list)) {
+      catalog = mapOpenCodeCatalog(list, defaultInfo);
+    } else {
+      // Older OpenCode builds without the API: fall back to `opencode models`.
+      const res = await withTimeoutFallback(
+        execa(bin, [...prefixArgs, 'models'], { cwd: key, reject: false, timeout: CATALOG_TIMEOUT_MS }),
+        CATALOG_TIMEOUT_MS,
+        null,
+        'opencode models',
+      );
+      catalog =
+        res && res.exitCode === 0
+          ? mapOpenCodeModelLines(res.stdout, defaultInfo)
+          : { models: MODEL_PRESETS.opencode };
+    }
+
+    this.catalogs.set(key, { at: Date.now(), catalog });
+    // Keep the map bounded when the app is used across many projects.
+    if (this.catalogs.size > 8) {
+      const oldest = [...this.catalogs.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) this.catalogs.delete(oldest[0]);
+    }
+    return catalog;
   }
 
   externalSessionIdOf(line: string): string | undefined {

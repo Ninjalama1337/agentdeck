@@ -30,6 +30,14 @@ export interface ModelPreset {
   id: string;
   label: string;
   description?: string;
+  /** Provider/group the model belongs to (OpenCode lists several providers). */
+  provider?: string;
+}
+
+/** What an agent's model picker can show; `defaultModel` is what a run uses without an explicit pick. */
+export interface ModelCatalog {
+  models: ModelPreset[];
+  defaultModel?: ModelPreset;
 }
 
 export interface AgentInfo {
@@ -45,6 +53,8 @@ export interface AgentInfo {
   version?: string;
   capabilities: AgentCapabilities;
   models: ModelPreset[];
+  /** Model a run uses when the session does not pick one, when the agent can report it. */
+  defaultModel?: ModelPreset;
   /** Supported thinking/reasoning effort levels ('default' always allowed). */
   efforts?: string[];
   /** Resolved command the adapter would execute. */
