@@ -137,6 +137,35 @@ describe('FileWatchers', () => {
     }
   });
 
+  it('keeps a brand-new file a create when its change event arrives first', async () => {
+    // Reproduces the slow-machine order: the `change` for a new file is queued
+    // before the `rename` that would classify it as a create.
+    const dir = await fsp.mkdtemp(path.join(tmp, 'race-'));
+    const batches: { type: string; path: string }[][] = [];
+    const watchers = new FileWatchers({
+      broadcast: ((event: string, payload: { events: { type: string; path: string }[] }) => {
+        if (event === 'files:changed') batches.push(payload.events);
+      }) as never,
+      log: { warn: () => undefined, info: () => undefined } as never,
+      debounceMs: 20,
+    });
+    try {
+      watchers.ensureStarted('race-order', dir);
+      const internals = watchers as unknown as {
+        states: Map<string, unknown>;
+        onFsEvent(state: unknown, type: 'rename' | 'change', filename: string): void;
+      };
+      const state = internals.states.get('race-order');
+      await fsp.writeFile(path.join(dir, 'order.txt'), 'x', 'utf8');
+      batches.length = 0;
+      internals.onFsEvent(state, 'change', 'order.txt');
+      internals.onFsEvent(state, 'rename', 'order.txt');
+      await vi.waitFor(() => expect(batches.flat()).toEqual([{ type: 'create', path: 'order.txt' }]), WAIT);
+    } finally {
+      watchers.stopAll();
+    }
+  });
+
   it('emits create for a file written directly on disk', async () => {
     await fsp.writeFile(path.join(projectDir, 'direct.txt'), 'from disk', 'utf8');
     await vi.waitFor(

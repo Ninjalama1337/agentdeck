@@ -224,7 +224,12 @@ export class FileWatchers {
     void this.classifyAndQueue(state, rel, eventType);
   }
 
-  /** rename+exists → create/change (via seen-set), rename+missing → delete. */
+  /**
+   * rename+exists → create/change (via seen-set), rename+missing → delete.
+   * A `change` for a path we have never classified counts as its first event
+   * too: on a slow machine a new file's `rename` can be missed entirely, and
+   * then only its `change` shows up — the disk decides, not the event type.
+   */
   private async classifyAndQueue(
     state: WatchState,
     rel: string,
@@ -232,16 +237,14 @@ export class FileWatchers {
   ): Promise<void> {
     if (this.states.get(state.projectId) !== state) return;
     let type: FileChangeEventKind;
-    if (eventType === 'change') {
-      // A new file reports `rename` then `change`. While the rename is still
-      // being classified it decides the outcome — queuing `change` now would
-      // win the batch slot and turn the create into a change.
-      if (state.classifying.has(rel)) return;
+    if (eventType === 'change' && state.seen.has(rel)) {
+      // A path we already know, reported as changed: a plain edit.
       type = 'change';
-      state.seen.add(rel);
     } else {
-      let exists = false;
+      // A rename for this path is still being classified — let it decide.
+      if (state.classifying.has(rel)) return;
       state.classifying.set(rel, (state.classifying.get(rel) ?? 0) + 1);
+      let exists = false;
       try {
         const stats = await fsp.stat(path.join(state.root, rel));
         exists = stats.isFile() || stats.isDirectory();
