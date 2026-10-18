@@ -4,6 +4,7 @@ import {
   filterModels,
   groupModels,
   isDefaultModelSelection,
+  pinnedModels,
   selectableModels,
 } from '../src/features/chat/modelPicker';
 
@@ -58,5 +59,24 @@ describe('model picker helpers', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.provider).toBe('');
     expect(groups[0]?.models).toHaveLength(2);
+  });
+
+  it('pins favorites and recents on top, dropping them from the rest', () => {
+    const models = [
+      preset('a/opus', 'Opus', 'a'),
+      preset('a/sonnet', 'Sonnet', 'a'),
+      preset('b/glm', 'GLM', 'b'),
+    ];
+    const pinned = pinnedModels(models, ['b/glm'], ['a/sonnet', 'b/glm']);
+    expect(pinned.favorites.map((m) => m.id)).toEqual(['b/glm']);
+    // A favorite is not repeated in the recents.
+    expect(pinned.recents.map((m) => m.id)).toEqual(['a/sonnet']);
+    expect(pinned.rest.map((m) => m.id)).toEqual(['a/opus']);
+  });
+
+  it('keeps a pinned model that left the catalog, with a synthetic row', () => {
+    const pinned = pinnedModels([preset('a/opus', 'Opus', 'a')], ['a/old'], []);
+    expect(pinned.favorites.map((m) => m.id)).toEqual(['a/old']);
+    expect(pinned.favorites[0]?.label).toBe('a/old');
   });
 });

@@ -105,7 +105,9 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
   zeigt ihre Lauf-Historie mit Ergebnis, Dauer, Tokens und Kosten; optional
   startet jeder Lauf mit frischem Kontext.
 - **Modell-Wechsel in 2 Taps** — Pro-Session Modell + Permission-Mode, mit
-  Presets pro Agent.
+  Presets pro Agent. Die Auswahl listet alle Modelle nach Provider gruppiert
+  (bei OpenCode die echte CLI-Liste), Favoriten und zuletzt genutzte Modelle
+  stehen ganz oben.
 - **Projekte & GitHub** — Projekte registrieren, aus GitHub klonen (`gh`),
   Status/Commit/Push direkt aus der App.
 - **Datei-Browser mit Download** — sandboxed auf `projectsRoot`, Downloads über

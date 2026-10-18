@@ -26,9 +26,7 @@ export function filterModels(models: ModelPreset[], query: string): ModelPreset[
 export interface ModelGroup {
   provider: string;
   models: ModelPreset[];
-}
-
-/**
+}/**
  * Groups the catalog by provider (OpenCode lists several) and puts the
  * default model's provider first. Agents with one flat list yield one group
  * with an empty provider name, which renders without a header.
@@ -50,4 +48,27 @@ export function groupModels(models: ModelPreset[], defaultProvider?: string): Mo
       }
       return a.provider.localeCompare(b.provider);
     });
+}
+
+export interface PinnedModels {
+  favorites: ModelPreset[];
+  recents: ModelPreset[];
+  /** The remaining models, in catalog order. */
+  rest: ModelPreset[];
+}
+
+/**
+ * Splits the catalog into the picker's top sections: favorites first, then
+ * recently used (favorites already shown are dropped), then the rest. An id
+ * that is not in the catalog (a custom id, or a model the provider retired) is
+ * still rendered from a synthetic preset, so a pinned entry never disappears.
+ */
+export function pinnedModels(models: ModelPreset[], favoriteIds: string[], recentIds: string[]): PinnedModels {
+  const byId = new Map(models.map((m) => [m.id, m]));
+  const preset = (id: string): ModelPreset => byId.get(id) ?? { id, label: id, description: id };
+  const favoriteSet = new Set(favoriteIds);
+  const favorites = favoriteIds.map(preset);
+  const recents = recentIds.filter((id) => !favoriteSet.has(id)).map(preset);
+  const pinned = new Set([...favoriteIds, ...recents.map((m) => m.id)]);
+  return { favorites, recents, rest: models.filter((m) => !pinned.has(m.id)) };
 }

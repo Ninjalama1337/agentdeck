@@ -125,6 +125,10 @@ const INBOX_CLEARED_KEY = scopedKey('agentdeck:inbox-cleared');
 const UPDATE_NOTIFIED_KEY = scopedKey('agentdeck:update-notified');
 const INBOX_LIMIT = 80;
 const MODEL_PREFS_KEY = 'agentdeck:model-prefs';
+const MODEL_RECENTS_KEY = 'agentdeck:model-recents';
+const MODEL_FAVORITES_KEY = 'agentdeck:model-favorites';
+/** How many recently used models the picker keeps per agent. */
+const MODEL_RECENTS_LIMIT = 6;
 
 /** A saved server as the UI sees it (the login itself stays in api/servers). */
 export interface SavedServer {
@@ -276,6 +280,10 @@ export interface AppStore {
    */
   share: (IncomingShare & { target: string | null }) | null;
   modelPrefs: Partial<Record<AgentId, string>>;
+  /** Models used recently per agent, newest first — the picker's "Recently used". */
+  modelRecents: Partial<Record<AgentId, string[]>>;
+  /** Models the user starred per agent — always on top of the picker. */
+  modelFavorites: Partial<Record<AgentId, string[]>>;
   /** Latest APK release from GitHub (null = unknown / unreachable). */
   apkRelease: ApkRelease | null;
   /** Set when the "update available" notification was tapped: the banner starts the install (APK). */
@@ -388,6 +396,10 @@ export interface AppStore {
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>;
   setSessionEffort(sessionId: string, effort: string | undefined): void;
   setModelPref(agentId: AgentId, model: string | undefined): void;
+  /** Records a model as recently used for its agent (the picker's top list). */
+  recordModelUse(agentId: AgentId, model: string | undefined): void;
+  /** Stars/unstars a model for an agent. */
+  toggleModelFavorite(agentId: AgentId, modelId: string): void;
   launchTeam(req: TeamRunRequest): Promise<TeamRun>;
   fetchTeamRuns(projectId?: string): Promise<void>;
   upsertTeamRun(run: TeamRun): void;
@@ -904,6 +916,8 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
     lightbox: null,
     share: null,
     modelPrefs: readJson<Partial<Record<AgentId, string>>>(MODEL_PREFS_KEY, {}),
+    modelRecents: readJson<Partial<Record<AgentId, string[]>>>(MODEL_RECENTS_KEY, {}),
+    modelFavorites: readJson<Partial<Record<AgentId, string[]>>>(MODEL_FAVORITES_KEY, {}),
     apkRelease: null,
     apkInstallRequest: null,
     update: null,
@@ -1477,6 +1491,32 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         else delete prefs[agentId];
         writeJson(MODEL_PREFS_KEY, prefs);
         return { modelPrefs: prefs };
+      });
+      if (model) get().recordModelUse(agentId, model);
+    },
+
+    recordModelUse(agentId, model) {
+      if (!model || model === 'inherit') return;
+      set((st) => {
+        const list = [model, ...(st.modelRecents[agentId] ?? []).filter((m) => m !== model)].slice(
+          0,
+          MODEL_RECENTS_LIMIT,
+        );
+        const recents = { ...st.modelRecents, [agentId]: list };
+        writeJson(MODEL_RECENTS_KEY, recents);
+        return { modelRecents: recents };
+      });
+    },
+
+    toggleModelFavorite(agentId, modelId) {
+      set((st) => {
+        const current = st.modelFavorites[agentId] ?? [];
+        const next = current.includes(modelId)
+          ? current.filter((m) => m !== modelId)
+          : [...current, modelId];
+        const favorites = { ...st.modelFavorites, [agentId]: next };
+        writeJson(MODEL_FAVORITES_KEY, favorites);
+        return { modelFavorites: favorites };
       });
     },
 

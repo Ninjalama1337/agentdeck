@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Search, Sparkles, Wand2, Zap } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Check, Search, Sparkles, Star, Wand2, Zap } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentInfo, ModelPreset, Session } from '@agentdeck/shared';
 import { api } from '../../api/client';
 import { Spinner } from '../../components/ui/Spinner';
 import { useAppStore } from '../../store/appStore';
 import { effortLabel } from './ModelBar';
-import { filterModels, groupModels, isDefaultModelSelection, selectableModels } from './modelPicker';
+import { filterModels, groupModels, isDefaultModelSelection, pinnedModels, selectableModels } from './modelPicker';
 
 /** Rendering hundreds of OpenCode models at once makes the sheet sluggish; search narrows them. */
 const MAX_VISIBLE_MODELS = 150;
@@ -25,6 +25,9 @@ export function ModelSheet({
 }) {
   const setSessionModel = useAppStore((s) => s.setSessionModel);
   const setSessionEffort = useAppStore((s) => s.setSessionEffort);
+  const modelRecents = useAppStore((s) => s.modelRecents);
+  const modelFavorites = useAppStore((s) => s.modelFavorites);
+  const toggleModelFavorite = useAppStore((s) => s.toggleModelFavorite);
   const usage = useAppStore((s) => s.usage);
   const refreshUsage = useAppStore((s) => s.refreshUsage);
   const toast = useAppStore((s) => s.toast);
@@ -78,7 +81,20 @@ export function ModelSheet({
   const selectable = useMemo(() => selectableModels(presets), [presets]);
   const filtered = useMemo(() => filterModels(selectable, query), [selectable, query]);
   const shown = filtered.slice(0, MAX_VISIBLE_MODELS);
-  const groups = groupModels(shown, defaultPreset?.provider);
+  const favoriteIds = agent ? (modelFavorites[agent.id] ?? []) : [];
+  const recentIds = agent ? (modelRecents[agent.id] ?? []) : [];
+  const searching = query.trim().length > 0;
+  const pinned = useMemo(
+    () => pinnedModels(selectable, favoriteIds, recentIds),
+    [selectable, favoriteIds, recentIds],
+  );
+  const pinnedIds = new Set([...pinned.favorites, ...pinned.recents].map((m) => m.id));
+  // While searching the provider list already holds everything, so the pinned
+  // shortcuts step aside; otherwise favorites and recents sit on top.
+  const groups = groupModels(searching ? shown : shown.filter((m) => !pinnedIds.has(m.id)), defaultPreset?.provider);
+  const toggleFav = (id: string) => {
+    if (agent) toggleModelFavorite(agent.id, id);
+  };
 
   const pick = (model: string | undefined) => {
     if (locked) return;
@@ -175,6 +191,40 @@ export function ModelSheet({
       )}
 
       <div className="mt-1 flex flex-col gap-1.5">
+        {!searching && pinned.favorites.length > 0 && (
+          <ModelSection title="Favorites" icon={<Star size={11} className="fill-current" />}>
+            {pinned.favorites.map((preset) => (
+              <ModelRow
+                key={preset.id}
+                label={preset.label}
+                description={preset.description ?? preset.id}
+                mono
+                selected={current === preset.id}
+                fav
+                onToggleFav={() => toggleFav(preset.id)}
+                onClick={() => pick(preset.id)}
+              />
+            ))}
+          </ModelSection>
+        )}
+
+        {!searching && pinned.recents.length > 0 && (
+          <ModelSection title="Recently used">
+            {pinned.recents.map((preset) => (
+              <ModelRow
+                key={preset.id}
+                label={preset.label}
+                description={preset.description ?? preset.id}
+                mono
+                selected={current === preset.id}
+                fav={false}
+                onToggleFav={() => toggleFav(preset.id)}
+                onClick={() => pick(preset.id)}
+              />
+            ))}
+          </ModelSection>
+        )}
+
         {groups.map((group) => (
           <section key={group.provider || 'models'}>
             {group.provider && (
@@ -190,6 +240,8 @@ export function ModelSheet({
                   description={preset.description ?? preset.id}
                   mono
                   selected={current === preset.id}
+                  fav={favoriteIds.includes(preset.id)}
+                  onToggleFav={() => toggleFav(preset.id)}
                   onClick={() => pick(preset.id)}
                 />
               ))}
@@ -275,33 +327,69 @@ export function ModelSheet({
   );
 }
 
+function ModelSection({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mt-2">
+      <div className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-dim">
+        {icon}
+        {title}
+      </div>
+      <div className="flex flex-col gap-1.5">{children}</div>
+    </section>
+  );
+}
+
 function ModelRow({
   label,
   description,
   mono,
   selected,
+  fav,
+  onToggleFav,
   onClick,
 }: {
   label: string;
   description?: string;
   mono?: boolean;
   selected: boolean;
+  fav?: boolean;
+  onToggleFav?: () => void;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={clsx(
-        'press tap flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left',
+        'flex w-full items-center gap-2 rounded-2xl border px-4 py-3',
         selected ? 'border-accent/45 bg-accent/12' : 'border-line bg-white/[0.04]',
       )}
     >
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] font-medium">{label}</span>
-        {description && <span className={clsx('block truncate text-[11.5px] text-dim', mono && 'font-mono')}>{description}</span>}
-      </span>
-      {selected && <Check size={16} className="shrink-0 text-accent" />}
-    </button>
+      <button type="button" onClick={onClick} className="press tap flex min-w-0 flex-1 items-center gap-3 text-left">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-medium">{label}</span>
+          {description && <span className={clsx('block truncate text-[11.5px] text-dim', mono && 'font-mono')}>{description}</span>}
+        </span>
+        {selected && <Check size={16} className="shrink-0 text-accent" />}
+      </button>
+      {onToggleFav && (
+        <button
+          type="button"
+          onClick={onToggleFav}
+          aria-pressed={fav === true}
+          aria-label={fav ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
+          title={fav ? 'Remove from favorites' : 'Add to favorites'}
+          className={clsx('press tap shrink-0 rounded-full p-1.5', fav ? 'text-warn' : 'text-dim hover:text-ink')}
+        >
+          <Star size={15} className={fav ? 'fill-current' : undefined} />
+        </button>
+      )}
+    </div>
   );
 }
