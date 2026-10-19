@@ -4,13 +4,20 @@
  * stays small. A chart that does not parse (or is still streaming) falls back to
  * the plain code block instead of an error.
  */
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Spinner } from './Spinner';
 
 let initialized = false;
 let seq = 0;
+/** Renders run one after another; Mermaid uses a temporary node per render id. */
+let queue: Promise<unknown> = Promise.resolve();
 
-async function renderChart(id: string, chart: string): Promise<string> {
+/** A fresh render id per call: a streaming chart must not reuse a render's DOM id. */
+export function nextMermaidId(): string {
+  return `ad-mermaid-${++seq}`;
+}
+
+async function renderNow(chart: string): Promise<string> {
   const mermaid = (await import('mermaid')).default;
   if (!initialized) {
     mermaid.initialize({
@@ -22,20 +29,33 @@ async function renderChart(id: string, chart: string): Promise<string> {
     });
     initialized = true;
   }
-  const { svg } = await mermaid.render(id, chart);
+  const { svg } = await mermaid.render(nextMermaidId(), chart);
   return svg;
+}
+
+function renderChart(chart: string, stale: () => boolean): Promise<string> {
+  const run = () => {
+    // A newer chart superseded this one while it waited in the queue.
+    if (stale()) return Promise.reject(new Error('stale mermaid render'));
+    return renderNow(chart);
+  };
+  const result = queue.then(run, run);
+  queue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 export const MermaidDiagram = memo(function MermaidDiagram({ chart }: { chart: string }) {
   const [svg, setSvg] = useState<string>();
   const [failed, setFailed] = useState(false);
-  const idRef = useRef(`ad-mermaid-${++seq}`);
 
   useEffect(() => {
     let cancelled = false;
     setSvg(undefined);
     setFailed(false);
-    renderChart(idRef.current, chart).then(
+    renderChart(chart, () => cancelled).then(
       (out) => {
         if (!cancelled) setSvg(out);
       },

@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { describe, expect, it } from 'vitest';
+import { nextMermaidId } from '../src/components/ui/Mermaid';
 import { mermaidSource } from '../src/components/ui/Markdown';
 
 const code = (className: string, text: string) => createElement('code', { className }, text);
@@ -17,5 +18,13 @@ describe('mermaidSource', () => {
     expect(
       mermaidSource([code('language-ts', 'const a = 1;'), code('language-mermaid', 'flowchart LR')]),
     ).toBe('flowchart LR');
+  });
+});
+
+describe('nextMermaidId', () => {
+  it('returns a fresh id for every render', () => {
+    const ids = [nextMermaidId(), nextMermaidId(), nextMermaidId()];
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(id).toMatch(/^ad-mermaid-\d+$/);
   });
 });

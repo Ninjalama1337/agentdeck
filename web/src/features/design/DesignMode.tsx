@@ -51,6 +51,15 @@ export function DesignMode({
     }
   }, [link]);
 
+  /** Origin of the signed preview link; only messages from it are accepted. */
+  const previewOrigin = useMemo(() => {
+    try {
+      return link ? new URL(link.url).origin : '';
+    } catch {
+      return '';
+    }
+  }, [link]);
+
   /* Ports of the running dev servers. */
   useEffect(() => {
     if (!open) return;
@@ -97,6 +106,10 @@ export function DesignMode({
   useEffect(() => {
     if (!open) return;
     const onMessage = (ev: MessageEvent) => {
+      // Only the preview frame may talk to us, and only from the preview origin.
+      const frame = frameRef.current;
+      if (!frame || ev.source !== frame.contentWindow) return;
+      if (previewOrigin && ev.origin !== previewOrigin) return;
       const data = ev.data as { source?: string; type?: string; pick?: unknown } | undefined;
       if (!data || data.source !== DESIGN_SOURCE) return;
       if (data.type === 'ready') {
@@ -114,7 +127,7 @@ export function DesignMode({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [open, tellBridge]);
+  }, [open, tellBridge, previewOrigin]);
 
   useEffect(() => {
     if (!open) return;
