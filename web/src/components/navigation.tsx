@@ -38,8 +38,12 @@ export function useTabIndicators(): (name: Route['name']) => ReactNode {
   const allSessions = Object.values(sessionsByProject).flat();
   const running = allSessions.filter((s) => s.status === 'running' || s.status === 'queued').length;
   const unreadChats = allSessions.filter((s) => isSessionUnread(s, unread)).length;
-  // Runs that stopped to ask — the same signal as the board's "Needs you".
-  const needsYou = allSessions.filter((s) => (drafts[s.id]?.permissions?.length ?? 0) > 0).length;
+  // Runs that stopped to ask — the same signal as the board's "Needs you":
+  // the live draft when there is one, else the REST snapshot (fresh page load).
+  const needsYou = allSessions.filter((s) => {
+    const draft = drafts[s.id];
+    return (draft ? (draft.permissions?.length ?? 0) : (s.pendingQuestions ?? 0)) > 0;
+  }).length;
   const waiting = terminals.filter((t) => t.attention || unread.marked.includes(`terminal:${t.id}`)).length;
   const dirty = projects.find((p) => p.id === activeProjectId)?.git?.dirty ?? 0;
 

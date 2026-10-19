@@ -65,6 +65,8 @@ export interface ChatMessage {
   attachments: Attachment[];
   ts: number;
   usage?: MessageUsage;
+  /** The agent's plan checklist as it stood when the turn ended. */
+  plan?: PlanItem[];
   /** Where the turn came from. */
   source?: 'app' | 'mcp' | 'team' | 'routine';
 }
@@ -105,6 +107,11 @@ export interface Session {
   accountId?: string;
   /** Turns posted while a run was active and still waiting to start. */
   queuedCount?: number;
+  /**
+   * Questions the session's run waits on right now. Runtime-only: added to
+   * REST answers, never stored with the session.
+   */
+  pendingQuestions?: number;
   lastError?: string;
 }
 

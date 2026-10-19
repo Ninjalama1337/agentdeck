@@ -42,6 +42,11 @@ export interface BoardInput {
   now?: number;
 }
 
+/** Open questions of the run: live draft first, else the REST snapshot. */
+function pendingCount(session: Session, draft: StreamDraft | undefined): number {
+  return draft ? (draft.permissions?.length ?? 0) : (session.pendingQuestions ?? 0);
+}
+
 /** Which column a session belongs in. "Needs you" always wins over "Working". */
 export function boardColumn(
   session: Session,
@@ -49,7 +54,7 @@ export function boardColumn(
   unread: boolean,
   now: number,
 ): BoardColumn {
-  if ((draft?.permissions?.length ?? 0) > 0) return 'needs';
+  if (pendingCount(session, draft) > 0) return 'needs';
   if (session.status === 'running' || session.status === 'queued') return 'working';
   if (unread || session.status === 'error') return 'done';
   if (now - session.updatedAt < RECENT_MS) return 'done';
@@ -64,7 +69,7 @@ export function buildBoard(input: BoardInput): Record<BoardColumn, BoardCard[]> 
     const draft = input.drafts[session.id];
     const unread = input.isUnread(session);
     const column = boardColumn(session, draft, unread, now);
-    board[column].push({ session, column, unread, pending: draft?.permissions?.length ?? 0 });
+    board[column].push({ session, column, unread, pending: pendingCount(session, draft) });
   }
   for (const column of COLUMN_ORDER) {
     board[column].sort((a, b) => b.session.updatedAt - a.session.updatedAt);

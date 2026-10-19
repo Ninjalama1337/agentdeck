@@ -13,8 +13,11 @@
  * - stops a run that says nothing for too long (stallWarnMs → note, stallAbortMs
  *   → stop) instead of letting the chat hang on a frozen caret
  * - kills runs on interrupt / maxRunMs (SIGINT → 3s → SIGKILL, process group)
+ * - persists queued turns to the data dir, so they resume after a restart
  */
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import { execa } from 'execa';
 import { ThinkTagSplitter } from '@agentdeck/shared';
 import type {
@@ -36,6 +39,7 @@ import type { Logger } from '../logging.js';
 import type { Store } from '../state/store.js';
 import type { AgentService } from './registry.js';
 import { newId, newMessageId } from '../util/ids.js';
+import { writeFileAtomic } from '../util/atomicWrite.js';
 import { ensureDir } from '../util/paths.js';
 import { truncate } from './types.js';
 import type { AgentAdapter, PermissionAnswer, PermissionSignal, RunAttachment, RunPlan } from './types.js';
@@ -61,6 +65,10 @@ const DELTA_FLUSH_MS = 40;
 /** Turns posted while a run is active wait behind it; a cap keeps one chat from piling up forever. */
 const MAX_QUEUED_TURNS = 10;
 
+/** Queued turns survive a restart through this file in the data dir. */
+const QUEUED_TURNS_FILE = 'queued-turns.json';
+const QUEUED_TURNS_VERSION = 1;
+
 /**
  * A note the manager wants the chat to show above the live answer rides on a
  * `raw` event with this prefix (an empty one clears the note) — the same channel
@@ -85,6 +93,45 @@ export interface StartTurnOptions {
 }
 
 export type StartGate = { ok: true } | { ok: false; code: string; message: string };
+
+/** A turn waiting in a session's queue until its user message is safely on disk. */
+interface QueuedTurn {
+  opts: StartTurnOptions;
+  /** True once the message (and session changes) are persisted; false when saving failed. */
+  ready: Promise<boolean>;
+  settle: (ok: boolean) => void;
+  /** When the turn was accepted — kept with the persisted copy. */
+  queuedAt: number;
+}
+
+/** The only part of an attachment worth restoring: the file on disk, not its loaded payload. */
+type PersistedAttachment = Pick<RunAttachment, 'path' | 'name' | 'mime' | 'size'>;
+
+/** Serializable form of a queued turn — no Session/Project objects, no credentials. */
+interface PersistedQueuedTurn {
+  sessionId: string;
+  projectId: string;
+  text: string;
+  attachments: PersistedAttachment[];
+  model?: string;
+  thinkingEffort?: string;
+  source: NonNullable<ChatMessage['source']>;
+  maxRunMs?: number;
+  queuedAt: number;
+}
+
+interface QueuedTurnsFile {
+  version: typeof QUEUED_TURNS_VERSION;
+  turns: PersistedQueuedTurn[];
+}
+
+/** Optional persistence handed to `submitTurn` along with the prepared turn. */
+export interface SubmitTurnOptions {
+  /** Saved before the run may start, so its history already contains the prompt. */
+  userMessage?: ChatMessage;
+  /** Session changes (title, model, effort) applied only once the turn was accepted. */
+  updateSession?: (session: Session) => void;
+}
 
 interface ActiveRun {
   /** Run id — sent with every event and with the draft snapshot. */
@@ -138,8 +185,16 @@ interface ActiveRun {
 
 export class AgentManager {
   private readonly active = new Map<string, ActiveRun>();
+  /** Sessions claimed from submission until their run is in `active`; no second run may start meanwhile. */
+  private readonly starting = new Set<string>();
+  /** Starting sessions whose turn was interrupted before it could spawn (deleted session). */
+  private readonly canceledStarts = new Set<string>();
   /** Turns posted during an active run, oldest first, per session. */
-  private readonly queues = new Map<string, StartTurnOptions[]>();
+  private readonly queues = new Map<string, QueuedTurn[]>();
+  /** Serializes queue-file writes so a slow, older snapshot cannot land last. */
+  private queueWrites: Promise<void> = Promise.resolve();
+  /** Agent detection settled; a restored queue may start now. */
+  private resumeReady = false;
 
   constructor(
     private readonly config: Config,
@@ -149,14 +204,18 @@ export class AgentManager {
     private readonly emit: SessionEventEmitter,
     /** Called with every finished run (activity database). */
     private readonly recordRun: (run: RunRecord) => void = () => undefined,
-  ) {}
+  ) {
+    // Rebuild the queues from disk, but do not start anything: agent detection
+    // may still be running. `resumeQueuedTurns()` starts them once it settled.
+    this.restoreQueuedTurns();
+  }
 
   isActive(sessionId: string): boolean {
-    return this.active.has(sessionId);
+    return this.active.has(sessionId) || this.starting.has(sessionId);
   }
 
   activeSessionIds(): string[] {
-    return [...this.active.keys()];
+    return [...new Set([...this.active.keys(), ...this.starting.keys()])];
   }
 
   /** Turns posted during the active run that still wait for their turn. */
@@ -164,44 +223,130 @@ export class AgentManager {
     return this.queues.get(sessionId)?.length ?? 0;
   }
 
+  /** Questions the run waits on, without building/flushing a full draft. */
+  pendingQuestionCount(sessionId: string): number {
+    return this.active.get(sessionId)?.permissions.size ?? 0;
+  }
+
   /** Drops queued turns (session deleted, agent gone) without touching the active run. */
   clearQueue(sessionId: string): void {
-    this.queues.delete(sessionId);
+    if (!this.queues.delete(sessionId)) return;
+    // The session is on its way out; a failed write must not block the delete.
+    void this.saveQueuedTurns();
+  }
+
+  /**
+   * Starts the first restored turn of every session whose queue survived a
+   * restart. Called once agent detection has settled, so a restored turn does
+   * not fail just because its adapter was still being probed. `drainQueue`
+   * chains the rest. A turn whose agent is unavailable fails cleanly and the
+   * queue moves on.
+   */
+  resumeQueuedTurns(): void {
+    this.resumeReady = true;
+    for (const sessionId of [...this.queues.keys()]) {
+      const session = this.store.getSession(sessionId);
+      if (!session) {
+        this.queues.delete(sessionId);
+        void this.saveQueuedTurns();
+        continue;
+      }
+      void this.drainQueue(sessionId, session);
+    }
   }
 
   /**
    * Starts a turn now, or parks it behind the active run. The REST layer uses
    * this instead of `startTurn` so posting while the agent works is allowed.
+   *
+   * The slot is reserved synchronously, before the first await: two requests
+   * arriving in the same tick cannot both decide the session is idle. A rejected
+   * turn never touches the store — `updateSession`/`userMessage` run only after
+   * the capacity check.
    */
-  submitTurn(opts: StartTurnOptions): { queued: boolean; error?: string } {
-    if (!this.active.has(opts.session.id)) {
-      this.runTurn(opts);
+  async submitTurn(
+    opts: StartTurnOptions,
+    submitted: SubmitTurnOptions = {},
+  ): Promise<{ queued: boolean; error?: string }> {
+    const id = opts.session.id;
+    // A queue restored from disk means older turns are still waiting, even
+    // though nothing runs yet (detection/resume may not have finished).
+    const queuedAhead = (this.queues.get(id)?.length ?? 0) > 0;
+    if (!this.active.has(id) && !this.starting.has(id) && !queuedAhead) {
+      this.starting.add(id);
+      try {
+        await this.persistTurn(opts.session, submitted);
+        await this.store.saveSession(opts.session);
+      } catch (err) {
+        this.starting.delete(id);
+        throw err;
+      }
+      void this.runReserved(opts);
       return { queued: false };
     }
-    const queue = this.queues.get(opts.session.id) ?? [];
+
+    const queue = this.queues.get(id) ?? [];
     if (queue.length >= MAX_QUEUED_TURNS) {
       return { queued: false, error: `Too many queued messages (max ${MAX_QUEUED_TURNS}).` };
     }
-    queue.push(opts);
-    this.queues.set(opts.session.id, queue);
-    opts.session.queuedCount = queue.length;
-    void this.store.saveSession(opts.session).catch((err) => {
-      this.logger.warn({ err, session: opts.session.id }, 'failed to persist queue state');
+
+    // Reserve the slot synchronously. The entry only becomes runnable once its
+    // user message is on disk, so a run cannot read a history that lacks it.
+    let settle!: (ok: boolean) => void;
+    const ready = new Promise<boolean>((resolve) => {
+      settle = resolve;
     });
+    const entry: QueuedTurn = { opts, ready, settle, queuedAt: Date.now() };
+    queue.push(entry);
+    this.queues.set(id, queue);
+    try {
+      await this.persistTurn(opts.session, submitted);
+      opts.session.queuedCount = queue.length > 0 ? queue.length : undefined;
+      await this.store.saveSession(opts.session);
+    } catch (err) {
+      settle(false);
+      const at = queue.indexOf(entry);
+      if (at >= 0) queue.splice(at, 1);
+      if (this.queues.get(id) === queue) {
+        if (queue.length > 0) opts.session.queuedCount = queue.length;
+        else this.queues.delete(id);
+      }
+      await this.saveQueuedTurns();
+      throw err;
+    }
+    settle(true);
+    // Best effort, but awaited: once submit returns, a restart finds the turn.
+    await this.saveQueuedTurns();
+    // A restored queue starts only after detection settled; before that the
+    // new turn waits behind it instead of failing the restored turns early.
+    if (queuedAhead && this.resumeReady) void this.drainQueue(id, this.store.getSession(id) ?? opts.session);
     return { queued: true };
   }
 
-  /** Runs one turn and, when it ends, hands the next queued turn its start. */
-  private runTurn(opts: StartTurnOptions): void {
-    void this.startTurn(opts)
+  /** Writes the prepared user message and applies deferred session changes. */
+  private async persistTurn(session: Session, submitted: SubmitTurnOptions): Promise<void> {
+    // The prompt lands first: if writing it fails, the session is untouched.
+    if (submitted.userMessage) await this.store.appendMessage(submitted.userMessage);
+    submitted.updateSession?.(session);
+  }
+
+  /** Runs a turn that already owns the session's `starting` slot. */
+  private runReserved(opts: StartTurnOptions): Promise<TurnOutcome> {
+    return this.startTurnNow(opts)
       .catch((err) => {
         this.logger.error({ err, session: opts.session.id }, 'startTurn crashed');
+        return { ok: false, text: '', error: errorMessage(err) };
       })
-      .finally(() => this.drainQueue(opts.session.id, opts.session));
+      .finally(() => {
+        this.starting.delete(opts.session.id);
+        this.canceledStarts.delete(opts.session.id);
+        void this.drainQueue(opts.session.id, opts.session);
+      });
   }
 
   /** Pops the next queued turn and updates the session's queue badge. */
-  private drainQueue(sessionId: string, session: Session): void {
+  private async drainQueue(sessionId: string, session: Session): Promise<void> {
+    if (this.active.has(sessionId) || this.starting.has(sessionId)) return;
     const queue = this.queues.get(sessionId);
     const next = queue?.shift();
     if (!next) {
@@ -210,20 +355,165 @@ export class AgentManager {
         session.queuedCount = undefined;
         void this.store.saveSession(session).catch(() => undefined);
       }
+      void this.saveQueuedTurns();
+      return;
+    }
+    // Claim the start before waiting for the message, so another turn cannot
+    // slip in while persistence finishes.
+    this.starting.add(sessionId);
+    // The badge belongs on the store's object, so the new run does not save a
+    // stale count back over it.
+    const fresh = this.store.getSession(sessionId) ?? session;
+    fresh.queuedCount = queue && queue.length > 0 ? queue.length : undefined;
+    void this.store.saveSession(fresh).catch(() => undefined);
+    // Persist the removal before the run starts, so a crash during the run
+    // cannot replay this turn on the next boot.
+    await this.saveQueuedTurns();
+
+    if (!(await next.ready)) {
+      // Saving that turn failed; skip it and let the queue move on.
+      this.starting.delete(sessionId);
+      void this.drainQueue(sessionId, this.store.getSession(sessionId) ?? fresh);
+      return;
+    }
+    if (this.queues.get(sessionId) !== queue) {
+      // The queue was cleared (session deleted) while the message was saved.
+      this.starting.delete(sessionId);
       return;
     }
     // Re-read the session: the run that just ended may have learned its resume
     // id, and a model pick made while this turn waited must reach it too.
-    const fresh = this.store.getSession(sessionId);
-    if (fresh) {
-      next.session = fresh;
-      next.model = fresh.model;
+    const readySession = this.store.getSession(sessionId) ?? fresh;
+    next.opts.session = readySession;
+    next.opts.model = readySession.model;
+    next.opts.session.queuedCount = queue && queue.length > 0 ? queue.length : undefined;
+    void this.store.saveSession(next.opts.session).catch(() => undefined);
+    void this.runReserved(next.opts);
+  }
+
+  private queueFile(): string {
+    return path.join(this.config.dataDir, QUEUED_TURNS_FILE);
+  }
+
+  /** The serializable snapshot of every session's queue. */
+  private snapshotQueuedTurns(): PersistedQueuedTurn[] {
+    const turns: PersistedQueuedTurn[] = [];
+    for (const queue of this.queues.values()) {
+      for (const entry of queue) {
+        turns.push({
+          sessionId: entry.opts.session.id,
+          projectId: entry.opts.project.id,
+          text: entry.opts.text,
+          attachments: entry.opts.attachments.map(({ path: p, name, mime, size }) => ({ path: p, name, mime, size })),
+          ...(entry.opts.model !== undefined ? { model: entry.opts.model } : {}),
+          ...(entry.opts.thinkingEffort !== undefined ? { thinkingEffort: entry.opts.thinkingEffort } : {}),
+          source: entry.opts.source,
+          ...(entry.opts.maxRunMs !== undefined ? { maxRunMs: entry.opts.maxRunMs } : {}),
+          queuedAt: entry.queuedAt,
+        });
+      }
     }
-    // The badge belongs on the store's object, so the new run does not save a
-    // stale count back over it.
-    next.session.queuedCount = queue && queue.length > 0 ? queue.length : undefined;
-    void this.store.saveSession(next.session).catch(() => undefined);
-    this.runTurn(next);
+    return turns;
+  }
+
+  /**
+   * Writes the queue file with the current snapshot. Writes are chained so an
+   * older snapshot cannot land after a newer one; a failure is logged and never
+   * propagates (chat must keep working even when this best-effort file fails).
+   */
+  private saveQueuedTurns(): Promise<void> {
+    const payload: QueuedTurnsFile = { version: QUEUED_TURNS_VERSION, turns: this.snapshotQueuedTurns() };
+    const write = this.queueWrites.then(() =>
+      writeFileAtomic(this.queueFile(), JSON.stringify(payload, null, 2), 0o600),
+    );
+    this.queueWrites = write.catch((err) => {
+      this.logger.warn({ err, file: this.queueFile() }, 'could not persist queued turns');
+    });
+    return this.queueWrites;
+  }
+
+  /**
+   * Rebuilds in-memory queues from the last queue file. Entries whose session
+   * or project is gone are dropped. Nothing starts here — `resumeQueuedTurns()`
+   * does that once agent detection has settled.
+   */
+  private restoreQueuedTurns(): void {
+    const file = this.queueFile();
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.warn({ err, file }, 'could not read queued turns');
+      }
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      this.logger.warn({ err, file }, 'ignoring unreadable queued turns file');
+      return;
+    }
+    if (!isRecord(parsed) || parsed.version !== QUEUED_TURNS_VERSION || !Array.isArray(parsed.turns)) {
+      this.logger.warn({ file }, 'ignoring queued turns file with an unknown shape');
+      return;
+    }
+
+    const restored = new Map<string, QueuedTurn[]>();
+    let dropped = 0;
+    for (const value of parsed.turns) {
+      const turn = parsePersistedTurn(value);
+      if (!turn) {
+        dropped += 1;
+        continue;
+      }
+      const session = this.store.getSession(turn.sessionId);
+      const project = this.store.getProject(turn.projectId);
+      // A deleted session/project (or a session moved to another project) no
+      // longer has a place to run: its user message stays in history.
+      if (!session || !project || session.projectId !== project.id) {
+        dropped += 1;
+        continue;
+      }
+      const queue = restored.get(session.id) ?? [];
+      if (queue.length >= MAX_QUEUED_TURNS) {
+        dropped += 1;
+        continue;
+      }
+      queue.push({
+        opts: {
+          session,
+          project,
+          text: turn.text,
+          attachments: turn.attachments,
+          ...(turn.model !== undefined ? { model: turn.model } : {}),
+          ...(turn.thinkingEffort !== undefined ? { thinkingEffort: turn.thinkingEffort } : {}),
+          source: turn.source,
+          ...(turn.maxRunMs !== undefined ? { maxRunMs: turn.maxRunMs } : {}),
+        },
+        // The user message was persisted before the queued turn was accepted;
+        // there is nothing left to wait for.
+        ready: Promise.resolve(true),
+        settle: () => undefined,
+        queuedAt: turn.queuedAt,
+      });
+      restored.set(session.id, queue);
+    }
+
+    for (const [sessionId, queue] of restored) {
+      this.queues.set(sessionId, queue);
+      const session = this.store.getSession(sessionId);
+      if (!session) continue;
+      session.queuedCount = queue.length;
+      void this.store.saveSession(session).catch((err) => {
+        this.logger.warn({ err, session: sessionId }, 'could not save the restored queue count');
+      });
+    }
+    if (restored.size > 0 || dropped > 0) {
+      const turns = [...restored.values()].reduce((n, queue) => n + queue.length, 0);
+      this.logger.info({ sessions: restored.size, turns, dropped }, 'restored queued turns');
+    }
   }
 
   /** The answer of the active run so far; undefined when nothing is running. */
@@ -287,7 +577,7 @@ export class AgentManager {
 
   /** Synchronous pre-flight used by the REST layer to return proper 409s. */
   canStart(session: Session): StartGate {
-    if (this.active.has(session.id)) {
+    if (this.active.has(session.id) || this.starting.has(session.id)) {
       return { ok: false, code: 'RUN_ACTIVE', message: 'A run is already active in this session.' };
     }
     const info = this.agents.infoOf(session.agentId);
@@ -299,6 +589,17 @@ export class AgentManager {
   }
 
   async startTurn(opts: StartTurnOptions): Promise<TurnOutcome> {
+    const { session } = opts;
+    // Claim the session before the first await. Two concurrent direct callers
+    // (bridge, routines, team) must not spawn two processes either.
+    if (this.active.has(session.id) || this.starting.has(session.id)) {
+      return { ok: false, text: '', error: 'A run is already active in this session.' };
+    }
+    this.starting.add(session.id);
+    return this.runReserved(opts);
+  }
+
+  private async startTurnNow(opts: StartTurnOptions): Promise<TurnOutcome> {
     const { session, project } = opts;
     const existing = this.active.get(session.id);
     if (existing) {
@@ -360,6 +661,12 @@ export class AgentManager {
 
     await ensureDir(project.path);
 
+    // Deleted / interrupted while it still held the `starting` reservation: no child.
+    if (this.canceledStarts.has(session.id)) {
+      await this.markStartingCanceled(session);
+      return { ok: false, text: '', error: 'Run canceled before it started.' };
+    }
+
     // Account profile env (multi-account switching) wins over adapter env.
     const accountEnv = session.accountId ? this.store.getAccount(session.accountId)?.env : undefined;
 
@@ -409,6 +716,12 @@ export class AgentManager {
       stderrTail: '',
       stdoutBuf: '',
     };
+    // Interrupted during the spawn itself: take the child down instead of tracking it.
+    if (this.canceledStarts.has(session.id)) {
+      killTree(child.pid, 'SIGKILL');
+      await this.markStartingCanceled(session);
+      return { ok: false, text: '', error: 'Run canceled before it started.' };
+    }
     this.active.set(session.id, run);
     // The CLI's own default (OpenCode reports it) is what a turn with no pick
     // actually runs, so the message and the activity record can name it.
@@ -528,10 +841,26 @@ export class AgentManager {
     return { ok: status !== 'error', text, error };
   }
 
+  /** A run canceled before it owned `active` must not leave the session "queued". */
+  private async markStartingCanceled(session: Session): Promise<void> {
+    // Deleted sessions are gone from the store; never recreate their meta.
+    if (!this.store.getSession(session.id)) return;
+    session.status = 'stopped';
+    session.lastError = undefined;
+    await this.store.saveSession(session).catch(() => undefined);
+    this.emit(session.id, { type: 'status', status: 'stopped' });
+  }
+
   /** SIGINT (graceful) now, SIGKILL after 3s if still alive. Returns false when nothing active. */
   interrupt(sessionId: string, reason?: string): boolean {
     const run = this.active.get(sessionId);
-    if (!run) return false;
+    if (!run) {
+      // Still in the `starting` reservation: stop it before it can spawn a child.
+      if (!this.starting.has(sessionId)) return false;
+      this.canceledStarts.add(sessionId);
+      this.logger.info({ session: sessionId }, 'interrupting run before it starts');
+      return true;
+    }
     run.interrupted = true;
     if (reason && !run.errorDetail) run.errorDetail = reason;
     killTree(run.child.pid, 'SIGINT');
@@ -800,7 +1129,7 @@ export class AgentManager {
     const thinking = run.thinkingBuf;
     const tools = run.tools;
     run.tools = [];
-    if (!text.trim() && !thinking.trim() && tools.length === 0) {
+    if (!text.trim() && !thinking.trim() && tools.length === 0 && run.planItems.length === 0) {
       run.textBuf = '';
       run.thinkingBuf = '';
       run.usage = undefined;
@@ -815,6 +1144,7 @@ export class AgentManager {
       text,
       ...(thinking.trim() ? { thinking } : {}),
       ...(tools.length ? { tools } : {}),
+      ...(run.planItems.length ? { plan: [...run.planItems] } : {}),
       attachments: [],
       ts: Date.now(),
       ...(run.usage ? { usage: run.usage } : {}),
@@ -857,6 +1187,55 @@ export class AgentManager {
       ts: Date.now(),
     };
   }
+}
+
+const TURN_SOURCES = new Set<string>(['app', 'mcp', 'team', 'routine']);
+
+function isTurnSource(value: unknown): value is NonNullable<ChatMessage['source']> {
+  return typeof value === 'string' && TURN_SOURCES.has(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePersistedAttachment(value: unknown): PersistedAttachment | undefined {
+  if (!isRecord(value)) return undefined;
+  const { path: file, name, mime, size } = value;
+  if (typeof file !== 'string' || !file) return undefined;
+  if (typeof name !== 'string' || typeof mime !== 'string') return undefined;
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return undefined;
+  return { path: file, name, mime, size };
+}
+
+/** Validates one entry from the queue file; anything unusable is dropped. */
+function parsePersistedTurn(value: unknown): PersistedQueuedTurn | undefined {
+  if (!isRecord(value)) return undefined;
+  const { sessionId, projectId, text, attachments, model, thinkingEffort, source, maxRunMs, queuedAt } = value;
+  if (typeof sessionId !== 'string' || !sessionId) return undefined;
+  if (typeof projectId !== 'string' || !projectId) return undefined;
+  if (typeof text !== 'string') return undefined;
+  if (!Array.isArray(attachments)) return undefined;
+  const parsedAttachments: PersistedAttachment[] = [];
+  for (const attachment of attachments) {
+    const parsed = parsePersistedAttachment(attachment);
+    if (!parsed) return undefined;
+    parsedAttachments.push(parsed);
+  }
+  if (!text.trim() && parsedAttachments.length === 0) return undefined;
+  const turn: PersistedQueuedTurn = {
+    sessionId,
+    projectId,
+    text,
+    attachments: parsedAttachments,
+    // An unknown source (older/hand-edited file) still runs, as a chat turn.
+    source: isTurnSource(source) ? source : 'app',
+    queuedAt: typeof queuedAt === 'number' && Number.isFinite(queuedAt) ? queuedAt : Date.now(),
+  };
+  if (typeof model === 'string') turn.model = model;
+  if (typeof thinkingEffort === 'string') turn.thinkingEffort = thinkingEffort;
+  if (typeof maxRunMs === 'number' && Number.isFinite(maxRunMs) && maxRunMs > 0) turn.maxRunMs = maxRunMs;
+  return turn;
 }
 
 function killTree(pid: number | undefined, signal: NodeJS.Signals): void {

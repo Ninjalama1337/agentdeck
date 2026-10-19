@@ -57,6 +57,8 @@ export interface ServerToClientEvents {
   'session:event': (payload: { sessionId: string; ts: number; event: AgentEvent; run?: string; seq?: number }) => void;
   /** Session metadata changed (status, title, model, ...). */
   'session:update': (payload: { session: Session }) => void;
+  /** A session was deleted (possibly on another device) — drop it locally. */
+  'session:deleted': (payload: { id: string }) => void;
   'project:update': (payload: { project: Project }) => void;
   'agent:update': (payload: { agent: AgentInfo }) => void;
   'team:update': (payload: { run: TeamRun }) => void;

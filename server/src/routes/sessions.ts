@@ -23,6 +23,16 @@ function getSessionOr404(deps: AppDeps, id: string): Session {
   return session;
 }
 
+/**
+ * Shallow copy of a session with the questions its run waits on. Runtime-only
+ * (not persisted) so a fresh page load still sees a waiting permission.
+ */
+function withPendingQuestions(deps: AppDeps, session: Session): Session {
+  // A count, not draftOf(): GET /sessions must not flush every active draft.
+  const pendingQuestions = deps.manager.pendingQuestionCount(session.id);
+  return pendingQuestions > 0 ? { ...session, pendingQuestions } : session;
+}
+
 /** Validated effort from raw input; blank/undefined → inherit (undefined). */
 export function effortOr400(value: string | undefined): ThinkingEffort | undefined {
   const parsed = parseEffortInput(value);
@@ -100,7 +110,7 @@ async function attachmentDto(
 export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Promise<void> {
   fastify.get('/sessions', async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query ?? {});
-    return deps.store.listSessions(query.projectId);
+    return deps.store.listSessions(query.projectId).map((session) => withPendingQuestions(deps, session));
   });
 
   fastify.post('/sessions', async (req, reply) => {
@@ -135,7 +145,7 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     const known = after ? all.findIndex((m) => m.id === after) : -1;
     const draft = deps.manager.draftOf(session.id) ?? null;
     return {
-      session,
+      session: withPendingQuestions(deps, session),
       messages: known >= 0 ? all.slice(known + 1) : all,
       draft,
       ...(known >= 0 ? { partial: true } : {}),
@@ -184,18 +194,14 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
     }
 
     // Title from the first user message.
-    if (session.title === 'New session' && body.text.trim()) {
-      session.title = body.text.trim().slice(0, 60);
-    }
+    const firstTitle = session.title === 'New session' && body.text.trim() ? body.text.trim().slice(0, 60) : undefined;
 
     // An explicit effort overrides the turn AND becomes the new session
     // default (persisted below → session:update broadcast).
     const thinkingEffort = effortOr400(body.thinkingEffort);
-    if (thinkingEffort !== undefined) session.thinkingEffort = thinkingEffort;
     // Same for the model: a turn-level pick becomes the session's model, so
     // the header and the next turns stay on it.
     const model = body.model !== undefined ? clearableModel(body.model) : undefined;
-    if (body.model !== undefined) session.model = model;
 
     const userMessage: ChatMessage = {
       id: newMessageId(),
@@ -207,20 +213,30 @@ export async function sessionRoutes(fastify: FastifyInstance, deps: AppDeps): Pr
       ts: Date.now(),
       source: 'app',
     };
-    await deps.store.appendMessage(userMessage);
-    await deps.store.saveSession(session);
 
     // Starts at once or waits behind the active run; either way completion
-    // flows through session:update / session:event.
-    const submitted = deps.manager.submitTurn({
-      session,
-      project,
-      text: body.text,
-      attachments: runs,
-      ...(model ? { model } : {}),
-      ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
-      source: 'app',
-    });
+    // flows through session:update / session:event. The manager checks the
+    // queue capacity first and only then persists the message and the session
+    // changes, so a rejected turn leaves no trace.
+    const submitted = await deps.manager.submitTurn(
+      {
+        session,
+        project,
+        text: body.text,
+        attachments: runs,
+        ...(model ? { model } : {}),
+        ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
+        source: 'app',
+      },
+      {
+        userMessage,
+        updateSession: (target) => {
+          if (firstTitle !== undefined) target.title = firstTitle;
+          if (thinkingEffort !== undefined) target.thinkingEffort = thinkingEffort;
+          if (body.model !== undefined) target.model = model;
+        },
+      },
+    );
     if (submitted.error) throw httpError(409, 'QUEUE_FULL', submitted.error);
 
     reply.send({ userMessage, ...(submitted.queued ? { queued: true } : {}) });

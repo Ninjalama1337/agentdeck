@@ -84,6 +84,19 @@ describe('buildBoard', () => {
     expect(board.needs[0]?.pending).toBe(2);
   });
 
+  it('treats a REST pendingQuestions count like a live permission draft', () => {
+    const waiting = session({ id: 'waiting', status: 'running', pendingQuestions: 2 });
+    const board = buildBoard({
+      sessions: [waiting],
+      drafts: {},
+      isUnread: () => false,
+      now: NOW,
+    });
+    expect(board.needs.map((c) => c.session.id)).toEqual(['waiting']);
+    expect(board.needs[0]?.pending).toBe(2);
+    expect(board.working).toHaveLength(0);
+  });
+
   it('filterCards matches on the given haystack, case-insensitively', () => {
     const cards: BoardCard[] = [
       { session: session({ id: 'a', status: 'idle', title: 'Fix the login' }), column: 'idle', unread: false, pending: 0 },

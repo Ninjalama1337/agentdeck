@@ -214,6 +214,7 @@ const MessageBubble = memo(function MessageBubble({
           <span className="ml-auto">{clock(msg.ts)}</span>
           {answer && <CopyButton text={answer} />}
         </div>
+        <PlanChecklist items={msg.plan} accent={accent} />
         {msg.tools && msg.tools.length > 0 && <ToolGroup tools={msg.tools} />}
         {thinking && <ThinkingBlock thinking={thinking} accent={accent} />}
         {answer && <MarkdownView text={answer} />}

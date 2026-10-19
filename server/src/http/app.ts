@@ -283,6 +283,7 @@ export async function buildApp(config: Config): Promise<BuiltApp> {
       case 'account-deleted':
         break; // accounts are static profiles — clients refetch on demand
       case 'session-deleted':
+        broadcast('session:deleted', { id: change.id });
         broadcast('notify', { level: 'info', text: 'Session deleted.' });
         break;
       case 'project-deleted':

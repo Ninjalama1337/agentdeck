@@ -224,7 +224,10 @@ function upsertSessionMap(
 ): Record<string, Session[]> {
   const list = map[session.projectId] ?? [];
   const idx = list.findIndex((s) => s.id === session.id);
-  const next = idx >= 0 ? list.map((s) => (s.id === session.id ? { ...s, ...session } : s)) : [session, ...list];
+  // Keep a REST-only pendingQuestions count when a normal session update does
+  // not carry it; the terminal status event clears it explicitly.
+  const merge = (prev: Session): Session => ({ ...prev, ...session });
+  const next = idx >= 0 ? list.map((s) => (s.id === session.id ? merge(s) : s)) : [session, ...list];
   return { ...map, [session.projectId]: next };
 }
 
@@ -232,6 +235,31 @@ function upsertListById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
   if (idx >= 0) return list.map((x) => (x.id === item.id ? { ...x, ...item } : x));
   return [item, ...list];
+}
+
+/** Drops a deleted session from every place the store keeps it. */
+function removeSessionState(
+  st: Pick<AppStore, 'sessionsByProject' | 'loadedSessions' | 'messagesBySession' | 'drafts' | 'activeSessionId'>,
+  id: string,
+): Partial<AppStore> {
+  const sessionsByProject: Record<string, Session[]> = {};
+  for (const [pid, list] of Object.entries(st.sessionsByProject)) {
+    sessionsByProject[pid] = list.filter((s) => s.id !== id);
+  }
+  const loadedSessions = { ...st.loadedSessions };
+  delete loadedSessions[id];
+  const messagesBySession = { ...st.messagesBySession };
+  delete messagesBySession[id];
+  const drafts = { ...st.drafts };
+  delete drafts[id];
+  streamMarks.delete(id);
+  return {
+    sessionsByProject,
+    loadedSessions,
+    messagesBySession,
+    drafts,
+    activeSessionId: st.activeSessionId === id ? null : st.activeSessionId,
+  };
 }
 
 /** Upsert one admin job, keeping the list sorted newest-first (capped client-side). */
@@ -572,6 +600,11 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       set((st) => ({ sessionsByProject: upsertSessionMap(st.sessionsByProject, session) }));
     });
 
+    // Deleted here or on another device: no ghost card, no stale chat behind it.
+    socket.on('session:deleted', ({ id }) => {
+      set((st) => removeSessionState(st, id));
+    });
+
     socket.on('project:update', ({ project }) => {
       get().upsertProject(project);
     });
@@ -737,6 +770,8 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
       const session = selectSession(st, sessionId);
       if (!session) return {};
       const next = { ...session, status, lastError: status === 'error' && detail ? detail : session.lastError };
+      // The run is over: whatever it waited on is gone with it.
+      if (status === 'idle' || status === 'error' || status === 'stopped') delete next.pendingQuestions;
       const patch: Partial<AppStore> = { sessionsByProject: upsertSessionMap(st.sessionsByProject, next) };
       if (status === 'idle' || status === 'error' || status === 'stopped') {
         if (st.drafts[sessionId]) {
@@ -1288,11 +1323,23 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
 
     async fetchAllSessions() {
       // The board shows every project at once; /api/sessions without a project
-      // id returns them all. Each lands in its project's list.
+      // id returns them all. Group per project and replace each known project's
+      // list, so a session deleted on another device cannot survive the reload.
       const all = await api.sessions();
       set((st) => {
-        let sessionsByProject = st.sessionsByProject;
-        for (const session of all) sessionsByProject = upsertSessionMap(sessionsByProject, session);
+        const grouped = new Map<string, Session[]>();
+        for (const session of all) {
+          const list = grouped.get(session.projectId);
+          if (list) list.push(session);
+          else grouped.set(session.projectId, [session]);
+        }
+        const sessionsByProject: Record<string, Session[]> = { ...st.sessionsByProject };
+        for (const project of st.projects) sessionsByProject[project.id] = grouped.get(project.id) ?? [];
+        // Projects this client does not know yet (project list still loading)
+        // keep their sessions rather than losing them; their next refresh cleans up.
+        for (const [projectId, list] of grouped) {
+          if (!(projectId in sessionsByProject)) sessionsByProject[projectId] = list;
+        }
         return { sessionsByProject };
       });
     },
@@ -1360,26 +1407,7 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
 
     async deleteSession(id) {
       await api.deleteSession(id);
-      set((st) => {
-        const sessionsByProject: Record<string, Session[]> = {};
-        for (const [pid, list] of Object.entries(st.sessionsByProject)) {
-          sessionsByProject[pid] = list.filter((s) => s.id !== id);
-        }
-        const loadedSessions = { ...st.loadedSessions };
-        delete loadedSessions[id];
-        const messagesBySession = { ...st.messagesBySession };
-        delete messagesBySession[id];
-        const drafts = { ...st.drafts };
-        delete drafts[id];
-        streamMarks.delete(id);
-        return {
-          sessionsByProject,
-          loadedSessions,
-          messagesBySession,
-          drafts,
-          activeSessionId: st.activeSessionId === id ? null : st.activeSessionId,
-        };
-      });
+      set((st) => removeSessionState(st, id));
       get().toast('info', 'Session deleted');
     },
 
@@ -1476,7 +1504,6 @@ export const useAppStore = create<AppStore>()((set, get, store) => {
         // Persist it: the server's session is what session:update broadcasts,
         // so without this the bar fell back to "default" on the next refresh.
         await api.updateSession(sessionId, { model: model ?? null });
-        get().setModelPref(before.agentId, model);
       } catch (err) {
         const current = selectSession(get(), sessionId);
         if (current) put({ ...current, model: before.model });

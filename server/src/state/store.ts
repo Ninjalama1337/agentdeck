@@ -104,15 +104,20 @@ export class Store {
    */
   private async recoverInterrupted(session: Session): Promise<void> {
     if (session.status !== 'running' && session.status !== 'queued') return;
+    const queuedTurns = session.queuedCount ?? 0;
     session.status = 'idle';
-    // The in-memory queue did not survive the restart either.
+    // The manager restores the persisted queue after this and sets the count
+    // again; clearing it here keeps a lost queue file from leaving a stale badge.
     session.queuedCount = undefined;
     await this.appendMessage({
       id: newMessageId(),
       sessionId: session.id,
       role: 'system',
       agentId: session.agentId,
-      text: 'The server restarted while this run was active — the answer was lost. Send your message again.',
+      text:
+        queuedTurns > 0
+          ? `The server restarted while this run was active — its answer was lost. ${queuedTurns} queued message${queuedTurns === 1 ? '' : 's'} resume automatically.`
+          : 'The server restarted while this run was active — the answer was lost. Send your message again.',
       attachments: [],
       ts: Date.now(),
     });

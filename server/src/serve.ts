@@ -21,8 +21,13 @@ async function main(): Promise<void> {
   const { app, io, deps, manager, agents, tunnel, logger } = await buildApp(config);
 
   // Listen immediately; agent detection is capped at 5s per adapter and may
-  // still be running (it broadcasts agent:update when done).
-  void agents.detectAll().catch((err) => logger.error({ err }, 'agent detection crashed'));
+  // still be running (it broadcasts agent:update when done). Turns restored
+  // from the queue file start only afterwards, so a probe still pending does
+  // not make them fail.
+  void agents
+    .detectAll()
+    .catch((err) => logger.error({ err }, 'agent detection crashed'))
+    .finally(() => manager.resumeQueuedTurns());
 
   // A Claude sign-in stored before this server marked the setup complete
   // would still make every new `claude` terminal ask to sign in again.
