@@ -108,7 +108,6 @@ describe('FileWatchers', () => {
     // fs.watch reports rename + change for a new file; the rename is classified
     // asynchronously, so on a slow machine the change used to win the batch.
     const dir = await fsp.mkdtemp(path.join(tmp, 'race-'));
-    await fsp.writeFile(path.join(dir, 'new.txt'), 'x', 'utf8');
     const batches: { type: string; path: string }[][] = [];
     const watchers = new FileWatchers({
       broadcast: ((event: string, payload: { events: { type: string; path: string }[] }) => {
@@ -119,6 +118,9 @@ describe('FileWatchers', () => {
     });
     try {
       watchers.ensureStarted('race', dir);
+      // The file must not exist yet: it is genuinely new to the watcher, not a
+      // pre-existing path seeded into `seen` at startup.
+      await fsp.writeFile(path.join(dir, 'new.txt'), 'x', 'utf8');
       const internals = watchers as unknown as {
         states: Map<string, unknown>;
         onFsEvent(state: unknown, type: 'rename' | 'change', filename: string): void;
@@ -184,6 +186,50 @@ describe('FileWatchers', () => {
       watchers.ensureStarted('pre-existing', dir);
       await fsp.writeFile(path.join(dir, 'old.txt'), 'after', 'utf8');
       await vi.waitFor(() => expect(batches.flat()).toEqual([{ type: 'change', path: 'old.txt' }]), WAIT);
+    } finally {
+      watchers.stopAll();
+    }
+  });
+
+  it('reports an atomically replaced file that predates the watcher as change', async () => {
+    // Repro: the target exists before the watcher starts, then an editor-style
+    // save writes a temp file and renames it over the target. The rename branch
+    // used to classify the unknown target as create.
+    const dir = await fsp.mkdtemp(path.join(tmp, 'atomic-save-'));
+    await fsp.writeFile(path.join(dir, 'existing.txt'), 'before', 'utf8');
+
+    const batches: { type: string; path: string }[][] = [];
+    const watchers = new FileWatchers({
+      broadcast: ((event: string, payload: { events: { type: string; path: string }[] }) => {
+        if (event === 'files:changed') batches.push(payload.events);
+      }) as never,
+      log: { warn: () => undefined, info: () => undefined } as never,
+      debounceMs: 20,
+    });
+    try {
+      watchers.ensureStarted('atomic-save', dir);
+      const temp = path.join(dir, '.existing.txt.tmp');
+      await fsp.writeFile(temp, 'after', 'utf8');
+      await fsp.rename(temp, path.join(dir, 'existing.txt'));
+
+      await vi.waitFor(() => {
+        const events = batches.flat().filter((e) => e.path === 'existing.txt');
+        expect(events).toContainEqual({ type: 'change', path: 'existing.txt' });
+        expect(events.filter((e) => e.type === 'create')).toEqual([]);
+      }, WAIT);
+
+      // Genuinely new files arriving the same way are still creates.
+      const freshTemp = path.join(dir, '.fresh.txt.tmp');
+      await fsp.writeFile(freshTemp, 'new', 'utf8');
+      await fsp.rename(freshTemp, path.join(dir, 'fresh.txt'));
+      await vi.waitFor(
+        () =>
+          expect(batches.flat().filter((e) => e.path === 'fresh.txt')).toContainEqual({
+            type: 'create',
+            path: 'fresh.txt',
+          }),
+        WAIT,
+      );
     } finally {
       watchers.stopAll();
     }

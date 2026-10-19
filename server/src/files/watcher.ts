@@ -21,7 +21,7 @@ import type { FileChangeEvent, FileChangeEventKind } from '@agentdeck/shared';
 import type { Broadcaster } from '../ws/gateway.js';
 import type { Logger } from '../logging.js';
 import { isGitInternalPath } from './sandbox.js';
-import { watchTree, type TreeWatcher } from './treeWatch.js';
+import { MAX_WATCHED_DIRS, UNWATCHED_DIRS, watchTree, type TreeWatcher } from './treeWatch.js';
 
 /** Debounce window per project; events inside one window collapse to one batch. */
 export const FILE_WATCH_DEBOUNCE_MS = 400;
@@ -33,6 +33,12 @@ const REWATCH_DELAY_MS = 2000;
  * (where Node reports the ctime instead) use this window.
  */
 const MISSED_RENAME_GRACE_MS = 5000;
+/**
+ * Upper bound on paths recorded by the startup `seen` snapshot. Big enough for
+ * normal projects, small enough that a huge tree cannot stall boot; paths past
+ * the cap fall back to the birth-time heuristic.
+ */
+const MAX_SEED_ENTRIES = 20_000;
 
 /**
  * Name prefix of the atomic-write temp dirs created by the edit routes.
@@ -168,7 +174,46 @@ export class FileWatchers {
       startedAt: Date.now(),
     };
     this.states.set(projectId, state);
+    // Snapshot before the watch opens: everything already on disk counts as
+    // pre-existing, and nothing created after start can leak into the snapshot.
+    this.seedSeen(state);
     this.openWatcher(state);
+  }
+
+  /**
+   * Fills `seen` with the paths that exist when the watcher starts. Without
+   * this, the first event for a pre-existing file is indistinguishable from a
+   * create: an atomic save (write a temp file, rename it over the target)
+   * arrives as `rename`, and the renamed inode carries a birth time *after*
+   * the watcher started, so the birth-time fallback cannot help.
+   *
+   * The walk is synchronous and bounded (same dependency/cache skips as the
+   * watcher itself) so the snapshot cannot race later writes and startup cost
+   * stays predictable. `.git` internals are never recorded.
+   */
+  private seedSeen(state: WatchState): void {
+    const queue: string[] = [''];
+    let entries = 0;
+    let dirs = 0;
+    while (queue.length && entries < MAX_SEED_ENTRIES && dirs < MAX_WATCHED_DIRS) {
+      const rel = queue.shift()!;
+      dirs += 1;
+      let children: fs.Dirent[];
+      try {
+        children = fs.readdirSync(path.join(state.root, rel), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const child of children) {
+        if (entries >= MAX_SEED_ENTRIES) break;
+        const childRel = rel ? `${rel}/${child.name}` : child.name;
+        if (isGitInternalPath(childRel)) continue;
+        if (child.isDirectory() && UNWATCHED_DIRS.has(child.name)) continue;
+        state.seen.add(childRel);
+        entries += 1;
+        if (child.isDirectory()) queue.push(childRel);
+      }
+    }
   }
 
   private openWatcher(state: WatchState): void {

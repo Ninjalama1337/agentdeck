@@ -82,13 +82,20 @@ export function permissionString(mode: number): string {
  * Atomic write: temp file inside a mkdtemp dir next to the target, then
  * rename over it. Parent directories are created (the full target path was
  * sandbox-checked up front, so this stays inside the project).
+ *
+ * An existing target keeps its permission bits (including setuid/setgid/
+ * sticky): the temp file is created with the umask default, so renaming it
+ * over a 0755 script would otherwise silently downgrade it to 0644.
  */
 async function atomicWrite(absDir: string, absTarget: string, content: string): Promise<number> {
   await fsp.mkdir(absDir, { recursive: true });
+  const existing = await fsp.lstat(absTarget).catch(() => undefined);
+  const keepMode = existing?.isFile() ? existing.mode & 0o7777 : undefined;
   const tmpDir = await fsp.mkdtemp(path.join(absDir, EDIT_TEMP_PREFIX));
   const tmpFile = path.join(tmpDir, 'file');
   try {
     await fsp.writeFile(tmpFile, content, 'utf8');
+    if (keepMode !== undefined) await fsp.chmod(tmpFile, keepMode);
     await fsp.rename(tmpFile, absTarget);
   } catch (err) {
     await fsp.rm(tmpFile, { force: true }).catch(() => undefined);
@@ -260,26 +267,30 @@ export async function fileEditRoutes(fastify: FastifyInstance, deps: AppDeps): P
       .object({ path: pathSchema, recursive: z.string().optional() })
       .parse(req.query ?? {});
     const recursive = query.recursive === '1';
-    const resolved = await resolveEditable(project.path, query.path);
+    // Not resolveEditable: deleting must remove the directory entry itself.
+    // Following a symlink here would delete its target and leave the link.
+    const entry = await resolveEntry(project.path, query.path);
     deps.fileWatchers.ensureStarted(project.id, project.path);
 
-    const stats = await fsp.lstat(resolved.abs).catch(() => undefined);
+    const stats = await fsp.lstat(entry.abs).catch(() => undefined);
     if (!stats) throw notFound('Entry not found');
 
+    // lstat: `stats.isDirectory()` is false for a link to a directory, so
+    // links always take the unlink branch (never the recursive rm).
     if (stats.isDirectory()) {
       try {
-        await fsp.rmdir(resolved.abs); // refuses non-empty dirs
+        await fsp.rmdir(entry.abs); // refuses non-empty dirs
       } catch (err) {
         if (errno(err) !== 'ENOTEMPTY') throw err;
         if (!recursive) {
           throw httpError(409, 'DIR_NOT_EMPTY', 'Directory is not empty — pass recursive=1 to delete it with its contents.');
         }
-        await fsp.rm(resolved.abs, { recursive: true, force: true });
+        await fsp.rm(entry.abs, { recursive: true, force: true });
       }
     } else {
-      await fsp.unlink(resolved.abs);
+      await fsp.unlink(entry.abs);
     }
-    deps.fileWatchers.push(project.id, { type: 'delete', path: toPosix(resolved.rel) });
+    deps.fileWatchers.push(project.id, { type: 'delete', path: toPosix(entry.rel) });
     reply.code(204).send();
   });
 }

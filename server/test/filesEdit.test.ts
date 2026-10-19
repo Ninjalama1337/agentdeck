@@ -131,6 +131,21 @@ describe('PUT/GET /files/content', () => {
     expect((await put(contentUrl(), { path: '', content: 'x' })).statusCode).toBe(400);
     expect((await put(contentUrl(), { content: 'x' })).statusCode).toBe(400);
   });
+
+  it('preserves the permission bits of an existing file on save', async () => {
+    const script = path.join(projectDir, 'script.sh');
+    await fsp.writeFile(script, '#!/bin/sh\necho v1\n');
+    await fsp.chmod(script, 0o755);
+    expect((await put(contentUrl(), { path: 'script.sh', content: '#!/bin/sh\necho v2\n' })).statusCode).toBe(200);
+    expect((await fsp.stat(script)).mode & 0o7777).toBe(0o755);
+
+    const secret = path.join(projectDir, 'secret.txt');
+    await fsp.writeFile(secret, 'shh');
+    await fsp.chmod(secret, 0o600);
+    expect((await put(contentUrl(), { path: 'secret.txt', content: 'shh2' })).statusCode).toBe(200);
+    expect((await fsp.stat(secret)).mode & 0o7777).toBe(0o600);
+    expect(await fsp.readFile(secret, 'utf8')).toBe('shh2');
+  });
 });
 
 describe('.git protection', () => {
@@ -207,6 +222,23 @@ describe('DELETE /files/entry', () => {
     expect((await del(`${entryUrl()}?path=emptydir`)).statusCode).toBe(204);
     await expect(fsp.stat(path.join(projectDir, 'emptydir'))).rejects.toBeTruthy();
   });
+
+  it('deletes a symlink, not its target', async () => {
+    await fsp.writeFile(path.join(projectDir, 'link-target.txt'), 'keep');
+    await fsp.symlink('link-target.txt', path.join(projectDir, 'link.txt'));
+    expect((await del(`${entryUrl()}?path=link.txt`)).statusCode).toBe(204);
+    await expect(fsp.lstat(path.join(projectDir, 'link.txt'))).rejects.toBeTruthy();
+    await expect(fsp.readFile(path.join(projectDir, 'link-target.txt'), 'utf8')).resolves.toBe('keep');
+  });
+
+  it('deletes a symlink to a directory without touching the target tree', async () => {
+    await fsp.mkdir(path.join(projectDir, 'link-tree', 'inner'), { recursive: true });
+    await fsp.writeFile(path.join(projectDir, 'link-tree', 'inner', 'leaf.txt'), 'leaf');
+    await fsp.symlink('link-tree', path.join(projectDir, 'dirlink'));
+    expect((await del(`${entryUrl()}?path=dirlink&recursive=1`)).statusCode).toBe(204);
+    await expect(fsp.lstat(path.join(projectDir, 'dirlink'))).rejects.toBeTruthy();
+    await expect(fsp.readFile(path.join(projectDir, 'link-tree', 'inner', 'leaf.txt'), 'utf8')).resolves.toBe('leaf');
+  });
 });
 
 describe('change events from API writes', () => {
@@ -256,5 +288,17 @@ describe('change events from API writes', () => {
       () => expect(filesEvents('watched-dir').filter((e) => e.type === 'delete').length).toBe(1),
       { timeout: 3000, interval: 25 },
     );
+  });
+
+  it('deleting a symlink emits the link path, not the target path', async () => {
+    await fsp.writeFile(path.join(projectDir, 'evt-target.txt'), 't');
+    await fsp.symlink('evt-target.txt', path.join(projectDir, 'evt-link.txt'));
+    expect((await del(`${entryUrl()}?path=evt-link.txt`)).statusCode).toBe(204);
+    await vi.waitFor(
+      () => expect(filesEvents('evt-link.txt').some((e) => e.type === 'delete')).toBe(true),
+      { timeout: 3000, interval: 25 },
+    );
+    expect(filesEvents('evt-target.txt').some((e) => e.type === 'delete')).toBe(false);
+    await expect(fsp.readFile(path.join(projectDir, 'evt-target.txt'), 'utf8')).resolves.toBe('t');
   });
 });
