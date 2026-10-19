@@ -9,7 +9,7 @@ import type { ParallelLaunchResponse, TerminalInfo, WorktreeInfo } from '@agentd
 import { httpError } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import { knownTimeZone, terminalBroadcasts } from './terminals.js';
-import { PRESET_DEFS, resolveLaunch } from '../term/presets.js';
+import { listPresets, presetForLaunch, resolveLaunch } from '../term/presets.js';
 import { accountAgentOfPreset } from '../accounts/active.js';
 import type { AppDeps } from './deps.js';
 
@@ -36,15 +36,17 @@ export async function worktreeRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const project = getProjectOr404(deps, (req.params as { id: string }).id);
     const body = ParallelSchema.parse(req.body);
     // Check every agent before creating anything.
+    const presets = listPresets();
     for (const a of body.agents) {
-      const def = PRESET_DEFS.find((p) => p.id === a.presetId);
+      const def = presets.find((p) => p.id === a.presetId);
       if (!def?.promptArg) throw httpError(400, 'BAD_PRESET', `${def?.label ?? a.presetId} cannot run in parallel (no start prompt)`);
+      if (!def.available) throw httpError(409, 'PRESET_UNAVAILABLE', `${def.label} is not installed on the server.`);
     }
     const timeZone = knownTimeZone(body.timeZone);
     const worktrees: WorktreeInfo[] = [];
     const terminals: TerminalInfo[] = [];
     for (const a of body.agents) {
-      const launch = resolveLaunch(a.presetId, a.variantId, undefined, body.prompt);
+      const launch = resolveLaunch(a.presetId, a.variantId, undefined, body.prompt, {}, presetForLaunch(a.presetId));
       const wt = await deps.worktrees.create(project.id, project.path, { prompt: body.prompt, presetId: launch.presetId, label: launch.title });
       const info = deps.terminals.spawn(wt.path, project.id, body.cols ?? 80, body.rows ?? 24, terminalBroadcasts(deps), {
         title: `${launch.title} · ${wt.name.split('-').slice(-1)[0]}`,

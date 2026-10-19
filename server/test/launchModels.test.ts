@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TerminalPreset } from '@agentdeck/shared';
 import { parseAgyModels, parseCodexModels, parseOpencodeModels, withLaunchModels } from '../src/term/launchModels.js';
-import { resolveLaunch } from '../src/term/presets.js';
+import { offersFlag, resolveLaunch } from '../src/term/presets.js';
 
 describe('launch with model and effort', () => {
   it('puts the flags between the variant and the first prompt', () => {
@@ -33,6 +33,47 @@ describe('launch with model and effort', () => {
 
   it('keeps a prompt with $ patterns literally', () => {
     expect(resolveLaunch('claude', undefined, undefined, "costs $& and $'")?.command).toBe("claude 'costs $& and $'\\'''");
+  });
+});
+
+describe('what the installed CLI accepts', () => {
+  it('recognizes a flag only as a whole token', () => {
+    expect(offersFlag('FLAGS\n  --prompt string', '--model')).toBe(false);
+    expect(offersFlag('FLAGS\n  -m, --model <MODEL>', '--model')).toBe(true);
+    expect(offersFlag('  --model <model>   Model for the session', '--model')).toBe(true);
+    expect(offersFlag('  --models          list models', '--model')).toBe(false);
+    expect(offersFlag('  --model-id        set the id', '--model')).toBe(false);
+  });
+
+  it('runs the binary the launcher found, with the flags that binary takes', () => {
+    const installed = (patch: Partial<TerminalPreset>): TerminalPreset => ({
+      id: 'claude',
+      label: 'Claude Code',
+      description: 'Anthropic Claude Code TUI',
+      kind: 'agent',
+      command: 'claude',
+      promptArg: '{prompt}',
+      modelArg: '--model {value}',
+      accent: '#FF6A3D',
+      available: true,
+      resolvedPath: '/opt/claude/bin/claude',
+      variants: [{ id: 'new', label: 'New', args: '' }],
+      ...patch,
+    });
+    // An absolute path survives a login shell that rewrites PATH.
+    expect(resolveLaunch('claude', undefined, undefined, undefined, {}, installed({})).command).toBe(
+      "'/opt/claude/bin/claude'",
+    );
+    // Version-aware: a preset without modelArg drops a remembered choice
+    // instead of turning the launch into an "unrecognized flag" error.
+    const opencode = installed({ id: 'opencode', command: 'opencode', label: 'OpenCode', modelArg: undefined });
+    expect(resolveLaunch('opencode', undefined, undefined, undefined, {}, opencode).command).toBe(
+      "'/opt/claude/bin/claude'",
+    );
+    expect(
+      resolveLaunch('opencode', undefined, undefined, undefined, { model: 'opencode-go/deepseek-v4.1-flash' }, opencode)
+        .command,
+    ).toBe("'/opt/claude/bin/claude'");
   });
 });
 

@@ -14,6 +14,15 @@ describe('Claude Code terminal hooks', () => {
   it('attaches the settings file to a claude launch only', () => {
     expect(withClaudeHooks('claude', '/d/t_1.json')).toBe("claude --settings '/d/t_1.json'");
     expect(withClaudeHooks('claude --continue', "/it's/t.json")).toBe("claude --settings '/it'\\''s/t.json' --continue");
+    expect(withClaudeHooks("'/opt/claude/bin/claude' --continue", '/d/t.json')).toBe(
+      "'/opt/claude/bin/claude' --settings '/d/t.json' --continue",
+    );
+    expect(withClaudeHooks('/usr/local/bin/claude --model opus', '/d/t.json')).toBe(
+      "/usr/local/bin/claude --settings '/d/t.json' --model opus",
+    );
+    expect(withClaudeHooks("'/opt/other/claude-wrapper' --continue", '/d/t.json')).toBe(
+      "'/opt/other/claude-wrapper' --continue",
+    );
     expect(withClaudeHooks('claude-foo', '/d/t.json')).toBe('claude-foo');
     expect(withClaudeHooks('codex resume', '/d/t.json')).toBe('codex resume');
   });

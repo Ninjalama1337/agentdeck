@@ -7,6 +7,7 @@
  * usual per-user install dirs (npm-global, ~/.local/bin, ~/.opencode/bin, …),
  * because a server started from systemd rarely inherits the login shell PATH.
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -283,6 +284,77 @@ const SHELL_PRESET: TerminalPreset = {
   variants: [NEW],
 };
 
+/**
+ * Does a CLI's help text offer `flag`? A flag is offered when it appears as a
+ * whole token (`--model` matches `--model <model>` and `-m, --model`, but not
+ * `--models` or `--model-id`).
+ */
+export function offersFlag(help: string, flag: string): boolean {
+  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[\\s,|(])${escaped}(?=$|[\\s,|=])`, 'm').test(help);
+}
+
+/** The first flag in a template such as `--model {value}` or `-c model=x={value}`. */
+function flagOf(template: string): string {
+  return /(?:^|\s)(--?[A-Za-z0-9][\w-]*)/.exec(template)?.[1] ?? template.split(/\s+/)[0] ?? template;
+}
+
+/** Help output that actually lists options (not a usage error or a version banner). */
+function looksLikeHelp(text: string): boolean {
+  return /(^|\n)\s*(usage|USAGE|Usage)\b/.test(text) || /(^|\n)\s*(FLAGS|Flags|OPTIONS|Options|COMMANDS|Commands)\b/.test(text);
+}
+
+interface FlagSupport {
+  /** `false`: the installed CLI rejected the flag we would pass; `undefined`: unknown, keep it. */
+  model?: boolean;
+  effort?: boolean;
+}
+
+const helpCache = new Map<string, { stamp: string; support: FlagSupport }>();
+
+/**
+ * Which of a preset's optional flags the installed CLI advertises. Version
+ * upgrades remove flags without warning (OpenCode v2 dropped `--model` from
+ * the full-screen TUI), and a launcher must not offer what the binary refuses.
+ * Unknown help output keeps the preset's flag, so unusual CLIs still work.
+ */
+function flagSupport(bin: string, def: PresetDef): FlagSupport {
+  let stamp = bin;
+  try {
+    const st = fs.statSync(bin);
+    stamp = `${bin}:${st.mtimeMs}:${st.size}`;
+  } catch {
+    // keep the path as stamp; the help probe will fail anyway
+  }
+  const cached = helpCache.get(bin);
+  if (cached?.stamp === stamp) return cached.support;
+
+  let help: string | undefined;
+  try {
+    help = execFileSync(bin, ['--help'], {
+      encoding: 'utf8',
+      timeout: 4000,
+      maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, PATH: augmentedPath() },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    // Some CLIs print help on stderr and exit non-zero.
+    const e = err as { stdout?: unknown; stderr?: unknown };
+    const out = `${typeof e.stdout === 'string' ? e.stdout : ''}\n${typeof e.stderr === 'string' ? e.stderr : ''}`.trim();
+    help = out || undefined;
+  }
+  const support: FlagSupport =
+    help && looksLikeHelp(help)
+      ? {
+          ...(def.modelArg ? { model: offersFlag(help, flagOf(def.modelArg)) } : {}),
+          ...(def.effortArg ? { effort: offersFlag(help, flagOf(def.effortArg)) } : {}),
+        }
+      : {};
+  helpCache.set(bin, { stamp, support });
+  return support;
+}
+
 let cache: { at: number; presets: TerminalPreset[] } | undefined;
 const CACHE_MS = 30_000;
 
@@ -302,10 +374,29 @@ export function listPresets(force = false): TerminalPreset[] {
         available = true;
       }
     }
-    presets.push({ ...rest, available, ...(resolved && available ? { resolvedPath: resolved } : {}) });
+    const effective = { ...rest };
+    if (resolved) {
+      // Hide a model/effort picker the installed binary cannot honour — a
+      // remembered choice would otherwise turn every launch into a CLI error.
+      const support = flagSupport(resolved, def);
+      if (support.model === false) delete effective.modelArg;
+      if (support.effort === false) delete effective.effortArg;
+    }
+    presets.push({ ...effective, available, ...(resolved && available ? { resolvedPath: resolved } : {}) });
   }
   cache = { at: Date.now(), presets };
   return presets;
+}
+
+/** The launcher preset as currently installed (retries once when it looked missing). */
+export function presetForLaunch(presetId: string | undefined): TerminalPreset | undefined {
+  if (!presetId) return undefined;
+  let preset = listPresets().find((p) => p.id === presetId);
+  if (preset && !preset.available) {
+    // Installed seconds ago but the availability cache still says no.
+    preset = listPresets(true).find((p) => p.id === presetId) ?? preset;
+  }
+  return preset;
 }
 
 /** Single-quoted for a POSIX shell. */
@@ -330,7 +421,10 @@ export interface LaunchChoice {
 
 /**
  * Resolves what to type into the fresh shell. Returns undefined for a plain
- * shell. Throws on unknown preset/variant ids.
+ * shell. Throws on unknown preset/variant ids. `installed` is the matching
+ * entry from `listPresets()`: its resolved binary path is what gets executed,
+ * so a login shell that rewrites PATH cannot lose the agent that the server
+ * just found (and its flag support reflects the installed CLI version).
  */
 export function resolveLaunch(
   presetId: string | undefined,
@@ -339,6 +433,7 @@ export function resolveLaunch(
   /** First prompt for the agent (presets with `promptArg` only). */
   prompt?: string,
   choice: LaunchChoice = {},
+  installed?: TerminalPreset,
 ): { command?: string; title: string; presetId: string; variantId?: string; agent: boolean } {
   const custom = command?.trim();
   if (custom) {
@@ -347,20 +442,30 @@ export function resolveLaunch(
   if (!presetId || presetId === 'shell') return { title: 'shell', presetId: 'shell', agent: false };
   const def = PRESET_DEFS.find((p) => p.id === presetId);
   if (!def) throw new Error(`Unknown terminal preset: ${presetId}`);
+  const preset = installed?.id === def.id ? installed : undefined;
   const variant = def.variants.find((v) => v.id === (variantId ?? 'new'));
   if (!variant) throw new Error(`Unknown variant ${variantId} for ${presetId}`);
   const first = prompt?.trim();
   if (first && !def.promptArg) throw new Error(`${def.label} cannot take a prompt on start`);
   const promptArgs = first && def.promptArg ? fillArg(def.promptArg, 'prompt', first) : '';
-  const model = choice.model?.trim();
-  if (model && !def.modelArg) throw new Error(`${def.label} cannot take a model on start`);
+  const modelArg = preset ? preset.modelArg : def.modelArg;
+  const effortArg = preset ? preset.effortArg : def.effortArg;
+  const requestedModel = choice.model?.trim();
+  const requestedEffort = choice.effort?.trim();
+  // A stale client can still send a choice the installed CLI no longer takes.
+  // With the resolved preset we know that, and dropping it beats a launch that
+  // dies on an unrecognized flag; a direct API call for a preset without the
+  // flag is still an error.
+  if (requestedModel && !modelArg && !preset) throw new Error(`${def.label} cannot take a model on start`);
+  if (requestedEffort && !effortArg && !preset) throw new Error(`${def.label} cannot take an effort on start`);
+  const model = requestedModel && modelArg ? requestedModel : undefined;
   if (model && !MODEL_ID.test(model)) throw new Error(`Not a model id: ${model}`);
-  const effort = choice.effort?.trim();
-  if (effort && !def.effortArg) throw new Error(`${def.label} cannot take an effort on start`);
+  const effort = requestedEffort && effortArg ? requestedEffort : undefined;
   if (effort && !EFFORT.test(effort)) throw new Error(`Not an effort level: ${effort}`);
-  const modelArgs = model && def.modelArg ? fillArg(def.modelArg, 'value', model) : '';
-  const effortArgs = effort && def.effortArg ? fillArg(def.effortArg, 'value', effort) : '';
-  const cmd = [def.command, variant.args, modelArgs, effortArgs, promptArgs].filter((s) => s.trim()).join(' ');
+  const modelArgs = model && modelArg ? fillArg(modelArg, 'value', model) : '';
+  const effortArgs = effort && effortArg ? fillArg(effortArg, 'value', effort) : '';
+  const primary = preset?.resolvedPath ? shellQuote(preset.resolvedPath) : def.command;
+  const cmd = [primary, variant.args, modelArgs, effortArgs, promptArgs].filter((s) => s.trim()).join(' ');
   const title = variant.id === 'new' ? def.label : `${def.label} · ${variant.label}`;
   return { command: cmd, title, presetId: def.id, variantId: variant.id, agent: def.kind === 'agent' };
 }

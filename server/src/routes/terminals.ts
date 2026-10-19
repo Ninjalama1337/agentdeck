@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { httpError, notFound } from '../http/errors.js';
 import { getProjectOr404 } from './projects.js';
 import type { AppDeps } from './deps.js';
-import { listPresets, resolveLaunch } from '../term/presets.js';
+import { listPresets, presetForLaunch, resolveLaunch } from '../term/presets.js';
 import { withLaunchModels } from '../term/launchModels.js';
 import type { TerminalBroadcasts } from '../term/manager.js';
 import { stateTitle } from '../notify/hub.js';
@@ -99,9 +99,20 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
   fastify.post('/terminals', async (req, reply) => {
     const body = CreateSchema.parse(req.body);
     const project = getProjectOr404(deps, body.projectId);
+    const preset = presetForLaunch(body.presetId);
+    if (preset && !preset.available) {
+      throw httpError(409, 'PRESET_UNAVAILABLE', `${preset.label} is not installed on the server.`);
+    }
     let launch: ReturnType<typeof resolveLaunch>;
     try {
-      launch = resolveLaunch(body.presetId, body.variantId, body.command, body.prompt, { model: body.model, effort: body.effort });
+      launch = resolveLaunch(
+        body.presetId,
+        body.variantId,
+        body.command,
+        body.prompt,
+        { model: body.model, effort: body.effort },
+        preset,
+      );
     } catch (err) {
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }
@@ -149,9 +160,13 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
     const ctx = deps.terminals.handoverContext(id);
     if (!ctx) throw notFound('Terminal not found');
     const prompt = handoverPrompt({ from: ctx.title ?? 'the previous agent', ...(ctx.prompt ? { prompt: ctx.prompt } : {}), screen: ctx.screen });
+    const preset = presetForLaunch(body.presetId);
+    if (preset && !preset.available) {
+      throw httpError(409, 'PRESET_UNAVAILABLE', `${preset.label} is not installed on the server.`);
+    }
     let launch: ReturnType<typeof resolveLaunch>;
     try {
-      launch = resolveLaunch(body.presetId, undefined, undefined, prompt);
+      launch = resolveLaunch(body.presetId, undefined, undefined, prompt, {}, preset);
     } catch (err) {
       throw httpError(400, 'BAD_PRESET', err instanceof Error ? err.message : String(err));
     }

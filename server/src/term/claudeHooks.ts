@@ -51,11 +51,17 @@ export function removeClaudeHookSettings(dataDir: string, terminalId: string): v
   fs.rmSync(settingsFile(dataDir, terminalId), { force: true });
 }
 
-/** `claude …` → `claude --settings '<file>' …`; any other command is returned unchanged. */
+/**
+ * `claude …` → `claude --settings '<file>' …`; the same for an absolute path
+ * (`'/opt/claude/bin/claude' …`, as the launcher resolves it). Any other
+ * command is returned unchanged.
+ */
 export function withClaudeHooks(command: string, file: string): string {
-  const m = /^claude(?=\s|$)/.exec(command);
+  const m = /^(?:'([^']+)'|(\S*\/)?claude)(?=\s|$)/.exec(command);
   if (!m) return command;
-  return `claude --settings '${file.replace(/'/g, "'\\''")}'${command.slice(m[0].length)}`;
+  // A quoted path is only Claude when its basename is exactly `claude`.
+  if (m[1] !== undefined && path.basename(m[1]) !== 'claude') return command;
+  return `${m[0]} --settings '${file.replace(/'/g, "'\\''")}'${command.slice(m[0].length)}`;
 }
 
 function str(value: unknown): string | undefined {
