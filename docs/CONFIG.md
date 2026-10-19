@@ -91,11 +91,14 @@ Server neu starten — es gibt kein Hot-Reload.
     // Generischer CLI-Agent: läuft JEDEN ein-Zeilen-CLI-Agent headless.
     // Feste Flags gehören in "command"; "promptArg" sagt, wo der Prompt hin
     // ({prompt}, z. B. "--message {prompt}"); leer = Prompt über stdin.
-    // Standard ist "off" — erst hier aktivieren. Beispiele:
+    // "modelArg" (optional) sagt, wo das in der App gewählte Modell hin
+    // ({model}, z. B. "--model {model}" oder "--model={model}"); ohne
+    // {model} wird das Modell als nächstes Argument angehängt, leer = kein
+    // Modell-Flag. Standard ist "off" — erst hier aktivieren. Beispiele:
     //   gemini   -> { "mode": "headless", "command": "gemini -p", "promptArg": "{prompt}" }
     //   aider    -> { "mode": "headless", "command": "aider --message", "promptArg": "{prompt} --yes" }
     //   einen beliebigen eigenen Agenten ebenso.
-    "custom":      { "mode": "off", "command": "custom-agent", "promptArg": "{prompt}" }
+    "custom":      { "mode": "off", "command": "custom-agent", "promptArg": "{prompt}", "modelArg": "--model {model}" }
   }
 }
 ```
@@ -124,6 +127,7 @@ Server neu starten — es gibt kein Hot-Reload.
 | `agents.<id>.command` | string | pro Agent | CLI-Befehl (Pfad erlaubt) |
 | `agents.<id>.ideCommand` | string | abgeleitet | Befehl zum Öffnen der IDE |
 | `agents.custom.promptArg` | string | `"{prompt}"` | Custom-CLI: Stelle des Prompts (`{prompt}`), leer = über stdin |
+| `agents.custom.modelArg` | string | `""` | Custom-CLI: Stelle des Modells (`{model}`, z. B. `--model {model}` oder `--model={model}`); ohne `{model}` wird das Modell angehängt; leer/fehlt = kein Modell-Flag |
 | `voice.provider` | string | `"auto"` | Diktat-Backend: `auto` \| `openai` \| `groq` \| `command` \| `off` |
 | `voice.apiKey` | string | `""` | API-Key (Fallback: `OPENAI_API_KEY` / `GROQ_API_KEY`) |
 | `voice.baseUrl` | string | `""` | OpenAI-kompatible Base-URL (Default `https://api.openai.com/v1`) |

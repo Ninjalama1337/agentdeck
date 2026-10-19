@@ -29,6 +29,13 @@ const AgentConfigSchema = z.object({
    * `--message {prompt}`. Empty string sends the prompt on stdin instead.
    */
   promptArg: z.string().optional(),
+  /**
+   * Custom CLI only: a template saying where the selected model goes. `{model}`
+   * is replaced with the session model (one argument); e.g. `--model {model}`
+   * or `--model={model}`. Without `{model}` the template is used as a flag and
+   * the model is appended as the next argument. Empty/absent = no model flag.
+   */
+  modelArg: z.string().optional(),
 });
 
 export const TunnelConfigSchema = z.object({

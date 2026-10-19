@@ -3,11 +3,13 @@
  * are in use and pushes a `usage-limit` notification when a window crosses
  * 80, 90 or 95 % — before an agent stalls on it (after Orca's limit warning).
  *
- * Each window warns once per level and reset period. A window re-arms only when
- * it clears — usage back below the first warning line, which is the reset; a
- * changed `resetsAt` on its own does not (the CLIs report a drifting reset
- * estimate, and a flicker around a threshold must not nag twice). The memory is
- * kept in `stateFile`, so a restart does not announce an open window again.
+ * Each window warns once per level and reset period. A window re-arms when it
+ * clears — usage back below the first warning line — or when its reset time
+ * jumps forward by about a whole window length while the old reset lies in the
+ * past (the watcher was inactive during the reset). A changed `resetsAt` on its
+ * own does not re-arm (the CLIs report a drifting reset estimate, and a flicker
+ * around a threshold must not nag twice). The memory is kept in `stateFile`, so
+ * a restart does not announce an open window again.
  */
 import fs from 'node:fs';
 import type { AgentId, AgentUsage, UsageWindow } from '@agentdeck/shared';
@@ -35,8 +37,32 @@ function windowsOf(u: AgentUsage): { key: string; name: string; win: UsageWindow
   return out;
 }
 
+/**
+ * How far `resetsAt` must jump for the change to be a new window rather than
+ * the CLIs' drifting estimate. A real reset moves the timestamp by roughly the
+ * window length; unknown `rl:*` windows get no guess, so they re-arm only when
+ * usage dips below the first warning line.
+ */
+function rolloverJumpMs(key: string): number | null {
+  if (key === 'session') return 2 * 60 * 60 * 1000; // real move ~5 h, drift < 2 h
+  if (key === 'week') return 24 * 60 * 60 * 1000; // real move ~7 d, drift ~hours
+  return null;
+}
+
+/** Whether `win` is the next period of a window last seen with `prev`. */
+function isNewWindow(key: string, prev: Seen | undefined, win: UsageWindow, now: number): boolean {
+  const threshold = rolloverJumpMs(key);
+  if (threshold === null || !prev?.resetsAt || !win.resetsAt) return false;
+  const before = Date.parse(prev.resetsAt);
+  const after = Date.parse(win.resetsAt);
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return false;
+  // The old reset must have passed and the new one must still be ahead; a
+  // forward correction while the old reset was still in the future is drift.
+  return before <= now && after > now && after - before >= threshold;
+}
+
 /** Alerts for windows that reached a higher level than last time; updates `seen`. */
-export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): LimitAlert[] {
+export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[], now = Date.now()): LimitAlert[] {
   const alerts: LimitAlert[] = [];
   for (const u of usages) {
     for (const { key, name, win } of windowsOf(u)) {
@@ -45,12 +71,14 @@ export function limitCrossings(seen: Map<string, Seen>, usages: AgentUsage[]): L
       const level = [...USAGE_LEVELS].reverse().find((l) => win.pct! >= l) ?? 0;
       const prev = seen.get(id);
       // A window is re-armed when it clears — usage back below the first warning
-      // line, which is the reset. A changed `resetsAt` must NOT re-arm on its
-      // own: the CLIs report a drifting reset estimate (Claude's weekly reset
-      // moves by the hour), and treating every drift as a new period spammed
-      // "limit used up" for a window that never actually reset.
+      // line, which is the reset — or when its reset timestamp jumps forward far
+      // enough to be the next period. A small changed `resetsAt` must NOT re-arm:
+      // the CLIs report a drifting reset estimate (Claude's weekly reset moves by
+      // the hour), and treating every drift as a new period spammed "limit used
+      // up" for a window that never actually reset.
       const cleared = level === 0;
-      const before = prev && !cleared ? prev.level : 0;
+      const rolled = !cleared && isNewWindow(key, prev, win, now);
+      const before = prev && !cleared && !rolled ? prev.level : 0;
       if (level > before) {
         alerts.push({ agentId: u.agentId, window: name, pct: Math.round(win.pct), level, ...(win.resetsAt ? { resetsAt: win.resetsAt } : {}) });
       }

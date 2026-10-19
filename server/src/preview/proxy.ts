@@ -140,6 +140,8 @@ export class PreviewProxy {
       // the HTML it serves (drop the flag by opening a plain preview link).
       if (url.searchParams.get('design') === '1') {
         cookies.push(`${DESIGN_COOKIE}=1; SameSite=Lax; Path=/; Max-Age=${PREVIEW_TOKEN_TTL_SECONDS}`);
+      } else {
+        cookies.push(`${DESIGN_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`);
       }
       res.writeHead(302, {
         'set-cookie': cookies,

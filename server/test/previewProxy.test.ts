@@ -2,7 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { localPath, PreviewProxy, signPreviewToken, verifyPreviewToken } from '../src/preview/proxy.js';
-import { DESIGN_BRIDGE_PATH, DESIGN_BRIDGE_TAG, injectBridge } from '../src/preview/designBridge.js';
+import { DESIGN_BRIDGE_PATH, DESIGN_BRIDGE_TAG, DESIGN_COOKIE, injectBridge } from '../src/preview/designBridge.js';
 import { parseLsof, parseProcNetTcp } from '../src/preview/ports.js';
 
 const SECRET = 'ab'.repeat(32);
@@ -104,8 +104,9 @@ describe('PreviewProxy', () => {
   it('injects the design bridge only for a design-mode session', async () => {
     const token = signPreviewToken(SECRET, targetPort);
     const plain = await get(`/__agentdeck_preview?t=${encodeURIComponent(token)}&path=/page`);
-    const plainCookie = String(plain.headers['set-cookie']![0]).split(';')[0]!;
-    expect(String(plain.headers['set-cookie']![0])).not.toContain('agentdeck_design');
+    const plainCookies = plain.headers['set-cookie']!.map((c) => String(c));
+    expect(plainCookies.some((c) => c.startsWith(`${DESIGN_COOKIE}=1`))).toBe(false);
+    const plainCookie = plainCookies[0]!.split(';')[0]!;
     const untouched = await get('/page', plainCookie);
     expect(untouched.body).toContain('<h1>hi</h1>');
     expect(untouched.body).not.toContain(DESIGN_BRIDGE_TAG);
@@ -119,6 +120,18 @@ describe('PreviewProxy', () => {
     // Plain text responses are forwarded unchanged.
     const json = await get('/data.json', cookies.join('; '));
     expect(json.body).toBe('hello /data.json');
+  });
+
+  it('clears the design flag when a plain link is opened', async () => {
+    const token = signPreviewToken(SECRET, targetPort);
+    const design = await get(`/__agentdeck_preview?t=${encodeURIComponent(token)}&path=/page&design=1`);
+    const designCookies = design.headers['set-cookie']!.map((c) => String(c));
+    expect(designCookies.some((c) => c.startsWith(`${DESIGN_COOKIE}=1;`) && /Max-Age=\d+/.test(c))).toBe(true);
+
+    const plain = await get(`/__agentdeck_preview?t=${encodeURIComponent(token)}&path=/page`);
+    const plainCookies = plain.headers['set-cookie']!.map((c) => String(c));
+    expect(plainCookies.some((c) => c.startsWith(`${DESIGN_COOKIE}=;`) && /Max-Age=0/.test(c))).toBe(true);
+    expect(plainCookies.some((c) => c.startsWith('agentdeck_preview=') && /Max-Age=\d+/.test(c))).toBe(true);
   });
 
   it('serves the bridge script to a preview session only', async () => {

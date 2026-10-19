@@ -13,6 +13,20 @@ const claude = (session?: number, week?: number, resetsAt = '2026-10-15T14:00:00
   ...(week !== undefined ? { week: { pct: week } } : {}),
 });
 
+const weekly = (pct: number, resetsAt: string): AgentUsage => ({
+  agentId: 'claude',
+  available: true,
+  fetchedAt: 0,
+  week: { pct, resetsAt },
+});
+
+const rateLimit = (pct: number, resetsAt: string): AgentUsage => ({
+  agentId: 'claude',
+  available: true,
+  fetchedAt: 0,
+  rateLimits: [{ name: 'Opus', window: { pct, resetsAt } }],
+});
+
 describe('limitCrossings', () => {
   it('warns once per level and window', () => {
     const seen = new Map();
@@ -46,6 +60,64 @@ describe('limitCrossings', () => {
       limitCrossings(seen, [claude(0, 100, '2026-10-19T20:59:00Z')]),
     ].flat();
     expect(alerts.map((a) => `${a.window}:${a.level}`)).toEqual(['weekly limit:95']);
+  });
+
+  it('keeps a full weekly window muted when the reset estimate only drifts', () => {
+    const seen = new Map();
+    const now = Date.parse('2026-10-19T12:00:00Z');
+    expect(limitCrossings(seen, [weekly(100, '2026-10-26T18:00:00Z')], now).map((a) => a.level)).toEqual([95]);
+    // +1 h and +2 h are ordinary drift, far below the ~7 d move of a real reset.
+    expect(limitCrossings(seen, [weekly(100, '2026-10-26T19:00:00Z')], now + 3_600_000)).toEqual([]);
+    expect(limitCrossings(seen, [weekly(100, '2026-10-26T20:00:00Z')], now + 7_200_000)).toEqual([]);
+  });
+
+  it('re-arms a full weekly window when the reset jumps to the next future week', () => {
+    const seen = new Map();
+    const t0 = Date.parse('2026-10-19T12:00:00Z');
+    expect(
+      limitCrossings(seen, [weekly(100, '2026-10-19T18:00:00Z')], t0).map((a) => `${a.window}:${a.level}`),
+    ).toEqual(['weekly limit:95']);
+    // The watcher was inactive while the window reset: the old reset now lies
+    // in the past and the new one points at the following week.
+    expect(
+      limitCrossings(seen, [weekly(100, '2026-10-26T18:00:00Z')], Date.parse('2026-10-20T09:00:00Z')).map(
+        (a) => `${a.window}:${a.level}`,
+      ),
+    ).toEqual(['weekly limit:95']);
+  });
+
+  it('re-arms a session window when the reset jumps by a full 5-hour period', () => {
+    const seen = new Map();
+    const t0 = Date.parse('2026-10-19T12:00:00Z');
+    expect(
+      limitCrossings(seen, [claude(90, undefined, '2026-10-19T13:00:00Z')], t0).map((a) => `${a.window}:${a.level}`),
+    ).toEqual(['5-hour limit:90']);
+    // Old window ended at 13:00; the next one ends five hours later.
+    expect(
+      limitCrossings(seen, [claude(90, undefined, '2026-10-19T18:00:00Z')], Date.parse('2026-10-19T13:30:00Z')).map(
+        (a) => `${a.window}:${a.level}`,
+      ),
+    ).toEqual(['5-hour limit:90']);
+  });
+
+  it('still re-arms after a reading below the first warning line', () => {
+    const seen = new Map();
+    const t0 = Date.parse('2026-10-19T12:00:00Z');
+    expect(limitCrossings(seen, [claude(96, 10, '2026-10-19T14:00:00Z')], t0).map((a) => a.level)).toEqual([95]);
+    expect(limitCrossings(seen, [claude(12, 10, '2026-10-19T17:00:00Z')], t0 + 30 * 60_000)).toEqual([]);
+    expect(
+      limitCrossings(seen, [claude(83, 10, '2026-10-19T17:00:00Z')], t0 + 31 * 60_000).map(
+        (a) => `${a.window}:${a.level}`,
+      ),
+    ).toEqual(['5-hour limit:80']);
+  });
+
+  it('does not guess rollovers for unknown rate-limit windows', () => {
+    const seen = new Map();
+    const t0 = Date.parse('2026-10-19T12:00:00Z');
+    expect(limitCrossings(seen, [rateLimit(100, '2026-10-19T18:00:00Z')], t0).map((a) => a.level)).toEqual([95]);
+    // A large jump is still not enough without a known window length.
+    expect(limitCrossings(seen, [rateLimit(100, '2026-10-26T18:00:00Z')], Date.parse('2026-10-20T09:00:00Z'))).toEqual([]);
   });
 });
 

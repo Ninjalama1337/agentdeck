@@ -239,13 +239,13 @@ again. `AgentInfo.admin` lists the per-agent actions.
 | POST | `/api/projects/:id/files/create` | `CreateEntryRequest → 204` — new empty file or dir, 409 EXISTS, same sandbox rules |
 | POST | `/api/projects/:id/files/rename` | `RenameEntryRequest → RenameEntryResponse` — rename or move a file or folder (a symlink itself, not its target), creates missing parent dirs, 409 EXISTS, 400 when a folder would move into itself, 403 inside `.git/` |
 | GET | `/api/projects/:id/files/info` `?path=` | `FileInfoResponse` — type, size, dates, permissions, absolute path; item count for folders, target for symlinks |
-| DELETE | `/api/projects/:id/files/entry` `?path=&recursive=0` | `204` — file always; dir only when empty (`recursive=1` for non-empty), 403 inside `.git/` |
+| DELETE | `/api/projects/:id/files/entry` `?path=&recursive=0` | `204` — file always; dir only when empty (`recursive=1` for non-empty), 403 inside `.git/`; a symlink is removed itself, never its target |
 | POST | `/api/projects/:id/files/upload` `?dir=`, `?sessionId=` or `?terminalId=` (multipart `file`) | `Attachment` — `terminalId` stores it for the agent in that terminal, outside the project, under a name without spaces, and adds `path` (absolute, on the server) for the app to type into the terminal; `sessionId` stores it as an attachment of that session (what the chat does), `dir` inside the project — with `&name=` under exactly that name (409 EXISTS when taken, `&overwrite=1` replaces it; without `name` the server prefixes an id). `Attachment.url` is signed for 120 s; the app shows images through `/files/raw` with its device login instead |
-| GET | `/api/sessions?projectId=` | `Session[]` |
+| GET | `/api/sessions?projectId=` | `Session[]` — `queuedCount` when turns wait behind a run; `pendingQuestions` (runtime-only) when the run waits on a permission |
 | POST | `/api/sessions` | `CreateSessionRequest → Session` (now incl. optional `thinkingEffort`) |
 | GET | `/api/sessions/:id` `?after=` | `SessionDetailResponse` `{session, messages, draft, partial?}` — `draft` (`SessionDraft`, else `null`) is what a run in progress has produced so far (`text`, `thinking`, `tools`, `usage`) plus `run`/`seq`; `after=<messageId>` returns only newer messages with `partial: true` (unknown id → whole history) |
 | DELETE | `/api/sessions/:id` | `204` |
-| POST | `/api/sessions/:id/messages` | `SendTurnRequest → SendTurnResponse` (409 if a run is active; `model`/`thinkingEffort` override the session defaults for that turn and update them) |
+| POST | `/api/sessions/:id/messages` | `SendTurnRequest → SendTurnResponse` — a turn posted while a run is active is queued (`queued: true`, capped at 10, `409 QUEUE_FULL` leaves no trace); queued turns persist in `<dataDir>/queued-turns.json` and resume after a restart; `model`/`thinkingEffort` override the session defaults for that turn and update them |
 | POST | `/api/sessions/:id/interrupt` | `204` |
 | POST | `/api/sessions/:id/permissions/:requestId` | body `{decision: allow\|always\|deny, message?, answers?}` → `204`; `409 PERMISSION_GONE` when the question is no longer open |
 | POST | `/api/sessions/:id/ide` | opens/focuses the project in the agent IDE → `204` |
@@ -275,9 +275,12 @@ so joining mid-run neither doubles nor loses text. Text and thinking deltas
 are bundled server-side (40 ms) instead of one event per token.
 
 Server pushes `session:event`,
-`session:update`, `project:update`, `agent:update`, `team:update`,
+`session:update`, `session:deleted {id}`, `project:update`, `agent:update`,
+`team:update`,
 `files:changed {projectId, events:[{type:'change'|'create'|'delete', path}]}`,
-`notify`. Client emits `session:interrupt {sessionId}` with ack.
+`notify`. Client emits `session:interrupt {sessionId}` with ack. A finished
+assistant `ChatMessage` may carry `thinking`, `tools`, `usage` and `plan`; the
+plan is the agent's last checklist snapshot for that turn.
 
 File watcher: every registered project gets a recursive `fs.watch` on its root
 (started lazily on first access after boot, restarted on server start, dropped

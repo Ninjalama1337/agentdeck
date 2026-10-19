@@ -27,7 +27,7 @@ Neuladen genügt, um alle zu aktualisieren.
 
 ### Voraussetzungen
 
-- Node ≥ 20, npm
+- Node ≥ 22.13, npm
 - **JDK 21** (z. B. [Temurin](https://adoptium.net/)) — Capacitor 7 braucht
   Java 21; `java -version` muss `21.x` zeigen
 - **Android SDK**: entweder Android Studio (einfachste Variante) oder nur die

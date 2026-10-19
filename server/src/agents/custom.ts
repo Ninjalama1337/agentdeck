@@ -2,7 +2,8 @@
  * Config-driven CLI agent (Orca's "works with any CLI agent").
  *
  * Runs a one-shot command from `agents.custom` headlessly: the fixed flags go
- * in `command`, `promptArg` says where the prompt goes (`{prompt}`), and stdout
+ * in `command`, `promptArg` says where the prompt goes (`{prompt}`), `modelArg`
+ * optionally says where the session model goes (`{model}`), and stdout
  * is streamed as plain text — no output schema is guessed, so any CLI that can
  * answer one prompt works. Off by default; enable it in the config.
  */
@@ -13,6 +14,7 @@ import { splitCommand } from '../util/cmd.js';
 import { withTimeoutFallback } from '../util/async.js';
 import { MODEL_PRESETS } from './models.js';
 import type { AgentAdapter, DetectResult, RunContext, RunPlan } from './types.js';
+import { resolveModelArg } from './types.js';
 
 /** ANSI SGR/CSI sequences a CLI may keep even when its output is a pipe. */
 const ANSI = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
@@ -80,13 +82,29 @@ export class CustomCliAdapter implements AgentAdapter {
     for (const att of ctx.attachments) parts.push(`\n[Attached file: ${att.path} (${att.mime})]`);
     const prompt = parts.join('\n');
 
+    // Model flag first: it is a fixed option, while the prompt is usually the
+    // trailing positional argument. Uses the same substitution rules as
+    // promptArg, so flags stay one argv element (`--model={model}`).
+    const modelArg = this.cfg.modelArg?.trim() ?? '';
+    const model = resolveModelArg(ctx.model);
+    if (model && modelArg) {
+      const modelTokens = modelArg.split(/\s+/).filter(Boolean);
+      if (modelTokens.some((token) => token.includes('{model}'))) {
+        for (const token of modelTokens) args.push(token.split('{model}').join(model));
+      } else {
+        // No placeholder: the template is the flag, the model its value.
+        args.push(...modelTokens, model);
+      }
+    }
+
     const promptArg = this.cfg.promptArg ?? '{prompt}';
     const tokens = promptArg.trim() ? promptArg.trim().split(/\s+/).filter(Boolean) : [];
     let stdinPrompt: string | null = null;
     if (tokens.length === 0) {
       stdinPrompt = prompt;
-    } else if (tokens.includes('{prompt}')) {
-      for (const token of tokens) args.push(token === '{prompt}' ? prompt : token);
+    } else if (tokens.some((token) => token.includes('{prompt}'))) {
+      // The placeholder may be embedded (`--message={prompt}`): stay one argv element.
+      for (const token of tokens) args.push(token.split('{prompt}').join(prompt));
     } else {
       args.push(...tokens, prompt);
     }

@@ -181,7 +181,7 @@ Agents, die **lokal mit vollem Kontext** arbeiten — mit deinen Repos, deiner
 
 ## Quickstart
 
-Voraussetzungen: **Node ≥ 20** und npm. Die Agent-CLIs (`claude`, `codex`, …)
+Voraussetzungen: **Node ≥ 22.13** und npm. Die Agent-CLIs (`claude`, `codex`, …)
 und `gh` sind optional — nicht installierte Agents werden sauber als
 *unavailable* angezeigt statt zu crashen.
 
