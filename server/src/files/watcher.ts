@@ -27,6 +27,12 @@ import { watchTree, type TreeWatcher } from './treeWatch.js';
 export const FILE_WATCH_DEBOUNCE_MS = 400;
 /** Delay before the single silent re-watch attempt after a watcher error. */
 const REWATCH_DELAY_MS = 2000;
+/**
+ * How long after a watcher starts a `change` without a birth time may still be
+ * a create whose `rename` was missed. Filesystems without birth-time support
+ * (where Node reports the ctime instead) use this window.
+ */
+const MISSED_RENAME_GRACE_MS = 5000;
 
 /**
  * Name prefix of the atomic-write temp dirs created by the edit routes.
@@ -44,6 +50,23 @@ function toPosix(p: string): string {
   return p.split(path.sep).join('/');
 }
 
+/**
+ * Whether `stats` describes a path created after the watcher started. Used for
+ * `change` events on paths we have never seen: a missed `rename` means a new
+ * file, while an edit of a file that predates the watcher must stay a change.
+ *
+ * `birthtime` is trusted only when it predates `ctime`: Node falls back to the
+ * ctime on filesystems without birth-time support, and a ctime that just moved
+ * would make every edit look like a creation. In that case the short grace
+ * window after start covers the missed-rename race instead.
+ */
+function createdSince(stats: fs.Stats, startedAt: number): boolean {
+  if (stats.birthtimeMs > 0 && stats.birthtimeMs < stats.ctimeMs) {
+    return stats.birthtimeMs >= startedAt;
+  }
+  return Date.now() - startedAt <= MISSED_RENAME_GRACE_MS;
+}
+
 interface WatchState {
   projectId: string;
   /** Absolute root passed by the caller (fs.watch reports paths relative to it). */
@@ -58,8 +81,10 @@ interface WatchState {
   batch: Map<string, FileChangeEvent>;
   /** Rel paths observed to exist — drives the create-vs-change heuristic. */
   seen: Set<string>;
-  /** Rel paths with a `rename` still being classified (existence check running). */
+  /** Rel paths whose first-event existence check is still running. */
   classifying: Map<string, number>;
+  /** Wall-clock time the watcher was opened; separates new files from old ones. */
+  startedAt: number;
 }
 
 export interface FileWatchersOptions {
@@ -140,6 +165,7 @@ export class FileWatchers {
       batch: new Map(),
       seen: new Set(),
       classifying: new Map(),
+      startedAt: Date.now(),
     };
     this.states.set(projectId, state);
     this.openWatcher(state);
@@ -228,7 +254,8 @@ export class FileWatchers {
    * rename+exists → create/change (via seen-set), rename+missing → delete.
    * A `change` for a path we have never classified counts as its first event
    * too: on a slow machine a new file's `rename` can be missed entirely, and
-   * then only its `change` shows up — the disk decides, not the event type.
+   * then only its `change` shows up. The disk decides, but the birth time
+   * keeps edits of files that predate the watcher a `change`.
    */
   private async classifyAndQueue(
     state: WatchState,
@@ -241,12 +268,13 @@ export class FileWatchers {
       // A path we already know, reported as changed: a plain edit.
       type = 'change';
     } else {
-      // A rename for this path is still being classified — let it decide.
+      // A classification for this path is still running — let it decide.
       if (state.classifying.has(rel)) return;
       state.classifying.set(rel, (state.classifying.get(rel) ?? 0) + 1);
       let exists = false;
+      let stats: fs.Stats | null = null;
       try {
-        const stats = await fsp.stat(path.join(state.root, rel));
+        stats = await fsp.stat(path.join(state.root, rel));
         exists = stats.isFile() || stats.isDirectory();
       } catch {
         exists = false;
@@ -257,7 +285,15 @@ export class FileWatchers {
       }
       if (this.states.get(state.projectId) !== state) return;
       if (exists) {
-        type = state.seen.has(rel) ? 'change' : 'create';
+        if (state.seen.has(rel)) {
+          type = 'change';
+        } else if (eventType === 'change' && stats && !createdSince(stats, state.startedAt)) {
+          // The file existed before this watcher started: first edit, not a
+          // create whose rename went missing.
+          type = 'change';
+        } else {
+          type = 'create';
+        }
         state.seen.add(rel);
       } else {
         type = 'delete';

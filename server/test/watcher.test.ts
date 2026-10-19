@@ -166,6 +166,29 @@ describe('FileWatchers', () => {
     }
   });
 
+  it('keeps an edit to a file that predates the watcher a change', async () => {
+    const dir = await fsp.mkdtemp(path.join(tmp, 'pre-existing-'));
+    await fsp.writeFile(path.join(dir, 'old.txt'), 'before', 'utf8');
+    // The file's birth time must be before the watcher's start time.
+    await sleep(10);
+
+    const batches: { type: string; path: string }[][] = [];
+    const watchers = new FileWatchers({
+      broadcast: ((event: string, payload: { events: { type: string; path: string }[] }) => {
+        if (event === 'files:changed') batches.push(payload.events);
+      }) as never,
+      log: { warn: () => undefined, info: () => undefined } as never,
+      debounceMs: 20,
+    });
+    try {
+      watchers.ensureStarted('pre-existing', dir);
+      await fsp.writeFile(path.join(dir, 'old.txt'), 'after', 'utf8');
+      await vi.waitFor(() => expect(batches.flat()).toEqual([{ type: 'change', path: 'old.txt' }]), WAIT);
+    } finally {
+      watchers.stopAll();
+    }
+  });
+
   it('emits create for a file written directly on disk', async () => {
     await fsp.writeFile(path.join(projectDir, 'direct.txt'), 'from disk', 'utf8');
     await vi.waitFor(
