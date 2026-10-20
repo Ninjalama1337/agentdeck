@@ -91,9 +91,16 @@ export async function terminalRoutes(fastify: FastifyInstance, deps: AppDeps): P
 
   fastify.get('/terminals/:id', async (req) => {
     const id = (req.params as { id: string }).id;
-    const term = deps.terminals.get(id);
-    if (!term) throw notFound('Terminal not found');
-    return { terminal: term.info, replay: deps.terminals.replayOf(id) ?? '' };
+    // A size means "this is how wide I draw" (see TerminalManager.attachView).
+    const query = z
+      .object({
+        cols: z.coerce.number().int().min(10).max(500).optional(),
+        rows: z.coerce.number().int().min(4).max(300).optional(),
+      })
+      .parse(req.query ?? {});
+    const view = await deps.terminals.attachView(id, query.cols, query.rows, terminalBroadcasts(deps));
+    if (!view) throw notFound('Terminal not found');
+    return { terminal: view.info, replay: view.replay };
   });
 
   fastify.post('/terminals', async (req, reply) => {

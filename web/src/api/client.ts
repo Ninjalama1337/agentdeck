@@ -571,8 +571,11 @@ export const api = {
     return request('GET', '/api/terminals', { query: { projectId } });
   },
 
-  terminal(id: string): Promise<{ terminal: TerminalInfo; replay: string }> {
-    return request('GET', `/api/terminals/${encodeURIComponent(id)}`);
+  terminal(id: string, size?: { cols: number; rows: number }): Promise<{ terminal: TerminalInfo; replay: string }> {
+    // A size makes the server lay the screen out for exactly these columns
+    // (TerminalManager.attachView) — a snapshot of another width wraps.
+    const query = size ? `?cols=${Math.round(size.cols)}&rows=${Math.round(size.rows)}` : '';
+    return request('GET', `/api/terminals/${encodeURIComponent(id)}${query}`);
   },
 
   createTerminal(body: CreateTerminalRequest): Promise<{ terminal: TerminalInfo }> {

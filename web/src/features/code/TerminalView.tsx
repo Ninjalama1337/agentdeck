@@ -278,12 +278,23 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     // Repaint from the server's serialized screen; chunks that race the fetch
     // are queued and replayed after it. Done at mount and after every socket
     // reconnect — output sent while the connection was down never arrived.
-    const repaint = (reset: boolean) => {
+    const repaint = (reset: boolean, attempt = 0) => {
       live = false;
+      // The server lays the screen out for the size it is told, so a device
+      // that sizes the PTY asks for its own (a snapshot of another width wraps
+      // into itself and stays in the scrollback).
+      const own = mayClaim();
+      const asked = { cols: term.cols, rows: term.rows };
       void api
-        .terminal(id)
+        .terminal(id, own ? asked : undefined)
         .then(({ replay }) => {
           if (disposed) return;
+          // The host changed while the screen was on its way (keyboard, rotation,
+          // another font size): what arrived was laid out for other columns.
+          if (own && attempt < 2 && (term.cols !== asked.cols || term.rows !== asked.rows)) {
+            repaint(reset, attempt + 1);
+            return;
+          }
           if (reset) term.reset();
           if (replay) term.write(replay);
         })

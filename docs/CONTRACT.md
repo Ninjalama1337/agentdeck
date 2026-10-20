@@ -360,6 +360,11 @@ Real PTY shells on the server, one per open tab, project-scoped.
   `GET /api/terminals/presets` → launchers, with the models each installed CLI
   offers (Claude Code aliases, Codex's model cache, OpenCode favourites/recents,
   `agy models`); `GET /api/terminals?projectId=` → list; `DELETE /api/terminals/:id` → kill.
+- REST: `GET /api/terminals/:id?cols=&rows=` → `{terminal, replay}`. The size is
+  what the asking device draws at: the PTY takes it before the screen is
+  serialized, so a phone (51 columns) is never handed a desktop's 120-column
+  screen — writing that lays every line into the next and leaves the torn rows
+  in the client's scrollback.
 - WS client→server: `terminal:input {id, data}`, `terminal:resize {id, cols, rows}`,
   `terminal:watch {ids}` (the terminals on screen; full list, replaces the last).
   A PTY has one size, the last one sent; clients send theirs only while in use
@@ -367,6 +372,10 @@ Real PTY shells on the server, one per open tab, project-scoped.
   open does not take the size from the one in hand. Unchanged sizes are ignored;
   a new size is broadcast as `terminal:list`, and devices not in use draw the
   terminal at the PTY's size (a screen at another size garbles on the next redraw).
+  The server changes the size in one order only: the tmux window first (tmux
+  lays it out line by line for the client — a window wider than the client
+  wraps in it), then the client, then its own emulator; the mirror is rebuilt
+  from the pane's history when the width changes.
 - WS server→clients: `terminal:data {id, data}` (UTF-8, chunks coalesced ~8 ms)
   only to sockets watching that terminal — a socket that never sent
   `terminal:watch` gets every terminal. `terminal:exit {id, code}` (after the

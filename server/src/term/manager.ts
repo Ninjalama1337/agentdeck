@@ -39,6 +39,7 @@ import {
   applyTmuxSessionOptions,
   killTmuxSession,
   resizeTmuxWindow,
+  refreshTmuxClient,
   captureTmuxPane,
 } from './tmux.js';
 
@@ -134,6 +135,14 @@ interface ActiveTerminal {
   turn?: { startedAt: number; prompt?: string; transcriptPath?: string };
   /** The last prompt a hook reported — what a hand-over continues. */
   lastPrompt?: string;
+  /**
+   * Width the mirror still has to shrink to: output written before the PTY
+   * was resized may be on its way and must not wrap in the meantime
+   * (see applySize/settleScreen).
+   */
+  settle?: { cols: number; rows: number; timer: NodeJS.Timeout };
+  /** A rebuild from the pane is in flight (see seedFromPane). */
+  seeding?: Promise<void>;
 }
 
 const MAX_CONCURRENT = 10;
@@ -141,6 +150,8 @@ const MAX_CONCURRENT = 10;
 const IDLE_MS = 12 * 60 * 60_000;
 const SCROLLBACK = 5000;
 const REPLAY_SCROLLBACK = 5000;
+/** A quiet terminal sends no redraw after a resize — trim the mirror after this long. */
+const SETTLE_MS = 250;
 /** Time for a dialog to appear on screen — and for a user sitting at it to answer first. */
 const ASK_GRACE_MS = 1500;
 /** Claude follows a dialog with its own notification a few seconds later. */
@@ -230,6 +241,36 @@ export class TerminalManager {
   get(id: string): { info: TerminalInfo; replay: string } | undefined {
     const t = this.active.get(id);
     return t ? { info: t.info, replay: this.snapshot(t) } : undefined;
+  }
+
+  /**
+   * Screen for a client that (re)connects, laid out for the size it draws.
+   *
+   * A PTY has one size and the server takes the one that arrived last — from
+   * any device. A phone is 51 columns wide, a desktop 120: handed a snapshot
+   * of the other layout, a client wraps every line into the next and keeps
+   * that garbage in its scrollback. So a size that comes with the request
+   * takes the PTY first, the mirror is rebuilt from the pane at that width,
+   * and only then is the screen serialized.
+   */
+  async attachView(
+    id: string,
+    cols?: number,
+    rows?: number,
+    broadcast?: TerminalBroadcasts,
+  ): Promise<{ info: TerminalInfo; replay: string } | undefined> {
+    const term = this.active.get(id);
+    if (!term) return undefined;
+    if (cols !== undefined && rows !== undefined) {
+      const change = this.applySize(term, cols, rows);
+      if (change) {
+        // A width change leaves rows laid out for the old one in the mirror.
+        if (change === 'width') await this.seedFromPane(term);
+        this.savePersisted();
+        broadcast?.onList();
+      }
+    }
+    return { info: term.info, replay: this.snapshot(term) };
   }
 
   /** Serialized screen + scrollback — used when a client (re)attaches. */
@@ -512,7 +553,10 @@ export class TerminalManager {
     proc.onData((data) => {
       broadcast.onData(id, data);
       term.info.lastOutputAt = Date.now();
-      term.screen.write(data);
+      // While the mirror is rebuilt from the pane (seedFromPane) this is the
+      // redraw of the size change, half of it parsed into the old buffer —
+      // tmux draws the whole picture again once the rebuild is done.
+      if (!term.seeding) term.screen.write(data, () => this.settleScreen(term));
       term.attention.output(data);
       this.touchIdle(term, id, broadcast);
     });
@@ -520,6 +564,8 @@ export class TerminalManager {
     proc.onExit(({ exitCode }) => {
       if (term.detaching) return;
       clearTimeout(term.idleTimer);
+      if (term.settle) clearTimeout(term.settle.timer);
+      term.settle = undefined;
       term.attention.dispose();
       term.screen.dispose();
       // An explicit kill() already removed+broadcast this terminal — only
@@ -669,7 +715,10 @@ export class TerminalManager {
     proc.onData((data) => {
       broadcast.onData(id, data);
       term.info.lastOutputAt = Date.now();
-      term.screen.write(data);
+      // While the mirror is rebuilt from the pane (seedFromPane) this is the
+      // redraw of the size change, half of it parsed into the old buffer —
+      // tmux draws the whole picture again once the rebuild is done.
+      if (!term.seeding) term.screen.write(data, () => this.settleScreen(term));
       term.attention.output(data);
       this.touchIdle(term, id, broadcast);
     });
@@ -677,6 +726,8 @@ export class TerminalManager {
     proc.onExit(({ exitCode }) => {
       if (term.detaching) return;
       clearTimeout(term.idleTimer);
+      if (term.settle) clearTimeout(term.settle.timer);
+      term.settle = undefined;
       term.attention.dispose();
       term.screen.dispose();
       if (this.active.get(id) !== term) return;
@@ -718,26 +769,94 @@ export class TerminalManager {
       term.cell.width = Math.round(cell.width);
       term.cell.height = Math.round(cell.height);
     }
-    const c = Math.min(Math.max(10, Math.round(cols)), 500);
-    const r = Math.min(Math.max(4, Math.round(rows)), 300);
-    // Devices re-send their size on every touch (see the web app's termClaim.ts).
-    if (c === term.info.cols && r === term.info.rows) return true;
     try {
-      term.proc.resize(c, r);
-      term.screen.resize(c, r);
+      // Devices re-send their size on every touch (see the web app's termClaim.ts).
+      const change = this.applySize(term, cols, rows);
+      if (!change) return true;
+      // Rows laid out for the old width are rebuilt from the pane's own history.
+      if (change === 'width') void this.seedFromPane(term);
       // The redraw that follows is not work.
       term.attention.input();
-      term.info.cols = c;
-      term.info.rows = r;
-      if (term.tmuxSession) {
-        resizeTmuxWindow(term.tmuxSession, c, r);
-      }
       this.savePersisted();
       broadcast?.onList();
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Gives the PTY a new size in the only order that does not garble the screen:
+   *
+   * 1. the tmux window — tmux lays its window out line by line for the
+   *    client, and a window wider than the client wraps every one of those
+   *    lines into the next (a 120-column screen in a 51-column phone);
+   * 2. the mirror, at least as wide as before — output written before the
+   *    resize can still be on its way and must not wrap either;
+   * 3. the client (node-pty) — from here tmux repaints at the new window
+   *    width. The mirror shrinks to it once that redraw was parsed
+   *    (settleScreen, or after SETTLE_MS on a quiet terminal).
+   *
+   * Returns false when the PTY already had that size.
+   */
+  private applySize(term: ActiveTerminal, cols: number, rows: number): false | 'size' | 'width' {
+    const c = Math.min(Math.max(10, Math.round(cols)), 500);
+    const r = Math.min(Math.max(4, Math.round(rows)), 300);
+    if (c === term.info.cols && r === term.info.rows) return false;
+    const widthChanged = c !== term.screen.cols;
+    if (term.tmuxSession) resizeTmuxWindow(term.tmuxSession, c, r);
+    const wide = Math.max(term.screen.cols, c);
+    const tall = Math.max(term.screen.rows, r);
+    if (term.screen.cols !== wide || term.screen.rows !== tall) term.screen.resize(wide, tall);
+    term.proc.resize(c, r);
+    term.info.cols = c;
+    term.info.rows = r;
+    this.settleScreen(term);
+    if (wide !== c || tall !== r) {
+      term.settle = { cols: c, rows: r, timer: setTimeout(() => this.settleScreen(term), SETTLE_MS) };
+    }
+    return widthChanged ? 'width' : 'size';
+  }
+
+  /** Shrinks the mirror to the PTY's size — what was written for the old width is in by now. */
+  private settleScreen(term: ActiveTerminal): void {
+    const settle = term.settle;
+    if (!settle) return;
+    term.settle = undefined;
+    clearTimeout(settle.timer);
+    try {
+      if (term.screen.cols !== settle.cols || term.screen.rows !== settle.rows) term.screen.resize(settle.cols, settle.rows);
+    } catch {
+      // the terminal was killed while the redraw was on its way
+    }
+  }
+
+  /**
+   * Rebuilds the mirror from the tmux pane after the width changed: its buffer
+   * still holds rows laid out for the old one (cut off on a shrink, wrapped
+   * into each other on a grow), and serializing that is what a client drawing
+   * the new size would wrap into itself. tmux re-wraps its own history.
+   */
+  private seedFromPane(term: ActiveTerminal): Promise<void> {
+    if (term.seeding) return term.seeding;
+    const { cols, rows } = term.info;
+    const captured = term.tmuxSession ? captureTmuxPane(term.tmuxSession, REPLAY_SCROLLBACK) : '';
+    this.settleScreen(term);
+    if (term.screen.cols !== cols || term.screen.rows !== rows) term.screen.resize(cols, rows);
+    if (!captured) return Promise.resolve();
+    // Let what was written before the reset be parsed first, then replace the
+    // buffer — and serialize only after xterm has parsed the capture.
+    term.seeding = (async () => {
+      await new Promise<void>((resolve) => term.screen.write('', () => resolve()));
+      term.screen.reset();
+      await new Promise<void>((resolve) => term.screen.write(captured, () => resolve()));
+    })().finally(() => {
+      term.seeding = undefined;
+      // One whole picture on top of the capture, not the tail of a redraw
+      // that started before it.
+      if (term.tmuxSession) refreshTmuxClient(term.tmuxSession);
+    });
+    return term.seeding;
   }
 
   /**
@@ -877,6 +996,8 @@ export class TerminalManager {
       return false;
     }
     term.attention.dispose();
+    if (term.settle) clearTimeout(term.settle.timer);
+    term.settle = undefined;
     term.screen.dispose();
     clearTimeout(term.idleTimer);
     clearTimeout(term.askTimer);

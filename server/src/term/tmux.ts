@@ -303,19 +303,53 @@ export function resizeTmuxWindow(sessionName: string, cols: number, rows: number
 /**
  * Captures screen content and scrollback from a tmux pane.
  * Used to seed xterm-headless replay when re-attaching after a server restart.
+ *
+ * Lines come back with `\r\n`, not tmux's bare `\n`: a row that fills the pane
+ * width leaves the cursor in the pending-wrap state, and a lone `\n` then
+ * carries that over — the emulator marks the next row as a wrapped
+ * continuation, the serializer joins it to the line above, and the client
+ * drawing that gets a staircase instead of a screen.
  */
 export function captureTmuxPane(sessionName: string, lines = 1500): string {
   const tmux = getTmuxBinary();
   if (!tmux) return '';
   const sock = tmuxSocketPath();
   try {
-    return execFileSync(
+    const raw = execFileSync(
       tmux,
       ['-S', sock, 'capture-pane', '-e', '-p', '-S', `-${lines}`, '-t', sessionName],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
+    // No line feed after the last row: writing it would scroll the capture
+    // one line and push its first row out.
+    return raw.replace(/\n$/, '').split('\n').join('\r\n');
   } catch {
     return '';
+  }
+}
+
+/**
+ * Makes tmux draw its screen for the client attached to the session again.
+ * The server asks for it after rebuilding its mirror (seedFromPane): what is
+ * still in flight is the tail of a redraw that started before, and one whole
+ * picture on top is better than a stitched one.
+ */
+export function refreshTmuxClient(sessionName: string): boolean {
+  const tmux = getTmuxBinary();
+  if (!tmux) return false;
+  const sock = tmuxSocketPath();
+  try {
+    const client = execFileSync(tmux, ['-S', sock, 'list-clients', '-t', sessionName, '-F', '#{client_name}'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\n')[0]
+      ?.trim();
+    if (!client) return false;
+    execFileSync(tmux, ['-S', sock, 'refresh-client', '-t', client], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
   }
 }
 
