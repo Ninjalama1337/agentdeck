@@ -11,7 +11,7 @@ import { useUnread } from '../../store/unread';
 import { api } from '../../api/client';
 import { ctrlChar, isTerminalReply } from './termInput';
 import { installMobileIme } from './termIme';
-import { installTouchWheelScroll, isMouseButtonReport, sendWheelBurst, trackMouseMode, trackTouches, type MouseMode } from './termScroll';
+import { installTouchWheelScroll, isMouseButtonReport, sendWheelBurst, trackMouseMode, trackTouches, appOwnsScreen, type MouseMode } from './termScroll';
 import { openExternal } from '../../util/openExternal';
 import { useIncomingFiles } from '../../util/incomingFiles';
 import { attachToTerminal } from './termAttach';
@@ -148,7 +148,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
     const disposeTouchScroll = installTouchWheelScroll(
       term,
       host,
-      () => term.buffer.active.type === 'alternate' && mouse.sgrActive(),
+      () => appOwnsScreen(term, mouse),
       (data) => {
         if (!endedRef.current) store.sendTerminalInput(id, data);
       },
@@ -524,7 +524,7 @@ export function TerminalView({ id, visible, modifier, onModifierUsed, onRestart,
   // the local viewport (which has no scrollback there).
   const inWheelMode = () => {
     const term = termRef.current;
-    return !!term && term.buffer.active.type === 'alternate' && mouseRef.current?.sgrActive() === true;
+    return !!term && appOwnsScreen(term, mouseRef.current);
   };
   const sendWheel = (down: boolean, ticks: number) => {
     const term = termRef.current;

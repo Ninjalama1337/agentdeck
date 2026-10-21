@@ -85,6 +85,20 @@ export function sendWheelBurst(term: Terminal, down: boolean, ticks: number, sen
 }
 
 /**
+ * Whether a swipe belongs to the application rather than to the local
+ * viewport. An alternate screen has no scrollback here — its history lives in
+ * tmux or in the TUI, and only wheel input reaches it. A screen that reports
+ * the mouse owns the wheel the same way: a client replayed from a snapshot
+ * starts on the normal buffer (the snapshot carries the cells, not the screen
+ * mode) but does get the mouse modes back, and tmux (`mouse on`) turns the
+ * wheel into copy-mode scrolling for panes that do not track the mouse.
+ * A plain shell on the normal buffer keeps native panning.
+ */
+export function appOwnsScreen(term: Terminal, mouse: MouseMode | null): boolean {
+  return term.buffer.active.type === 'alternate' || mouse?.sgrActive() === true;
+}
+
+/**
  * Translates single-finger vertical drags into wheel events while the
  * application owns the screen; scrollable local buffers keep native panning.
  * Two-finger gestures are left to the pinch-zoom handler in TerminalView.
